@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.44 (PRE-RELEASE)
+# K-Term Emulation Library v2.4.0
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,160 +46,31 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.4.0-pre:** Final Op Queue Decoupling (Mandatory).
-**All grid mutations are now processed via the lock-free op queue — atomic, batched, and GPU-efficient.**
-*   **Mandatory Queue:** Removed `use_op_queue` flag; all mutations (including resize, scroll, rect ops) are unconditionally queued. Direct mutation paths removed (legacy debug mode `#ifdef KTERM_DEBUG_DIRECT` remains for bisection).
-*   **Complete Coverage:** Added queuing for all remaining mutations: Resize, Scroll, Insert/Delete Lines, and Rectangular Operations.
-*   **Stability:** Thread safety is now enforced by design; all grid modifications occur atomically during the flush phase.
-*   **Clean Grid:** Post-flush grid state is guaranteed consistent, enabling reliable external introspection and simulation layers. See [doc/op_queue_final.md](doc/op_queue_final.md) for details.
+**New in v2.4.0:** Major Architecture Overhaul, Safety Hardening, and Feature Consolidation.
+This release represents the culmination of the v2.3 development cycle, delivering a fully decoupled, thread-safe, and robust terminal emulation engine.
 
-**New in v2.3.44:** Finalize Op Queue Decoupling – Mandatory Mode.
-**All grid mutations are now processed via the lock-free op queue — atomic, batched, and GPU-efficient.**
-*   **Mandatory Queue:** Removed `use_op_queue` flag; all mutations (including resize, scroll, rect ops) are unconditionally queued. Direct mutation paths removed (legacy debug mode `#ifdef KTERM_DEBUG_DIRECT` remains for bisection).
-*   **Resize Queue:** Added `KTERM_OP_RESIZE_GRID` to queue dynamic resize events, ensuring thread safety.
-*   **Cleanup:** Resolved struct ordering, forward declarations, and compilation issues. This completes the multi-version refactor arc (started v2.3.40).
+*   **Mandatory Op Queue & Thread Safety (Architecture):**
+    *   **Final Decoupling:** All grid mutations (Resize, Scroll, Rect Ops, Text) are now unconditionally processed via the lock-free `KTermOpQueue`. Direct mutation paths have been removed, ensuring absolute thread safety and atomic, batched updates.
+    *   **JIT Text Shaping:** Introduced Just-In-Time text shaping to dynamically group characters (e.g., base + combining marks) for correct rendering while keeping the grid storage simple.
+    *   **Sink Output Pattern:** Added `KTerm_SetOutputSink` for zero-copy, high-throughput data output, bypassing legacy buffering.
+    *   **Layout Engine:** Decoupled multiplexer logic into `kt_layout.h`, separating geometry management from emulation core.
 
-**New in v2.3.43:** Mandatory Op Queue & Decoupling.
-*   **Architecture:** Completed core refactoring to make the `KTermOpQueue` mandatory and fully decoupled from direct grid mutation.
-*   **Queue Expansion:** Added `KTERM_OP_RESIZE_GRID` to `kt_ops.h` and increased queue capacity to 16384 to handle bursty resize events.
-*   **Unified Mutation:** Updated all grid mutation functions (`InsertLines`, `DeleteLines`, `Scroll`, `Insert/DeleteChar`, `RectOps`) to unconditionally queue operations, removing the `use_op_queue` flag.
-*   **Resize Logic:** Refactored `KTerm_ResizeSession` to queue resize operations (`KTERM_OP_RESIZE_GRID`) instead of applying them immediately, ensuring thread safety and rendering consistency.
+*   **Security & Stability (Hardening):**
+    *   **Parser Hardening:** Complete rewrite of parsing logic using safe `StreamScanner` primitives and a non-destructive `KTermLexer`.
+    *   **Memory Safety:** Introduced safe allocation wrappers (`KTerm_Calloc` with overflow protection, etc.) and eliminated unsafe string functions.
+    *   **Structured Error Reporting:** New API for visibility into internal errors (allocation, parsing, rendering).
+    *   **Robustness:** Fixed critical race conditions via coarse-grained locking and hardened initialization/destruction paths.
 
-**New in v2.3.42:** Expanded Input Op Queue (Vertical Ops).
-*   **Vertical Ops:** Added support for `INSERT_LINES` (IL) and `DELETE_LINES` (DL) in the `KTermOpQueue`.
-*   **Scrolling:** Refactored `KTerm_ScrollUpRegion_Internal` and `KTerm_ScrollDownRegion_Internal` to queue `SCROLL_REGION` ops when `use_op_queue` is active.
-*   **Refactoring:** Updated internal handlers for `ExecuteIL` and `ExecuteDL` to utilize the queue.
-*   **Optimization:** Vertical line operations are now applied atomically during the flush phase, with correct protected cell handling.
+*   **DEC Compliance & Emulation:**
+    *   **Full VT500/VT525 Support:** Implemented esoteric features (DECRQTSR, DECRQUPSS, DECARR, DECRQDE), Soft Fonts (DECDLD), and Rectangular Operations (DECCRA, DECFRA, etc.).
+    *   **Protected Cells:** Full support for DECSCA protected attributes in all destructive operations.
+    *   **Unicode:** Opt-in `enable_wide_chars` mode with correct `wcwidth` logic for CJK and emoji.
+    *   **Enhanced Modes:** Added support for Column Mode (DECCOLM), Page Mode, Sixel Display Mode, and Infinite Scrollback.
 
-**New in v2.3.41:** Expanded Input Op Queue (Rectangular Operations).
-*   **Rectangular Ops:** Added `FILL_RECT`, `COPY_RECT` (DECCRA), and `SET_ATTR_RECT` (DECCARA/DECRARA) to the `KTermOpQueue`.
-*   **Decoupling:** Refactored `ExecuteDECFRA`, `KTerm_CopyRectangle`, and `ExecuteDECCARA` to utilize the queue when enabled, further decoupling parsing from grid mutation.
-*   **Atomic Updates:** Rectangular operations are now batched and applied atomically during the flush phase, improving thread safety and rendering consistency.
-
-**New in v2.3.40:** Input Op Queue & JIT Text Shaping.
-*   **Op Queue:** Implemented a lock-free Op Queue for input buffering (`KTermOpQueue`), decoupling the input stream from direct grid mutation and enabling atomic batch updates.
-*   **JIT Text Shaping:** Introduced Just-In-Time text shaping via `KTermTextRun` and `KTerm_BuildRun`. This allows the renderer to dynamically group characters (e.g., base + combining marks) into logical runs, solving long-standing issues with combining character display while keeping the grid storage addressable and simple.
-*   **Optimization:** Added dirty rect support (`session->dirty_rect`) to the flush logic, allowing `KTerm_PrepareRenderBuffer` to perform partial GPU uploads for significantly improved performance on large terminals.
-
-**New in v2.3.39:** Hardened Initialization & Destruction.
-*   **Leak Fix:** Resolved a memory leak in `KTerm_Cleanup` where the layout structure was not being properly freed in certain error paths.
-*   **Safety:** Refactored `KTerm_Destroy` to safely delegate cleanup to `KTerm_Cleanup`, ensuring consistent resource release and preventing double-free scenarios by nullifying pointers after destruction.
-
-**New in v2.3.38:** Sink Output Pattern.
-*   **Sink Output Pattern:** Introduced `KTerm_SetOutputSink` to allow applications to register a direct output callback (`KTermOutputSink`), enabling zero-copy data transmission from the terminal to the host. This replaces the legacy buffered `ResponseCallback` for high-throughput use cases (e.g., matrix rain, fast build logs) while maintaining backward compatibility.
-*   **Output Refactor:** The internal output logic has been unified into a single `KTerm_WriteInternal` primitive, eliminating code duplication between string and binary response paths and ensuring consistent buffer overflow protection.
-*   **Flush on Transition:** Transitioning from buffered mode to sink mode automatically flushes any pending data to the new sink.
-
-**New in v2.3.37:** Layout Engine Decoupling.
-*   **Modular Layout:** The multiplexer and pane management logic has been extracted from the core `kterm.h` into a standalone `kt_layout.h` module. This architectural change decouples geometry calculation from terminal emulation logic.
-*   **Extensibility:** This separation lays the groundwork for advanced windowing features like tabbed interfaces, floating windows, and custom layout managers without impacting the stability of the VT emulation core.
-*   **API Update:** `KTerm_Resize`, `KTerm_SplitPane`, and `KTerm_ClosePane` now delegate operations to the layout module via a cleaner internal API.
-
-**New in v2.3.36:** Implemented structured error reporting API.
-*   **Structured API:** Introduced `KTermErrorLevel`, `KTermErrorSource`, and callback mechanisms to provide visibility into internal errors (allocation failures, parser warnings, render issues).
-*   **Integration:** Critical paths (init, resize, font loading, compute init) now report specific errors instead of failing silently or logging to stderr exclusively.
-*   **Stability:** Hardened `KTerm_Resize` to prevent heap corruption if buffer reallocation fails by safely capping size and reporting the error.
-
-**New in v2.3.35:** Comprehensive hardening of parser primitives and memory safety.
-*   **Parser Hardening:** Updated `Stream_ReadInt` and `Stream_ReadHex` in `kt_parser.h` to robustly detect and handle integer overflows, clamping values to safe limits.
-*   **Memory Safety:** Introduced `KTerm_Malloc`, `KTerm_Calloc`, `KTerm_Realloc`, and `KTerm_Free` wrappers. `KTerm_Calloc` includes explicit integer overflow protection for size calculations.
-*   **Safe Allocations:** Replaced all standard allocation calls in `kterm.h` with the new safe wrappers to prevent heap exploitation vectors.
-*   **Fuzzing Support:** Added `tests/fuzz_harness.c` to facilitate fuzz testing with tools like AFL++.
-
-**New in v2.3.34:** Basic Unicode handling (wcwidth) logic implementation with opt-in control.
-*   **Unicode Width:** Implemented `mk_wcwidth` logic to correctly calculate character widths (0 for combining, 1 for half-width, 2 for full-width CJK).
-*   **Opt-In Behavior:** Added `enable_wide_chars` per-session flag. By default, KTerm remains in **Fixed Width Mode** (all chars width 1) to preserve backward compatibility with legacy bitmap fonts.
-*   **Gateway Control:** Added `SET;WIDE_CHARS;ON` command to enable variable-width Unicode logic at runtime.
-*   **Rendering Alignment:** Updated `KTerm_ProcessNormalChar` and `KTerm_InsertCharacterAtCursor` to respect character widths when enabled, ensuring proper spacing and alignment for international text.
-
-**New in v2.3.33:** Hardened Protected Cell logic for full DEC VT520 compliance.
-*   **Protected Cells:** Updated `ICH`, `DCH`, `IL`, `DL` and scrolling operations to strictly respect `DECSCA` protected attributes. Destructive operations are blocked if they affect protected fields.
-*   **Smart Editing:** Refined insertion/deletion logic to allow operations that do not shift protected content (e.g. editing after a protected prompt), ensuring usability in form applications.
-
-**New in v2.3.32:** Parser Unification and Robustness Hardening.
-*   **Parser Dispatcher:** Introduced `KTerm_DispatchSequence` to unify execution paths for OSC, DCS, APC, PM, and SOS sequences, enforcing consistent null-termination and error recovery.
-*   **OSC Refactor:** Completely rewrote `KTerm_ExecuteOSCCommand` and its helpers (`ProcessKTermColorCommand`, `ProcessClipboardCommand`, etc.) to use `StreamScanner` primitives. This eliminates unsafe string functions (`atoi`, `strchr`) and ensures robust parameter parsing for complex sequences like `rgb:rr/gg/bb`.
-*   **DCS Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use `StreamScanner` for dispatching sub-commands (GATE, XTGETTCAP, DECUDK, Soft Fonts). Fixed a potential buffer overflow in `ProcessSoftFontDownload` by adding explicit bounds checks to the `Dscs` string parser.
-*   **Safety:** Standardized bounds checking across all string-based sequence handlers (`KTerm_ProcessGenericStringChar`, `KTerm_ProcessOSCChar`, `KTerm_ProcessDCSChar`).
-
-**v2.3.31 Update:** Complete unification of parsing logic for OSC and DCS sequences.
-*   **Safe OSC Parsing:** Replaced unsafe string manipulation (e.g., `atoi`, `strchr`) in `KTerm_ExecuteOSCCommand` with safe `StreamScanner` primitives (`Stream_ReadInt`, `Stream_Expect`).
-*   **Full OSC Color Support:** OSC commands 10, 11, and 12 (Foreground, Background, Cursor Color) now support setting colors via `rgb:rr/gg/bb` syntax, in addition to the existing query functionality.
-*   **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).
-*   **Memory Safety:** Removed legacy usage of `strdup` in clipboard (OSC 52) and key definition parsing, eliminating potential heap fragmentation and leaks.
-
-**v2.3.30 Update:** Major refactor of Gateway Protocol parsing and introduction of high-value primitives.
-*   **Gateway Dispatcher Refactor:** The Gateway Protocol (`kt_gateway.h`) now uses a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`) and leverages `StreamScanner` for efficient parameter parsing. This replaces the legacy linear string comparison model, improving maintainability and extensibility.
-*   **New Parsing Primitives:** Added `Stream_ReadIdentifier`, `Stream_ReadBool`, `Stream_PeekChar`, and `Stream_MatchToken` to `kt_parser.h`. These primitives provide a robust foundation for parsing complex command structures and boolean flags (handling `1`/`0`, `ON`/`OFF`, `TRUE`/`FALSE`).
-*   **Enhanced Safety:** The new dispatcher and primitives include strict bounds checking and robust whitespace handling, further hardening the library against malformed input.
-
-**v2.3.29 Update:** Enhanced robustness for CSI parsing and Gateway strings.
-*   **CSI Parsing Refactor:** CSI parameter parsing (`kterm.h`) now uses `StreamScanner` primitives, significantly improving robustness against malformed sequences (garbage data is safely skipped as default).
-*   **Gateway Quoted Strings:** `KTermLexer` now correctly supports escaped characters (e.g., `\"`) within quoted strings. Added `KTerm_UnescapeString` utility to process escapes for rich configuration values (banners, fonts, etc.).
-
-**v2.3.28 Update:** Refactored parsing architecture to centralize primitives and enhance safety.
-*   **Centralized Parsing:** Moved parsing primitives (`StreamScanner` and helpers) to `kt_parser.h`, creating a unified foundation for safe data extraction across the library.
-*   **Enhanced Primitives:** Added `Stream_ReadHex`, `Stream_ReadFloat`, and automatic whitespace skipping to the parser toolkit.
-*   **Gateway Hardening:** Updated `kt_gateway.h` color parsing logic to use the new safe primitives, replacing `sscanf` to eliminate buffer overflow risks.
-
-**v2.3.27 Update:** Major architectural refactor of the parsing engine for improved thread safety and robustness.
-*   **KTermLexer:** Introduced a new, non-destructive tokenizer (`kt_parser.h`) replacing legacy `strtok`-based logic. This eliminates re-entrancy issues and improves parsing reliability for complex commands.
-*   **Gateway Protocol Parsing:** Updated `kt_gateway.h` to use `KTermLexer` for parsing attributes (`SET;ATTR`), keyboard settings (`SET;KEYBOARD`), and banners. This supports robust handling of composite values (e.g., `UL=R,G,B` for RGB underlines) and quoted strings.
-*   **Deprecation Notice:** Unquoted strings containing spaces (e.g., `TEXT=Hello World`) are now parsed as separate tokens. Users should update configurations to use quotes (e.g., `TEXT="Hello World"`).
-
-**v2.3.26 Update:** Added full Sixel support to the Gateway Protocol, enabling advanced session targeting and control.
-*   **Sixel Targeting:** New commands `SET;SIXEL_SESSION;id` and `RESET;SIXEL_SESSION` route Sixel graphics to specific sessions.
-*   **Sixel Management:** Added `INIT;SIXEL_SESSION` for initialization and `RESET;SIXEL` for clearing Sixel state via Gateway.
-*   **API Alignment:** Sixel gateway commands now conform to the functionality of other supported graphics APIs (ReGIS, Tektronix, Kitty).
-
-**v2.3.25 Update:** Implemented comprehensive stability and performance fixes:
-*   **Resize Throttling:** Prevented allocation thrashing during rapid window drags by limiting resize events (~30 FPS).
-*   **Thread Safety:** Added global mutex locking to `KTerm_Resize` to prevent race conditions with the update loop.
-*   **Precision Input:** Upgraded mouse tracking to use floating-point math, solving precision drift on high-DPI displays.
-
-**v2.3.24 Update:** Hardened Gateway Protocol functions to prevent corruption and crashes. Improved string handling safety, refactored banner generation to use heap allocation, robust integer parsing, and added input validation to prevent buffer overflows and null pointer dereferences.
-
-**v2.3.23 Update:** Added safe arbitrary screen resizing via the Gateway Protocol. New commands `SET;WIDTH;val` and `SET;HEIGHT;val` allow dynamic resizing, while `SET;SIZE;w;h` has been updated to respect safe internal limits (`KTERM_MAX_COLS` and `KTERM_MAX_ROWS`, default 2048), preventing excessive memory usage.
-
-**v2.3.21 Update:** Refactored versioning to use pre-processor macros (`KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`) in `kterm.h`. Updated the Gateway Protocol (`GET;VERSION`) to dynamically report the version defined by these macros, ensuring consistency between code and runtime reporting.
-
-**v2.3.20 Update:** Refactored `VTFeatures` struct to use a 32-bit integer bitmask for feature flags, improving memory efficiency and standardizing feature checking logic. Moved `max_session_count` to `VTConformance`.
-
-**v2.3.19 Update:** Implemented esoteric VT510 features: `DECRQTSR` (Request Terminal State Report), `DECRQUPSS` (Request User-Preferred Supplemental Set), `DECARR` (Auto-Repeat Rate), `DECRQDE` (Request Default Settings), and `DECST8C` (Select Tab Stops every 8 Columns). Added software keyboard repeater with configurable delay and rate.
-
-**v2.3.18 Update:** Implemented esoteric VT510 features: `DECSNLS` (Set Number of Lines per Screen), `DECSLPP` (Set Lines Per Page), `DECXRLM` (Transmit XOFF/XON on Receive Limit), `DECRQPKU` (Request Programmed Key), and `DECSKCV` (Select Keyboard Variant).
-
-**v2.3.17 Update:** Major refactor of Set/Reset Mode logic (`ExecuteSM`/`ExecuteRM`) for consistency. Implemented missing DEC Private Modes (64, 67, 68, 103, 104) and ANSI Mode 12 (SRM). Unified mouse tracking mode logic.
-
-**v2.3.16 Update:** Implemented DECHDPXM (Half-Duplex Mode) as DEC Private Mode 103 and DECKBUM (Keyboard Usage Mode) as DEC Private Mode 68. Verified DECSERA (Selective Erase Rectangular Area) functionality.
-
-**v2.3.15 Update:** Fixed critical active session context trap and improved multiplexing stability. Refactored internal architecture for explicit session context passing and header organization. Enhanced thread safety with a custom re-entrant tokenizer (`KTerm_Tokenize`) and enforced locking strategy. Updated Gateway Protocol to use the new tokenizer and improved session targeting logic.
-
-**v2.3.14 Update:** Fully implemented **DECDLD (Down-Line Loadable) Soft Fonts**, allowing custom bitmap fonts (Sixel-based) to be loaded and rendered. Added support for multi-byte designation strings in `SCS` sequences to map soft fonts to G-sets.
-
-**v2.3.13 Update:** Added robust graphics reset capabilities. Standard terminal resets (`RIS`, `DECSTR`) now fully clear Sixel, ReGIS, Tektronix, and Kitty graphics resources (including textures). Added `RESET;GRAPHICS`, `RESET;KITTY` etc. to the Gateway Protocol for manual control.
-
-**v2.3.12 Update:** Expanded Gateway Protocol targeting with `INIT` command and specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols.
-
-**v2.3.11 Update:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
-
-**v2.3.10 Update:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
-
-**v2.3.9 Update:** Achieved **Full Base** coverage of standard ANSI CSI sequences, including S7C1T/S8C1T (nF Escape Sequences), `ESC #` Line Attributes, and corrected behaviors for `ED 2` (ANSI.SYS cursor homing) and `ED 3` (xterm scrollback clear).
-
-**v2.3.8 Update:** Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes, as well as **Superscript** (SGR 73) and **Subscript** (SGR 74), with full shader-based rendering for frames, ellipses, and scaling.
-
-**v2.3.7 Update:** Updated default 256-color palette to match standard XTerm values (especially indices 0-15) and introduced `cga_colors` for accurate **ANSI.SYS** (IBM CGA) emulation. Refactored rendering logic to consistently use the active session's palette.
-
-**v2.3.6 Update:** Fixed **DECCRA** (Copy Rectangular Area) compliance, ensuring correct default parameter handling (bottom/right to page end) and **DECOM** (Origin Mode) support for relative coordinates.
-
-**v2.3.5 Update:** Implemented complete **DECCOLM** (Column Mode) and **DECSCPP** (Select Columns per Page) capabilities, including correct handling of **DECNCSM** (No Clear Screen on Column Change) and **Mode 40** (Allow 80/132 Cols).
-
-**v2.3.4 Update:** Added support for **DECCARA** (Change Attributes in Rectangular Area) and **DECRARA** (Reverse Attributes in Rectangular Area), completing the VT420 rectangular operations suite.
-
-**v2.3.3 Update:** Added **halfbrite (dim)** rendering support for both foreground and background colors, including the new private SGR 62 sequence for background dimming.
-
-**v2.3.2 Update:** Added the **VT Pipe** feature to the Gateway Protocol.
+*   **Gateway Protocol & Visuals:**
+    *   **Protocol Expansion:** Added commands for dynamic resizing (`SET;WIDTH`), session targeting (`SET;SESSION`), banners, and pipes.
+    *   **Graphics:** Enhanced Sixel, ReGIS, and Kitty protocol support with robust reset mechanisms and session routing.
+    *   **Styling:** Added SGR 51 (Framed), 52 (Encircled), curly/dotted underlines, and extended True Color support.
 
 **v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements.
 
