@@ -301,6 +301,7 @@ KTerm v2.3.44 demonstrates nearly perfect fidelity to the **VT420/VT520** archit
 
 ### Change Log
 Changes in v2.3.44:
+- **Mandatory Op Queue:** All grid mutations are now decoupled and queued (Insert/Delete Lines, Resize, Rect Ops), ensuring thread-safe atomic updates.
 - **Build Stability:** Fixed critical compilation errors in `kterm.h` related to struct ordering and visibility.
 - **Code Health:** Cleaned up duplicate definitions and restored missing fields in internal structures.
 
