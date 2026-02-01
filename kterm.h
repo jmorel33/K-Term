@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 43
+#define KTERM_VERSION_PATCH 44
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
