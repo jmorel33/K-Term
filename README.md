@@ -46,6 +46,13 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.4.0-pre:** Final Op Queue Decoupling (Mandatory).
+**All grid mutations are now processed via the lock-free op queue — atomic, batched, and GPU-efficient.**
+*   **Mandatory Queue:** Removed `use_op_queue` flag; all mutations (including resize, scroll, rect ops) are unconditionally queued. Direct mutation paths removed (legacy debug mode `#ifdef KTERM_DEBUG_DIRECT` remains for bisection).
+*   **Complete Coverage:** Added queuing for all remaining mutations: Resize, Scroll, Insert/Delete Lines, and Rectangular Operations.
+*   **Stability:** Thread safety is now enforced by design; all grid modifications occur atomically during the flush phase.
+*   **Clean Grid:** Post-flush grid state is guaranteed consistent, enabling reliable external introspection and simulation layers. See [doc/op_queue_final.md](doc/op_queue_final.md) for details.
+
 **New in v2.3.44:** Finalize Op Queue Decoupling – Mandatory Mode.
 **All grid mutations are now processed via the lock-free op queue — atomic, batched, and GPU-efficient.**
 *   **Mandatory Queue:** Removed `use_op_queue` flag; all mutations (including resize, scroll, rect ops) are unconditionally queued. Direct mutation paths removed (legacy debug mode `#ifdef KTERM_DEBUG_DIRECT` remains for bisection).

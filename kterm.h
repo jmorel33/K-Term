@@ -45,9 +45,10 @@
 
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
-#define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 44
-#define KTERM_VERSION_REVISION "PRE-RELEASE"
+#define KTERM_VERSION_MINOR 4
+#define KTERM_VERSION_PATCH 0
+#define KTERM_VERSION_REVISION "pre"
+#define KTERM_VERSION_STRING "2.4.0-pre (full op queue decoupling)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1314,6 +1315,11 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
 void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessnFChar(KTerm* term, KTermSession* session, unsigned char ch);
 
+
+// Grid Access (Post-Flush / Simulation)
+EnhancedTermChar* KTerm_GetCell(KTerm* term, int x, int y);
+void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c);
+void KTerm_MarkRegionDirty(KTerm* term, KTermRect rect);
 
 // Screen manipulation internals
 void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines);
@@ -4260,19 +4266,6 @@ void ExecuteDECRARA(KTerm* term, KTermSession* session) {
         ExtendedKTermColor empty_color = {0};
         KTerm_QueueSetAttrRect(session, rect, 0, 0, attr_xor_mask, false, empty_color, false, empty_color);
         return;
-#ifdef KTERM_DEBUG_DIRECT
-
-    for (int y = top; y <= bottom; y++) {
-        for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
-            for (int i = 4; i < session->param_count; i++) {
-                int param = session->escape_params[i];
-                KTerm_ApplyAttributeToCell(term, cell, param, &i, true);
-            }
-        }
-        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
-    }
-#endif
 }
 
 
@@ -5601,9 +5594,6 @@ static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int
 }
 
 void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
-#ifdef KTERM_DEBUG_DIRECT
-    KTerm_InsertLinesAt_Internal(term, GET_SESSION(term), row, count);
-#else
     KTermSession* session = GET_SESSION(term);
     if (row < session->scroll_top || row > session->scroll_bottom) return;
 
@@ -5620,39 +5610,72 @@ void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
     op.u.vertical.respect_protected = true;
     op.u.vertical.downward = true;
     KTerm_QueueOp(&session->op_queue, op);
-#endif
 }
 
-static void KTerm_DeleteLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
-    (void)term;
-    if (row < session->scroll_top || row > session->scroll_bottom) {
-        return;
-    }
+EnhancedTermChar* KTerm_GetCell(KTerm* term, int x, int y) {
+    if (!term) return NULL;
+    KTermSession* session = GET_SESSION(term);
+    return GetScreenCell(session, y, x);
+}
 
-    if (IsRegionProtected(session, row, session->scroll_bottom, session->left_margin, session->right_margin)) return;
+void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c) {
+    if (!term) return;
+    KTermSession* session = GET_SESSION(term);
+    EnhancedTermChar* cell = GetScreenCell(session, y, x);
+    if (cell) {
+        *cell = c;
+        cell->flags |= KTERM_FLAG_DIRTY;
+        if (y >= 0 && y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+    }
+}
+
+void KTerm_MarkRegionDirty(KTerm* term, KTermRect rect) {
+    if (!term) return;
+    KTermSession* session = GET_SESSION(term);
     
-    // Move remaining lines up
-    for (int y = row; y <= session->scroll_bottom - count; y++) {
-        for (int x = session->left_margin; x <= session->right_margin; x++) {
-            *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + count, x);
-            GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
-        }
+    // Clamp to viewport
+    int top = rect.y;
+    int bottom = rect.y + rect.h - 1;
+    if (top < 0) top = 0;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+
+    for (int y = top; y <= bottom; y++) {
         session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 
-    // Clear bottom lines
-    for (int y = session->scroll_bottom - count + 1; y <= session->scroll_bottom; y++) {
-        if (y >= 0) {
-            for (int x = session->left_margin; x <= session->right_margin; x++) {
-                KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
-            }
-            session->row_dirty[y] = KTERM_DIRTY_FRAMES;
-    }
+    // Merge into dirty rect
+    if (session->dirty_rect.w == 0) {
+        session->dirty_rect = rect;
+    } else {
+        int x1 = (rect.x < session->dirty_rect.x) ? rect.x : session->dirty_rect.x;
+        int y1 = (rect.y < session->dirty_rect.y) ? rect.y : session->dirty_rect.y;
+        int x2_a = rect.x + rect.w;
+        int x2_b = session->dirty_rect.x + session->dirty_rect.w;
+        int x2 = (x2_a > x2_b) ? x2_a : x2_b;
+        int y2_a = rect.y + rect.h;
+        int y2_b = session->dirty_rect.y + session->dirty_rect.h;
+        int y2 = (y2_a > y2_b) ? y2_a : y2_b;
+        session->dirty_rect = (KTermRect){x1, y1, x2 - x1, y2 - y1};
     }
 }
 
 void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
-    KTerm_DeleteLinesAt_Internal(term, GET_SESSION(term), row, count);
+    KTermSession* session = GET_SESSION(term);
+    if (row < session->scroll_top || row > session->scroll_bottom) return;
+
+    KTermRect region;
+    region.x = session->left_margin;
+    region.y = row;
+    region.w = session->right_margin - session->left_margin + 1;
+    region.h = session->scroll_bottom - row + 1;
+
+    KTermOp op;
+    op.type = KTERM_OP_DELETE_LINES;
+    op.u.vertical.region = region;
+    op.u.vertical.count = count;
+    op.u.vertical.respect_protected = true;
+    op.u.vertical.downward = false;
+    KTerm_QueueOp(&session->op_queue, op);
 }
 
 static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
@@ -15014,13 +15037,7 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
 
-#ifdef KTERM_DEBUG_DIRECT
-    KTERM_MUTEX_LOCK(session->lock);
-    KTerm_ResizeSession_Internal(term, session, cols, rows);
-    KTERM_MUTEX_UNLOCK(session->lock);
-#else
     KTerm_QueueResize(session, cols, rows, true);
-#endif
 
     if (term->session_resize_callback) term->session_resize_callback(term, session_index, cols, rows);
 }

@@ -12,7 +12,6 @@ void test_insert_lines_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Fill screen with line numbers
     for(int i=0; i<10; i++) {
@@ -64,7 +63,6 @@ void test_delete_lines_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Fill screen with line numbers
     for(int i=0; i<10; i++) {
@@ -110,7 +108,6 @@ void test_protected_lines_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Fill with A
     for(int i=0; i<10*20; i++) KTerm_WriteChar(term, 'A');
@@ -148,7 +145,6 @@ void test_insert_lines_overflow(void) {
     config.height = 5;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // Fill with 'A'
     for(int i=0; i<10*5; i++) KTerm_WriteChar(term, 'A');
