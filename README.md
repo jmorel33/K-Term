@@ -46,7 +46,24 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.44:** Compilation Fixes & Struct Restructuring.
+**New in v2.3.44:** Finalize Op Queue Decoupling – Mandatory Mode.
+**All grid mutations are now processed via the lock-free op queue — atomic, batched, and GPU-efficient.**
+*   **Mandatory Queue:** Removed `use_op_queue` flag; all mutations (including resize, scroll, rect ops) are unconditionally queued. Direct mutation paths removed (legacy debug mode `#ifdef KTERM_DEBUG_DIRECT` remains for bisection).
+*   **Resize Queue:** Added `KTERM_OP_RESIZE_GRID` to queue dynamic resize events, ensuring thread safety.
+*   **Cleanup:** Resolved struct ordering, forward declarations, and compilation issues. This completes the multi-version refactor arc (started v2.3.40).
+
+**New in v2.3.43:** Mandatory Op Queue & Decoupling.
+*   **Architecture:** Completed core refactoring to make the `KTermOpQueue` mandatory and fully decoupled from direct grid mutation.
+*   **Queue Expansion:** Added `KTERM_OP_RESIZE_GRID` to `kt_ops.h` and increased queue capacity to 16384 to handle bursty resize events.
+*   **Unified Mutation:** Updated all grid mutation functions (`InsertLines`, `DeleteLines`, `Scroll`, `Insert/DeleteChar`, `RectOps`) to unconditionally queue operations, removing the `use_op_queue` flag.
+*   **Resize Logic:** Refactored `KTerm_ResizeSession` to queue resize operations (`KTERM_OP_RESIZE_GRID`) instead of applying them immediately, ensuring thread safety and rendering consistency.
+
+**New in v2.3.42:** Expanded Input Op Queue (Vertical Ops).
+*   **Vertical Ops:** Added support for `INSERT_LINES` (IL) and `DELETE_LINES` (DL) in the `KTermOpQueue`.
+*   **Scrolling:** Refactored `KTerm_ScrollUpRegion_Internal` and `KTerm_ScrollDownRegion_Internal` to queue `SCROLL_REGION` ops when `use_op_queue` is active.
+*   **Refactoring:** Updated internal handlers for `ExecuteIL` and `ExecuteDL` to utilize the queue.
+*   **Optimization:** Vertical line operations are now applied atomically during the flush phase, with correct protected cell handling.
+
 **New in v2.3.41:** Expanded Input Op Queue (Rectangular Operations).
 *   **Rectangular Ops:** Added `FILL_RECT`, `COPY_RECT` (DECCRA), and `SET_ATTR_RECT` (DECCARA/DECRARA) to the `KTermOpQueue`.
 *   **Decoupling:** Refactored `ExecuteDECFRA`, `KTerm_CopyRectangle`, and `ExecuteDECCARA` to utilize the queue when enabled, further decoupling parsing from grid mutation.

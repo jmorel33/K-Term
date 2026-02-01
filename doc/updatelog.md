@@ -1,10 +1,17 @@
 # Update Log
 
-## [v2.3.44]
-*   **Compilation Fixes:** Resolved structural issues in `kterm.h` where `KTermConfig` was not visible to API consumers and internal structs `KTermSession` and `KTerm` were defined too late in the implementation block.
-*   **Struct Restructuring:** Restored missing fields in `KTermSession` (input config, auto-repeat) and `KTerm` (ReGIS state, visual effects) that were accidentally truncated in previous refactors.
-*   **Safety:** Removed conflicting static forward declarations and cleaned up duplicate struct definitions.
-*   **API Visibility:** Moved `KTermConfig` to the public API section of `kterm.h`.
+## [v2.3.44] (pre-release)
+
+### Finalize Op Queue Decoupling – Mandatory Mode Achieved
+
+- Made op queue **mandatory** (removed `use_op_queue` flag and all fallback paths).
+- All grid mutations (cell set, scroll, rect ops, vertical insert/delete, resize) now unconditionally queue operations.
+- Added `KTERM_OP_RESIZE_GRID` + full queuing for dynamic resizes (Gateway/host-triggered).
+- Cleaned up struct ordering, forward declarations, font includes, and test compilation issues.
+- Tests: `test_full_decoupling.c` verifies deferred mutations; rect/vertical suites pass cleanly.
+- Docs: Updated to reflect mandatory queue, full coverage, and post-flush grid purity.
+
+This completes the multi-version refactor arc (started v2.3.40) — grid is now fully declarative/batched, thread-safe, and directly addressable after flush. Ready for per-cell extensions, bytecode, and next-gen renderer integration.
 
 ## [v2.3.43]
 
