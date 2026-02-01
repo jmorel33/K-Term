@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.41
+# kterm.h - Technical Reference Manual v2.4.0
 
 **(c) 2026 Jacques Morel**
 
@@ -37,7 +37,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
         *   [3.3.1. CSI Command Reference](#331-csi-command-reference)
         *   [3.3.2. SGR (Select Graphic Rendition) Parameters](#332-sgr-select-graphic-rendition-parameters)
         *   [3.3.3. Mode Setting Parameters](#333-mode-setting-parameters)
-    *   [3.3.4. Multi-Session & Split Screen](#334-multi-session-and-split-screen)
+        *   [3.3.4. Multi-Session & Split Screen](#334-multi-session-and-split-screen)
     *   [3.4. OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
     *   [3.5. DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
     *   [3.6. Other Escape Sequences](#36-other-escape-sequences)
@@ -82,6 +82,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [6.3. Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
     *   [6.4. Stage 4: Rendering](#64-stage-4-rendering)
     *   [6.5. Stage 5: Keyboard Input Processing](#65-stage-5-keyboard-input-processing)
+    *   [6.6. The Operations Queue (Deferred Execution)](#66-the-operations-queue-deferred-execution)
 
 *   [7. Data Structures Reference](#7-data-structures-reference)
     *   [7.1. Enums](#71-enums)
@@ -171,9 +172,9 @@ This section provides a more detailed examination of the library's internal comp
 
 The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device.
 
-In **v2.3**, `KTerm` acts as a thread-safe hypervisor/multiplexer. Instead of managing a single state, it holds:
+In **v2.4**, `KTerm` acts as a thread-safe hypervisor/multiplexer. Instead of managing a single state, it holds:
 -   An array of `KTermSession` structs (up to `MAX_SESSIONS`), each representing a virtual terminal with its own screen buffer, cursor, parser state, and **mutex lock**.
--   A `KTermPane` tree (`layout_root`), defining how these sessions are tiled on the screen.
+-   A `KTermLayout` containing the `KTermPane` tree, defining how these sessions are tiled on the screen.
 -   Global resources like the GPU pipeline, font texture, and shared input/output buffers.
 
 The API remains **instance-based** (`KTerm*`), allowing multiple independent multiplexer instances to coexist.
@@ -195,7 +196,8 @@ The heart of the emulation is the main processing loop within `KTerm_Update(term
     -   `VT_PARSE_NORMAL`: In the default state, printable characters are sent to the screen, and control characters (like `ESC` or C0 codes) change the parser's state.
     -   `VT_PARSE_ESCAPE`: After an `ESC` (`0x1B`) is received, the parser enters this state, waiting for the next character to determine the type of sequence (e.g., `[` for CSI, `]` for OSC).
     -   `PARSE_CSI`, `PARSE_OSC`, `PARSE_DCS`, etc.: In these states, the parser accumulates parameters and intermediate bytes into `escape_buffer` until a final character (terminator) is received.
-    -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `KTerm_ExecuteCSICommand`, `KTerm_ExecuteOSCCommand`). `KTerm_ExecuteCSICommand` uses a highly efficient computed-goto dispatch table to jump directly to the handler for the specific command (`ExecuteCUU`, `ExecuteED`, etc.), minimizing lookup overhead.
+    -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `KTerm_ExecuteCSICommand`, `KTerm_ExecuteOSCCommand`).
+    -   **Deferred Operations:** Unlike previous versions, execution does **not** modify the grid directly. Instead, it queues a `KTermOp` (Operation) into the session's **Op Queue**. This ensures atomicity and thread safety.
 
 #### 1.3.4. The Screen Buffer
 
@@ -210,10 +212,10 @@ The visual state of the terminal is stored in one of two screen buffers, both of
 
 #### 1.3.5. The Rendering Engine (The Compositor)
 
-The v2.3 rendering engine operates as a decoupled, thread-safe **Compositor** (Phase 4 Thread Safety). The Logic Thread prepares a double-buffered `KTermRenderBuffer`, while the Render Thread consumes it. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
+The v2.4 rendering engine operates as a decoupled, thread-safe **Compositor**. The Logic Thread prepares a double-buffered `KTermRenderBuffer`, while the Render Thread consumes it. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
 
-1.  **Layout Traversal:** It iterates through the `layout_root` tree to calculate the absolute screen viewport for each visible leaf pane.
-2.  **SSBO Update:** `KTerm_UpdateSSBO()` uploads content from each visible session into a global `GPUCell` staging buffer, respecting pane boundaries.
+1.  **Layout Traversal:** It iterates through the `layout` tree (`KTermPane`) to calculate the absolute screen viewport for each visible leaf pane.
+2.  **SSBO Update:** `RecursiveUpdateSSBO()` uploads content from each visible session into a global `GPUCell` staging buffer, respecting pane boundaries.
 3.  **Compute Dispatch (Text):** The core `terminal.comp` shader renders the text grid for the entire screen in one pass.
 4.  **Overlay Pass (Graphics):** A new `texture_blit.comp` pipeline is dispatched to draw media elements:
     -   **Sixel Graphics:** Rendered from a dedicated texture.
@@ -223,33 +225,58 @@ The v2.3 rendering engine operates as a decoupled, thread-safe **Compositor** (P
 
 ```mermaid
 graph TD
-    Clear["Clear Screen (1x1 Black)"] --> Background["Background Images (Kitty z<0)"]
-    Background --> Text["Text Grid (Compute Shader)"]
-    Text --> Foreground["Foreground Images (Sixel, Kitty z>=0)"]
-    Foreground --> Vectors["Vector Overlay (ReGIS/Tektronix)"]
-    Vectors --> Present["Final Output"]
+    subgraph Host ["Host Application"]
+        Input["KTerm_WriteChar"]
+        Callbacks["ResponseCallback / Sink"]
+    end
+
+    subgraph Core ["KTerm Core"]
+        Parser["VT Parser"]
+        OpQueue["Operations Queue (Ring Buffer)"]
+        Flush["FlushOps (Atomic Update)"]
+        Session["Session State (Grid/Cursor)"]
+    end
+
+    subgraph LayoutEngine ["Layout Engine"]
+        LayoutTree["KTermPane Tree"]
+        Reflow["Resize/Reflow Logic"]
+    end
+
+    subgraph Renderer ["Rendering Pipeline"]
+        Prep["PrepareRenderBuffer (Logic Thread)"]
+        Draw["KTerm_Draw (Render Thread)"]
+        GPU["Compute Shaders"]
+    end
+
+    Input --> Parser
+    Parser --> OpQueue
+    OpQueue --> Flush
+    Flush --> Session
+    Session --> Prep
+    LayoutTree --> Prep
+    Prep --> Draw
+    Draw --> GPU
+    Session --> Callbacks
 ```
 
 #### 1.3.6. The Output Pipeline (Response System)
 
 The terminal needs to send data back to the host in response to certain queries or events. This is handled by the output pipeline, or response system.
 
--   **Mechanism:** When the terminal needs to send a response (e.g., a cursor position report `CSI {row};{col} R`), it doesn't send it immediately. Instead, it queues the response string into an `answerback_buffer`.
+-   **Mechanism:** When the terminal needs to send a response (e.g., a cursor position report `CSI {row};{col} R`), it queues the response.
 -   **Events:** The following events generate responses:
     -   **User Input:** Keystrokes (`KTerm_UpdateKeyboard(term)`) and mouse events (`KTerm_UpdateMouse(term)`) are translated into the appropriate VT sequences and queued.
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
--   **Callback (Legacy):** The `KTerm_Update(term)` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application.
--   **Sink (Modern):** Alternatively, applications can register an `OutputSink` using `KTerm_SetOutputSink`. This bypasses the internal buffer entirely, delivering response data directly to the callback as it is generated (zero-copy). Setting a sink automatically flushes any legacy buffered data.
+-   **Sink (Modern):** Applications can register an `OutputSink` using `KTerm_SetOutputSink`. This bypasses internal buffering, delivering response data directly to the callback as it is generated (zero-copy). This is the preferred method for high-performance integration.
 
 #### 1.3.7. Session Management (Multiplexer)
 
-Version 2.3 enhances the tiling multiplexer with robust focus management and tree pruning.
+Version 2.4 decouples the tiling multiplexer into `kt_layout.h`.
 
 -   **Sessions:** Independent `KTermSession` contexts (up to 4) maintain their own state (screen, history, cursor) and thread locks.
 -   **Layout Tree:** The screen is divided into non-overlapping rectangles using a recursive `KTermPane` tree structure. Splits can be Horizontal or Vertical.
 -   **Input Routing:** User input (Keyboard/Mouse) is routed exclusively to the session in the `focused_pane`.
--   **Background Processing:** All sessions, visible or not, continue to process data from their input pipelines and update their internal buffers.
--   **Reflow:** When a pane is resized, the session within it automatically reflows its text buffer to fit the new dimensions, preserving history.
+-   **Reflow:** When a pane is resized, the session within it automatically reflows its text buffer to fit the new dimensions via `KTerm_ResizeSession`, preserving history.
 
 ---
 
@@ -379,8 +406,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | **Erasing & Editing** | | | |
 | `CSI Ps J` | `J` | ED | **Erase In Display.** `Ps=0`: cursor to end. `Ps=1`: start to cursor. `Ps=2`: entire screen (ANSI.SYS: also homes cursor). `Ps=3`: entire buffer (xterm). |
 | `CSI Ps K` | `K` | EL | **Erase In Line.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire line. |
-| `CSI Pn L` | `L` | IL | **Insert Lines.** Inserts `Pn` blank lines at the cursor. Default `Pn=1`. |
-| `CSI Pn M` | `M` | DL | **Delete Lines.** Deletes `Pn` lines at the cursor. Default `Pn=1`. |
+| `CSI Pn L` | `L` | IL | **Insert Lines.** Inserts `Pn` blank lines at the cursor. Default `Pn=1`. Respects margins. Pushes lines down. |
+| `CSI Pn M` | `M` | DL | **Delete Lines.** Deletes `Pn` lines at the cursor. Default `Pn=1`. Respects margins. Pulls lines up. |
 | `CSI Pn P` | `P` | DCH | **Delete Characters.** Deletes `Pn` characters at the cursor. Default `Pn=1`. |
 | `CSI Pn X` | `X` | ECH | **Erase Characters.** Erases `Pn` characters from the cursor without deleting them. Default `Pn=1`. |
 | `CSI Pn @` | `@` | ICH | **Insert Characters.** Inserts `Pn` blank spaces at the cursor. Default `Pn=1`. |
@@ -397,14 +424,15 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
 | **Rectangular Area Operations (VT420+)** | | | |
-| `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area. Supports default values (bottom/right to page end) and DECOM (Origin Mode) relative coordinates. |
-| `CSI Pts;Ptd;Pcs * y` | `y` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum. Gated by `DECECR`. |
+| `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies from source rect (Top, Left, Bottom, Right) to Dest (Top, Left). `Pps`/`Ppd` are source/dest page (ignored). Respects DECOM. |
+| `CSI Pts;Ptd;Pcs * y` | `y` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum of the area. Response: `DCS Pid ! ~ Checksum ST`. |
 | `CSI Pt ; Pc z` | `z` | DECECR | **Enable Checksum Report.** `Pc=1` enables, `0` disables DECRQCRA responses. |
-| `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |
-| `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills a rectangular area with a character. |
-| `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Selectively erases a rectangular area. |
-| `CSI Pt;Pl;Pb;Pr;Ps $ t`| `t` | DECCARA | **Change Attributes in Rectangular Area.** Applies SGR attributes to the specified region. |
-| `CSI Pt;Pl;Pb;Pr;Ps $ u`| `u` | DECRARA | **Reverse Attributes in Rectangular Area.** Toggles SGR attributes in the specified region. |
+| `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases the specified rectangle to space with current background attributes. |
+| `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills the rectangle with character `Pch` (ASCII/Unicode). |
+| `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Erases only erasable characters (not Protected via `DECSCA`) in the area. |
+| `CSI Pt;Pl;Pb;Pr;Ps1;... $ t`| `t` | DECCARA | **Change Attributes in Rectangular Area.** Applies SGR attributes `Ps...` to the region. 0=Clear All, 1=Bold, 4=Underline, 5=Blink, 7=Reverse. |
+| `CSI Pt;Pl;Pb;Pr;Ps1;... $ u`| `u` | DECRARA | **Reverse Attributes in Rectangular Area.** Toggles SGR attributes `Ps...` in the region. |
+| `CSI Ps " q` | `q` | DECSCA | **Select Character Protection Attribute.** `Ps=1`: Protected. `Ps=0` or `2`: Unprotected. Protected cells are ignored by `DECERA`, `DECSERA` (partially), and `DECSEL`. |
 | `CSI # {` | `{` | XTPUSHSGR | **Push SGR.** Saves current text attributes to the stack. |
 | `CSI # }` | `}` | XTPOPSGR | **Pop SGR.** Restores text attributes from the stack. |
 | **Text Attributes (SGR)** | | | |
@@ -432,24 +460,13 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
 | `CSI ? Ps ; Pv $ z` | `z` | DECVERP | **Verify Parity.** (currently unsupported) |
 | `CSI Pn $ \|` | `\|` | DECSCPP | **Select Columns Per Page.** `Pn=0` or `80` for 80 columns; `Pn=132` for 132 columns. Requires Mode 40. |
-| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
-| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
+| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** `Psl`: 0=Req, 1=Down, 2=Cancel Down, 3=Up, 4=Cancel Up. |
+| `CSI Ps \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. Response: `CSI 1;r;c;1 ! |`. |
 | `CSI Ps SP =` | `=` | DECSKCV | **Select Keyboard Variant.** Sets the keyboard layout variant. |
 | `CSI ? Ps $ u` | `u` | DECRQTSR | **Request Terminal State Report.** `Ps=1`: Report All. `Ps=53`: Report Factory Defaults (DECRQDE). Response is DCS. |
 | `CSI ? 26 u` | `u` | DECRQUPSS| **Request User-Preferred Supplemental Set.** Reports current preferred set (DCS). |
 | `CSI Ps SP r` | `r` | DECARR | **Auto Repeat Rate.** Sets keyboard repeat rate (0-30Hz). 31=Off. |
 | `CSI ? 5 W` | `W` | DECST8C | **Set Tab Stops 8 Columns.** Resets all tab stops to every 8 columns. |
-
-#### 3.3.4. Multi-Session & Split Screen
-These commands control the VT520-style multi-session and split screen features. **Note:** In v2.2+, legacy VT520 session commands are mapped to the tiling layout engine (focus change instead of full session switch).
-
-| Command | Name | Description |
-| :--- | :--- | :--- |
-| `CSI Ps ! ~` | `DECSN` | **Select Session Number.** Switches the active session to `Ps`. `Ps` is 1-based (1-3). |
-| `CSI ? Ps n` | `DECRSN` | **Report Session Number.** If `Ps=12`, reports the active session as `CSI ? 12 ; {session} n`. |
-| `CSI ? 21 n` | `DECRS` | **Report Session Status.** Reports availability of sessions via a DCS string. |
-| `CSI Ps $ }` | `DECSASD`| **Select Active Status Display.** `Ps=0`: Main display. `Ps=1`: Status line. |
-| `CSI Ps $ ~` | `DECSSDT`| **Select Split Definition Type.** `Ps=0`: No split. `Ps=1`: Horizontal split (50/50). |
 
 #### 3.3.2. SGR (Select Graphic Rendition) Parameters
 The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).
@@ -539,6 +556,18 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | 2004 | `-`| **Bracketed Paste Mode.** `h` enables, `l` disables. Wraps pasted text with control sequences. |
 | 8246 | `BDSM`| **Bi-Directional Support Mode.** `h` enables internal BiDi reordering. |
 | 8452 | `-`| **Sixel Cursor Mode.** `h` places cursor at end of graphic. `l` moves to next line. |
+
+
+#### 3.3.4. Multi-Session & Split Screen
+These commands control the VT520-style multi-session and split screen features. **Note:** In v2.2+, legacy VT520 session commands are mapped to the tiling layout engine (focus change instead of full session switch).
+
+| Command | Name | Description |
+| :--- | :--- | :--- |
+| `CSI Ps ! ~` | `DECSN` | **Select Session Number.** Switches the active session to `Ps`. `Ps` is 1-based (1-3). |
+| `CSI ? Ps n` | `DECRSN` | **Report Session Number.** If `Ps=12`, reports the active session as `CSI ? 12 ; {session} n`. |
+| `CSI ? 21 n` | `DECRS` | **Report Session Status.** Reports availability of sessions via a DCS string. |
+| `CSI Ps $ }` | `DECSASD`| **Select Active Status Display.** `Ps=0`: Main display. `Ps=1`: Status line. |
+| `CSI Ps $ ~` | `DECSSDT`| **Select Split Definition Type.** `Ps=0`: No split. `Ps=1`: Horizontal split (50/50). |
 
 ### 3.4. OSC - Operating System Command (`ESC ]`)
 
