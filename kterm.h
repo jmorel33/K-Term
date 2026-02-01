@@ -58,28 +58,6 @@
 #include "kt_layout.h"
 #include "font_data.h"
 
-#ifdef KTERM_IMPLEMENTATION
-  #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
-    #define STB_TRUETYPE_IMPLEMENTATION
-  #endif
-  #define KTERM_LAYOUT_IMPLEMENTATION
-  #define FONT_DATA_IMPLEMENTATION
-#endif
-#include "stb_truetype.h"
-#include "kt_parser.h"
-#include "kt_layout.h"
-
-
-#include <stdio.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <ctype.h>
-#include <stdarg.h>
-#include <math.h>
-#include <time.h>
 
 // Safe Allocation Wrappers
 void* KTerm_Malloc(size_t size);
@@ -1127,301 +1105,6 @@ typedef struct {
 #endif
 
 
-typedef struct {
-    KTermVector2 screen_size;
-    KTermVector2 char_size;
-    KTermVector2 grid_size;
-    float time;
-    union {
-        uint32_t cursor_index;
-        // For Vector Shader, we use a separate layout or the end of the struct
-        // but aligning with the GLSL struct is key.
-        // The GLSL struct 'PushConsts' in Vector shader is minimal.
-        // The Vulkan 'PushConstants' is larger.
-        // We will rely on explicit offsets or names.
-    };
-    uint32_t cursor_blink_state;
-    uint32_t text_blink_state;
-    uint32_t sel_start;
-    uint32_t sel_end;
-    uint32_t sel_active;
-    float scanline_intensity;
-    float crt_curvature;
-    uint32_t mouse_cursor_index;
-    uint64_t terminal_buffer_addr;
-    uint64_t vector_buffer_addr;
-    uint64_t font_texture_handle;
-    uint64_t sixel_texture_handle;
-    uint64_t vector_texture_handle;
-    uint32_t atlas_cols;   // Added for Dynamic Atlas
-    uint32_t vector_count; // Appended for Vector shader access
-    float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
-    int sixel_y_offset; // For scrolling Sixel images
-    uint32_t grid_color; // Debug Grid Color
-    uint32_t conceal_char_code; // Conceal Character Code
-} KTermPushConstants;
-
-#define GPU_ATTR_BOLD       (1 << 0)
-#define GPU_ATTR_FAINT      (1 << 1)
-#define GPU_ATTR_ITALIC     (1 << 2)
-#define GPU_ATTR_UNDERLINE  (1 << 3)
-#define GPU_ATTR_BLINK      (1 << 4)
-#define GPU_ATTR_REVERSE    (1 << 5)
-#define GPU_ATTR_STRIKE     (1 << 6)
-#define GPU_ATTR_DOUBLE_WIDTH       (1 << 7)
-#define GPU_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
-#define GPU_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
-#define GPU_ATTR_CONCEAL            (1 << 10)
-
-// =============================================================================
-// MAIN ENHANCED TERMINAL STRUCTURE
-// =============================================================================
-
-// Saved Cursor State (DECSC/DECRC)
-typedef struct {
-    int x, y;
-    bool origin_mode;
-    bool auto_wrap_mode;
-
-    // Attributes
-    ExtendedKTermColor fg_color;
-    ExtendedKTermColor bg_color;
-    uint32_t attributes;
-
-    // Charset
-    CharsetState charset;
-} SavedCursorState;
-
-// SGR Stack State (XTPUSHSGR/XTPOPSGR)
-typedef struct {
-    ExtendedKTermColor fg_color;
-    ExtendedKTermColor bg_color;
-    ExtendedKTermColor ul_color;
-    ExtendedKTermColor st_color;
-    uint32_t attributes;
-} SavedSGRState;
-
-typedef struct KTermSession_T {
-
-    // Operation Queue for Grid Mutations
-    KTermOpQueue op_queue;
-    KTermRect dirty_rect;
-
-    // Screen management
-    EnhancedTermChar* screen_buffer;       // Primary screen ring buffer
-    EnhancedTermChar* alt_buffer;          // Alternate screen buffer
-    int buffer_height;                     // Total rows in ring buffer
-    int screen_head;                       // Index of the top visible row in the buffer (Ring buffer head)
-    int history_rows_populated;            // Number of valid lines in scrollback history
-    int alt_screen_head;                   // Stored head for alternative screen
-    int view_offset;                       // Scrollback offset (0 = bottom/active view)
-    int saved_view_offset;                 // Stored scrollback offset for main screen
-
-    // Legacy member placeholders to be removed after refactor,
-    // but kept as comments for now to indicate change.
-    // EnhancedTermChar screen[term->height][term->width];
-    // EnhancedTermChar alt_screen[term->height][term->width];
-
-    int cols; // KTerm width in columns
-    int rows; // KTerm height in rows (viewport)
-    int lines_per_page; // DECSLPP (Logical Page Height)
-
-    uint8_t* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
-    // EnhancedTermChar saved_screen[term->height][term->width]; // For DECSEL/DECSED if implemented
-
-    // Enhanced cursor
-    EnhancedCursor cursor;
-    SavedCursorState saved_cursor; // For DECSC/DECRC and other save/restore ops
-    bool saved_cursor_valid;
-
-    // KTerm identification & conformance
-    VTConformance conformance;
-    char device_attributes[128];    // Primary DA string (e.g., CSI c)
-    char secondary_attributes[128]; // Secondary DA string (e.g., CSI > c)
-
-    // Mode management
-    DECModes dec_modes;
-    ANSIModes ansi_modes;
-
-    // Current character attributes for new text
-    ExtendedKTermColor current_fg;
-    ExtendedKTermColor current_bg;
-    ExtendedKTermColor current_ul_color;
-    ExtendedKTermColor current_st_color;
-    uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
-    uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
-    double text_blink_timer;    // Timer for text blink interval
-    int fast_blink_rate;        // Oscillator Slot (Default 30, ~250ms)
-    int slow_blink_rate;        // Oscillator Slot (Default 35, ~500ms)
-    int bg_blink_rate;          // Oscillator Slot (Default 35, ~500ms)
-
-    // Debug Grid
-    bool grid_enabled;
-    RGB_KTermColor grid_color;
-    uint32_t conceal_char_code;
-
-    // Scrolling and margins
-    int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
-    int left_margin, right_margin;  // Defines left/right margins (0-indexed, VT420+)
-
-    // Character handling
-    CharsetState charset;
-    TabStops tab_stops;
-
-    // Enhanced features
-    BracketedPaste bracketed_paste;
-    ProgrammableKeys programmable_keys; // For DECUDK
-    StoredMacros stored_macros;         // For DECDMAC
-    SixelGraphics sixel;
-    KittyGraphics kitty;
-    SoftFont soft_font;                 // For DECDLD
-    TitleManager title;
-
-    // Mouse support state
-    struct {
-        MouseTrackingMode mode; // Mouse tracking mode
-        bool enabled; // Mouse input enabled
-        bool buttons[3]; // Left, middle, right button states
-        int last_x; // Last cell x position
-        int last_y; // Last cell y position
-        int last_pixel_x; // Last pixel x position
-        int last_pixel_y; // Last pixel y position
-        bool focused; // Tracks window focus state for CSI I/O
-        bool focus_tracking; // Enables focus in/out reporting
-        bool sgr_mode; // Enables SGR mouse reporting
-        int cursor_x; // Current mouse cursor X cell position
-        int cursor_y; // Current mouse cursor Y cell position
-    } mouse;
-
-    // Input/Output pipeline (enhanced)
-    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE]; // Buffer for incoming data from host (Increased to 1MB)
-    int input_pipeline_length; // Input pipeline length0
-    atomic_int pipeline_head;
-    atomic_int pipeline_tail;
-    int pipeline_count;
-    atomic_bool pipeline_overflow;
-    bool xoff_sent; // For DECXRLM flow control
-
-    KTermInputConfig input;
-
-    // Performance and processing control
-    struct {
-        int chars_per_frame;      // Max chars to process from pipeline per frame
-        double target_frame_time; // Inverse of target FPS (e.g., 1/60.0)
-        double time_budget;       // Max time per frame for pipeline processing
-        double avg_process_time;  // Moving average of char processing time
-        bool burst_mode;          // Is processing in burst mode (more chars/frame)
-        int burst_threshold;      // Pipeline count to trigger burst mode
-        // double burst_time_limit;  // Max time for a burst
-        bool adaptive_processing; // Adjust chars_per_frame based on performance
-    } VTperformance;
-
-    // Response system (data to send back to host)
-    char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE]; // Buffer for responses to host
-    int response_length; // Response buffer length
-    bool response_enabled; // Master switch for output (response transmission) - Legacy only
-
-    // ANSI parsing state (enhanced)
-    VTParseState parse_state;
-    VTParseState saved_parse_state; // Saved state for handling string terminators (ESC \)
-    char escape_buffer[MAX_COMMAND_BUFFER]; // Buffer for parameters of ESC, CSI, OSC, DCS etc.
-    int escape_pos;
-    int escape_params[MAX_ESCAPE_PARAMS];   // Parsed numeric parameters for CSI
-    char escape_separators[MAX_ESCAPE_PARAMS]; // Separator following each param (';' or ':')
-    int param_count;
-
-    // SGR Stack (XTPUSHSGR/XTPOPSGR)
-    SavedSGRState sgr_stack[10];
-    int sgr_stack_depth;
-
-    // Status and diagnostics
-    struct {
-        // bool error_recovery; // Attempt to recover from invalid sequences
-        // double last_error_time;
-        // char last_error[256];
-        int error_count;        // Generic error counter
-        bool debugging;         // General debugging flag for verbose logs
-    } status;
-
-    // Feature toggles / options
-    struct {
-        bool conformance_checking; // Enable stricter checks and logging
-        bool vttest_mode;          // Special behaviors for vttest suite
-        bool debug_sequences;      // Log unknown/unsupported sequences
-        bool log_unsupported;      // Alias or part of debug_sequences
-    } options;
-
-    // Fields for console.c
-    bool session_open; // Session open status
-    int active_display; // 0=Main Display, 1=Status Line (DECSASD)
-    bool echo_enabled;
-    bool input_enabled;
-    bool password_mode;
-    bool raw_mode;
-    bool paused;
-
-    bool printer_available;      // Tracks printer availability for CSI ?15 n
-    bool auto_print_enabled; // Tracks CSI 4 i / CSI 5 i state
-    bool printer_controller_enabled; // Tracks CSI ?4 i / CSI ?5 i state
-    struct {
-        bool report_button_down;
-        bool report_button_up;
-        bool report_on_request_only;
-    } locator_events;
-    bool locator_enabled;        // Tracks locator device status for CSI ?53 n
-    struct {
-        size_t used;             // Bytes used for macro storage
-        size_t total;            // Total macro storage capacity
-    } macro_space;               // For CSI ?62 n
-    struct {
-        int algorithm;           // Checksum algorithm (e.g., 1=CRC16)
-        uint32_t last_checksum;  // Last computed checksum
-    } checksum;                  // For CSI ?63 n
-    char tertiary_attributes[128]; // For CSI = c
-
-    double visual_bell_timer; // Timer for visual bell effect
-
-    // Graphics resources for Compute Shader
-
-    // UTF-8 decoding state
-    struct {
-        uint32_t codepoint;
-        uint32_t min_codepoint;
-        int bytes_remaining;
-    } utf8;
-
-    // Mouse selection
-    struct {
-        int start_x, start_y;
-        int end_x, end_y;
-        bool active;
-        bool dragging;
-    } selection;
-
-
-    // Last printed character (for REP command)
-    unsigned int last_char;
-
-    // Auto-print state
-    int last_cursor_y; // For tracking line completion
-
-    // Printer Controller buffer for exit sequence detection
-    unsigned char printer_buffer[8];
-    int printer_buf_len;
-
-    void* user_data; // User data for callbacks and application state
-
-    // Esoteric VT510 State
-    int auto_repeat_rate;        // DECARR (0-31)
-    int auto_repeat_delay;       // Initial Delay (ms), default 500
-    int preferred_supplemental;  // DECRQUPSS (Code)
-
-    bool enable_wide_chars;      // Enable wide character support (wcwidth) - Default FALSE
-
-    kterm_mutex_t lock; // Session Lock (Phase 3)
-
-} KTermSession;
-
 
 // External declarations for users of the library (if not header-only)
 // extern Texture2D font_texture; // Moved to struct
@@ -1445,279 +1128,6 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
 // Typedef for the command execution callback to accept session
 typedef void (*ExecuteCommandCallback)(KTerm* term, KTermSession* session);
 
-// Helper functions for Ring Buffer Access
-static inline EnhancedTermChar* GetScreenRow(KTermSession* session, int row) {
-    // Access logical row 'row' (0 to HEIGHT-1 or -scrollback) relative to the visible screen top.
-    // We adjust by view_offset (which allows looking back).
-    // view_offset = 0 means looking at active screen.
-    // view_offset > 0 means scrolling up (looking at history).
-
-    // Logical top row of the visible window (including scrollback offset)
-    // screen_head points to the top line of the active screen (logical row 0).
-    // If we view back, we look at screen_head - view_offset.
-
-    int logical_row_idx = session->screen_head + row - session->view_offset;
-
-    // Handle wrap-around
-    int actual_index = logical_row_idx % session->buffer_height;
-    if (actual_index < 0) actual_index += session->buffer_height;
-
-    return &session->screen_buffer[actual_index * session->cols];
-}
-
-static inline EnhancedTermChar* GetScreenCell(KTermSession* session, int y, int x) {
-    if (x < 0 || x >= session->cols) return NULL; // Basic safety
-    return &GetScreenRow(session, y)[x];
-}
-
-static inline EnhancedTermChar* GetActiveScreenRow(KTermSession* session, int row) {
-    // Access logical row 'row' relative to the ACTIVE screen top (ignoring view_offset).
-    // This is used for emulation commands that modify the screen state (insert, delete, scroll).
-
-    int logical_row_idx = session->screen_head + row; // No view_offset subtraction
-
-    // Handle wrap-around
-    int actual_index = logical_row_idx % session->buffer_height;
-    if (actual_index < 0) actual_index += session->buffer_height;
-
-    return &session->screen_buffer[actual_index * session->cols];
-}
-
-static inline EnhancedTermChar* GetActiveScreenCell(KTermSession* session, int y, int x) {
-    if (x < 0 || x >= session->cols) return NULL;
-    return &GetActiveScreenRow(session, y)[x];
-}
-
-typedef struct {
-    // Basic info for blit
-    int x, y, width, height;
-    int z_index;
-    int clip_x, clip_y, clip_mx, clip_my;
-    KTermTexture texture;
-} KittyRenderOp;
-
-typedef struct {
-    GPUCell* cells;
-    size_t cell_count; // width * height
-    size_t cell_capacity;
-
-    KTermPushConstants constants;
-
-    // Sixel Data
-    GPUSixelStrip* sixel_strips;
-    size_t sixel_count;
-    size_t sixel_capacity;
-    uint32_t sixel_palette[256];
-    bool sixel_active;
-    int sixel_width;
-    int sixel_height;
-    int sixel_y_offset;
-
-    // Vector Data
-    GPUVectorLine* vectors;
-    size_t vector_count;
-    size_t vector_capacity;
-
-    // Kitty Graphics
-    KittyRenderOp* kitty_ops;
-    size_t kitty_count;
-    size_t kitty_capacity;
-
-    // Resource Garbage Collection (Deferred Destruction)
-    KTermTexture garbage[8];
-    int garbage_count;
-
-} KTermRenderBuffer;
-
-typedef struct KTerm_T {
-    KTermSession sessions[MAX_SESSIONS];
-    KTermLayout* layout;
-    int width; // Global Width (Columns)
-    int height; // Global Height (Rows)
-    int active_session;
-    int pending_session_switch; // For session switching during update loop
-    bool split_screen_active; // Deprecated by layout_root, kept for legacy compatibility for now
-    int split_row;
-    int session_top;
-    int session_bottom;
-    ResponseCallback response_callback; // Response callback
-    KTermPipeline compute_pipeline;
-    KTermPipeline texture_blit_pipeline; // For Kitty Graphics
-    KTermBuffer terminal_buffer; // SSBO
-    KTermTexture output_texture; // Storage Image
-    KTermTexture font_texture;   // Font Atlas
-    KTermTexture sixel_texture;  // Sixel Graphics
-    KTermTexture dummy_sixel_texture; // Fallback 1x1 transparent texture
-    KTermTexture clear_texture;  // 1x1 Opaque texture for clearing
-    // GPUCell* gpu_staging_buffer; // Moved to RenderBuffer
-    bool compute_initialized;
-
-    // Render State (Phase 4)
-    KTermRenderBuffer render_buffers[2];
-    int rb_front;
-    int rb_back;
-    kterm_mutex_t render_lock;
-
-    // Vector Engine (Tektronix)
-    KTermBuffer vector_buffer;
-    KTermTexture vector_layer_texture;
-    KTermPipeline vector_pipeline;
-    uint32_t vector_count;
-    GPUVectorLine* vector_staging_buffer;
-    size_t vector_capacity;
-
-    // Sixel Engine (Compute Shader)
-    KTermBuffer sixel_buffer;
-    KTermBuffer sixel_palette_buffer;
-    KTermPipeline sixel_pipeline;
-
-    // Tektronix Parser State
-    struct {
-        int state; // 0=Alpha, 1=Graph
-        int sub_state; // 0=HiY, 1=LoY, 2=HiX, 3=LoX
-        int x, y; // Current beam position (0-4095)
-        int holding_x, holding_y; // Holding registers
-        int extra_byte; // Buffered Extra Byte for 12-bit coordinates
-        bool pen_down; // True=Draw, False=Move
-    } tektronix;
-
-    // ReGIS Parser State
-    struct {
-        int state; // 0=Command, 1=Values, 2=Options, 3=Text String
-        int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
-        int screen_min_x, screen_min_y; // Logical screen extents
-        int screen_max_x, screen_max_y;
-        int save_x, save_y; // Saved position (stack depth 1)
-        uint32_t color; // Current RGBA color
-        int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
-        char command; // Current command letter (P, V, C, T, W, etc.)
-        int params[16]; // Numeric parameters for current command
-        bool params_relative[16]; // True if parameter was explicitly signed (+/-)
-        int param_count; // Number of parameters parsed so far
-        bool has_comma; // Was a comma seen? (Parameter separator)
-        bool has_bracket; // Was an opening bracket seen? (Option/Vector list)
-        bool has_paren; // Was an opening parenthesis seen? (Options)
-        char option_command; // Current option command being parsed
-        bool data_pending; // Has new data arrived since last execution?
-
-        // Robust Number Parsing
-        int current_val;
-        int current_sign;
-        bool parsing_val;
-        bool val_is_relative;
-
-        // Text Command
-        char text_buffer[256];
-        int text_pos;
-        char string_terminator;
-
-        // Curve & Polygon support
-        struct { int x, y; } point_buffer[64];
-        int point_count;
-        char curve_mode; // 'C'ircle, 'A'rc, 'B'spline (Interpolated), 'O'pen (Unclosed)
-
-        // Extended Text Attributes
-        float text_size;
-        float text_angle; // Radians
-
-        // Macrographs
-        char* macros[26]; // Storage for @A through @Z
-        bool recording_macro;
-        int macro_index;
-        char* macro_buffer;
-        size_t macro_len;
-        size_t macro_cap;
-        int recursion_depth;
-
-        // Load Alphabet (L) Support
-        struct {
-            char name[16]; // Name of the alphabet (e.g., "A")
-            int current_char; // The character currently being defined (0-255)
-            int pattern_byte_idx; // Current byte index in the character's pattern (0-31)
-            int hex_nibble; // Parsing state for hex pairs (-1 = expecting high nibble)
-        } load;
-    } regis;
-
-    // Retro Visual Effects
-    struct {
-        float curvature;
-        float scanline_intensity;
-    } visual_effects;
-
-    bool vector_clear_request; // Request to clear the persistent vector layer
-
-    // Dynamic Glyph Cache
-    uint16_t* glyph_map; // Map Unicode Codepoint to Atlas Index
-    uint32_t next_atlas_index;
-    uint32_t atlas_clock_hand; // For Clock eviction algorithm
-    unsigned char* font_atlas_pixels; // persistent CPU copy
-    bool font_atlas_dirty;
-    uint32_t atlas_width;
-    uint32_t atlas_height;
-    uint32_t atlas_cols;
-
-    NotificationCallback notification_callback; // Notification callback (OSC 9)
-
-    // TrueType Font Engine
-    struct {
-        bool loaded;
-        unsigned char* file_buffer;
-        stbtt_fontinfo info;
-        float scale;
-        int ascent;
-        int descent;
-        int line_gap;
-        int baseline;
-    } ttf;
-
-    // LRU Cache for Dynamic Atlas
-    uint64_t* glyph_last_used;   // Timestamp (frame count) of last usage
-    uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
-    uint64_t frame_count;        // Logical clock for LRU
-
-    // Font State
-    int char_width;  // Cell Width (Screen)
-    int char_height; // Cell Height (Screen)
-    int font_data_width;  // Glyph Bitmap Width
-    int font_data_height; // Glyph Bitmap Height
-    const void* current_font_data;
-    bool current_font_is_16bit; // True for >8px wide fonts (e.g. VCR)
-    KTermFontMetric font_metrics[256]; // Current font metrics
-
-    PrinterCallback printer_callback; // Callback for Printer Controller Mode
-#ifdef KTERM_ENABLE_GATEWAY
-    GatewayCallback gateway_callback; // Callback for Gateway Protocol
-#endif
-    TitleCallback title_callback;
-    BellCallback bell_callback;
-    SessionResizeCallback session_resize_callback;
-    KTermErrorCallback error_callback;
-    void* error_user_data;
-
-    RGB_KTermColor color_palette[256];
-    uint32_t charset_lut[32][128];
-    EnhancedTermChar* row_scratch_buffer; // Scratch buffer for row rendering
-
-    // Multiplexer Input Interceptor
-    struct {
-        bool active;
-        int prefix_key_code; // Default 'B' (for Ctrl+B)
-    } mux_input;
-
-    kterm_mutex_t lock; // KTerm Lock (Phase 3)
-    kterm_thread_t main_thread_id; // For main thread assertions
-    int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
-    int regis_target_session;
-    int tektronix_target_session;
-
-    double last_resize_time; // [NEW] For resize throttling
-
-    int kitty_target_session;
-    int sixel_target_session;
-
-    KTermOutputSink output_sink;
-    void* output_sink_ctx;
-} KTerm;
 
 // =============================================================================
 // CORE API FUNCTIONS
@@ -1956,7 +1366,799 @@ void KTerm_Script_Printf(KTerm* term, const char* format, ...);
 void KTerm_Script_Cls(KTerm* term);
 void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 
+
+#define FONT_DATA_IMPLEMENTATION
+#include "font_data.h"
+#undef FONT_DATA_IMPLEMENTATION
+
+// Full structs — place EARLY
+typedef struct {
+    KTermVector2 screen_size;
+    KTermVector2 char_size;
+    KTermVector2 grid_size;
+    float time;
+    union {
+        uint32_t cursor_index;
+        // For Vector Shader, we use a separate layout or the end of the struct
+        // but aligning with the GLSL struct is key.
+        // The GLSL struct 'PushConsts' in Vector shader is minimal.
+        // The Vulkan 'PushConstants' is larger.
+        // We will rely on explicit offsets or names.
+    };
+    uint32_t cursor_blink_state;
+    uint32_t text_blink_state;
+    uint32_t sel_start;
+    uint32_t sel_end;
+    uint32_t sel_active;
+    float scanline_intensity;
+    float crt_curvature;
+    uint32_t mouse_cursor_index;
+    uint64_t terminal_buffer_addr;
+    uint64_t vector_buffer_addr;
+    uint64_t font_texture_handle;
+    uint64_t sixel_texture_handle;
+    uint64_t vector_texture_handle;
+    uint32_t atlas_cols;   // Added for Dynamic Atlas
+    uint32_t vector_count; // Appended for Vector shader access
+    float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
+    int sixel_y_offset; // For scrolling Sixel images
+    uint32_t grid_color; // Debug Grid Color
+    uint32_t conceal_char_code; // Conceal Character Code
+} KTermPushConstants;
+
+#define GPU_ATTR_BOLD       (1 << 0)
+#define GPU_ATTR_FAINT      (1 << 1)
+#define GPU_ATTR_ITALIC     (1 << 2)
+#define GPU_ATTR_UNDERLINE  (1 << 3)
+#define GPU_ATTR_BLINK      (1 << 4)
+#define GPU_ATTR_REVERSE    (1 << 5)
+#define GPU_ATTR_STRIKE     (1 << 6)
+#define GPU_ATTR_DOUBLE_WIDTH       (1 << 7)
+#define GPU_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
+#define GPU_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
+#define GPU_ATTR_CONCEAL            (1 << 10)
+
+// =============================================================================
+// MAIN ENHANCED TERMINAL STRUCTURE
+// =============================================================================
+
+// Saved Cursor State (DECSC/DECRC)
+typedef struct {
+    int x, y;
+    bool origin_mode;
+    bool auto_wrap_mode;
+
+    // Attributes
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
+    uint32_t attributes;
+
+    // Charset
+    CharsetState charset;
+} SavedCursorState;
+
+// SGR Stack State (XTPUSHSGR/XTPOPSGR)
+typedef struct {
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
+    ExtendedKTermColor ul_color;
+    ExtendedKTermColor st_color;
+    uint32_t attributes;
+} SavedSGRState;
+
 #ifdef KTERM_IMPLEMENTATION
+// --- Implementation Includes ---
+  #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
+    #define STB_TRUETYPE_IMPLEMENTATION
+  #endif
+  #define KTERM_LAYOUT_IMPLEMENTATION
+  #define FONT_DATA_IMPLEMENTATION
+#include "font_data.h"
+#undef FONT_DATA_IMPLEMENTATION
+#include "stb_truetype.h"
+#include "kt_parser.h"
+#include "kt_layout.h"
+
+
+#include <stdio.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <ctype.h>
+#include <stdarg.h>
+#include <math.h>
+#include <time.h>
+
+// --- Internal Struct Definitions (Early) ---
+typedef struct KTermSession_T {
+
+    // Operation Queue for Grid Mutations
+    KTermOpQueue op_queue;
+    KTermRect dirty_rect;
+
+    // Screen management
+    EnhancedTermChar* screen_buffer;       // Primary screen ring buffer
+    EnhancedTermChar* alt_buffer;          // Alternate screen buffer
+    int buffer_height;                     // Total rows in ring buffer
+    int screen_head;                       // Index of the top visible row in the buffer (Ring buffer head)
+    int history_rows_populated;            // Number of valid lines in scrollback history
+    int alt_screen_head;                   // Stored head for alternative screen
+    int view_offset;                       // Scrollback offset (0 = bottom/active view)
+    int saved_view_offset;                 // Stored scrollback offset for main screen
+
+    // Legacy member placeholders to be removed after refactor,
+    // but kept as comments for now to indicate change.
+    // EnhancedTermChar screen[term->height][term->width];
+    // EnhancedTermChar alt_screen[term->height][term->width];
+
+    int cols; // KTerm width in columns
+    int rows; // KTerm height in rows (viewport)
+    int lines_per_page; // DECSLPP (Logical Page Height)
+
+    uint8_t* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
+    // EnhancedTermChar saved_screen[term->height][term->width]; // For DECSEL/DECSED if implemented
+
+    // Enhanced cursor
+    EnhancedCursor cursor;
+    SavedCursorState saved_cursor; // For DECSC/DECRC and other save/restore ops
+    bool saved_cursor_valid;
+
+    // KTerm identification & conformance
+    VTConformance conformance;
+    char device_attributes[128];    // Primary DA string (e.g., CSI c)
+    char secondary_attributes[128]; // Secondary DA string (e.g., CSI > c)
+
+    // Mode management
+    DECModes dec_modes;
+    ANSIModes ansi_modes;
+
+    // Current character attributes for new text
+    ExtendedKTermColor current_fg;
+    ExtendedKTermColor current_bg;
+    ExtendedKTermColor current_ul_color;
+    ExtendedKTermColor current_st_color;
+    uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
+    uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
+    double text_blink_timer;    // Timer for text blink interval
+    int fast_blink_rate;        // Oscillator Slot (Default 30, ~250ms)
+    int slow_blink_rate;        // Oscillator Slot (Default 35, ~500ms)
+    int bg_blink_rate;          // Oscillator Slot (Default 35, ~500ms)
+
+    // Debug Grid
+    bool grid_enabled;
+    RGB_KTermColor grid_color;
+    uint32_t conceal_char_code;
+
+    // Scrolling and margins
+    int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
+    int left_margin, right_margin;  // Defines left/right margins (0-indexed, VT420+)
+
+    // Character handling
+    CharsetState charset;
+    TabStops tab_stops;
+
+    // Enhanced features
+    BracketedPaste bracketed_paste;
+    ProgrammableKeys programmable_keys; // For DECUDK
+    StoredMacros stored_macros;         // For DECDMAC
+    SixelGraphics sixel;
+    KittyGraphics kitty;
+    SoftFont soft_font;                 // For DECDLD
+    TitleManager title;
+
+    // Mouse support state
+    struct {
+        MouseTrackingMode mode; // Mouse tracking mode
+        bool enabled; // Mouse input enabled
+        bool buttons[3]; // Left, middle, right button states
+        int last_x; // Last cell x position
+        int last_y; // Last cell y position
+        int last_pixel_x; // Last pixel x position
+        int last_pixel_y; // Last pixel y position
+        bool focused; // Tracks window focus state for CSI I/O
+        bool focus_tracking; // Enables focus in/out reporting
+        bool sgr_mode; // Enables SGR mouse reporting
+        int cursor_x; // Current mouse cursor X cell position
+        int cursor_y; // Current mouse cursor Y cell position
+    } mouse;
+
+// Helper functions for Ring Buffer Access
+
+    // Missing fields restored
+    KTermInputConfig input;
+    int auto_repeat_rate;
+    int auto_repeat_delay;
+    bool response_enabled;
+    bool enable_wide_chars;
+
+    // Other fields that seem to be required by session logic
+    bool session_open;
+    int active_display;
+    bool echo_enabled;
+    bool input_enabled;
+    bool password_mode;
+    bool raw_mode;
+    bool paused;
+
+    bool printer_available;
+    bool auto_print_enabled;
+    bool printer_controller_enabled;
+    bool locator_enabled;
+
+    struct {
+        bool report_button_down;
+        bool report_button_up;
+        bool report_on_request_only;
+    } locator_events;
+
+    struct {
+        size_t used;
+        size_t total;
+    } macro_space;
+
+    struct {
+        int algorithm;
+        uint32_t last_checksum;
+    } checksum;
+
+    char tertiary_attributes[128];
+    double visual_bell_timer;
+
+    struct {
+        uint32_t codepoint;
+        uint32_t min_codepoint;
+        int bytes_remaining;
+    } utf8;
+
+    struct {
+        int start_x, start_y;
+        int end_x, end_y;
+        bool active;
+        bool dragging;
+    } selection;
+
+    unsigned int last_char;
+    int last_cursor_y;
+    unsigned char printer_buffer[8];
+    int printer_buf_len;
+    void* user_data;
+
+    // Input pipeline specific to session?
+    // Usually on KTerm, but if per-session...
+    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE];
+    int input_pipeline_length;
+    atomic_int pipeline_head;
+    atomic_int pipeline_tail;
+    int pipeline_count;
+    atomic_bool pipeline_overflow;
+    bool xoff_sent;
+
+    // Performance
+    struct {
+        int chars_per_frame;
+        double target_frame_time;
+        double time_budget;
+        double avg_process_time;
+        bool burst_mode;
+        int burst_threshold;
+        bool adaptive_processing;
+    } VTperformance;
+
+    char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE];
+    int response_length;
+
+    VTParseState parse_state;
+    VTParseState saved_parse_state;
+    char escape_buffer[MAX_COMMAND_BUFFER];
+    int escape_pos;
+    int escape_params[MAX_ESCAPE_PARAMS];
+    char escape_separators[MAX_ESCAPE_PARAMS];
+    int param_count;
+    SavedSGRState sgr_stack[10];
+    int sgr_stack_depth;
+
+    struct {
+        int error_count;
+        bool debugging;
+    } status;
+
+    struct {
+        bool conformance_checking;
+        bool vttest_mode;
+        bool debug_sequences;
+        bool log_unsupported;
+    } options;
+
+    kterm_mutex_t lock; // Session Lock (Phase 3)
+    int preferred_supplemental;
+} KTermSession;
+static inline EnhancedTermChar* GetScreenRow(KTermSession* session, int row) {
+    // Access logical row 'row' (0 to HEIGHT-1 or -scrollback) relative to the visible screen top.
+    // We adjust by view_offset (which allows looking back).
+    // view_offset = 0 means looking at active screen.
+    // view_offset > 0 means scrolling up (looking at history).
+
+    // Logical top row of the visible window (including scrollback offset)
+    // screen_head points to the top line of the active screen (logical row 0).
+    // If we view back, we look at screen_head - view_offset.
+
+    int logical_row_idx = session->screen_head + row - session->view_offset;
+
+    // Handle wrap-around
+    int actual_index = logical_row_idx % session->buffer_height;
+    if (actual_index < 0) actual_index += session->buffer_height;
+
+    return &session->screen_buffer[actual_index * session->cols];
+}
+
+static inline EnhancedTermChar* GetScreenCell(KTermSession* session, int y, int x) {
+    if (x < 0 || x >= session->cols) return NULL; // Basic safety
+    return &GetScreenRow(session, y)[x];
+}
+
+static inline EnhancedTermChar* GetActiveScreenRow(KTermSession* session, int row) {
+    // Access logical row 'row' relative to the ACTIVE screen top (ignoring view_offset).
+    // This is used for emulation commands that modify the screen state (insert, delete, scroll).
+
+    int logical_row_idx = session->screen_head + row; // No view_offset subtraction
+
+    // Handle wrap-around
+    int actual_index = logical_row_idx % session->buffer_height;
+    if (actual_index < 0) actual_index += session->buffer_height;
+
+    return &session->screen_buffer[actual_index * session->cols];
+}
+
+static inline EnhancedTermChar* GetActiveScreenCell(KTermSession* session, int y, int x) {
+    if (x < 0 || x >= session->cols) return NULL;
+    return &GetActiveScreenRow(session, y)[x];
+}
+
+typedef struct {
+    // Basic info for blit
+    int x, y, width, height;
+    int z_index;
+    int clip_x, clip_y, clip_mx, clip_my;
+    KTermTexture texture;
+} KittyRenderOp;
+
+typedef struct {
+    GPUCell* cells;
+    size_t cell_count; // width * height
+    size_t cell_capacity;
+
+    KTermPushConstants constants;
+
+    // Sixel Data
+    GPUSixelStrip* sixel_strips;
+    size_t sixel_count;
+    size_t sixel_capacity;
+    uint32_t sixel_palette[256];
+    bool sixel_active;
+    int sixel_width;
+    int sixel_height;
+    int sixel_y_offset;
+
+    // Vector Data
+    GPUVectorLine* vectors;
+    size_t vector_count;
+    size_t vector_capacity;
+
+    // Kitty Graphics
+    KittyRenderOp* kitty_ops;
+    size_t kitty_count;
+    size_t kitty_capacity;
+
+    // Resource Garbage Collection (Deferred Destruction)
+    KTermTexture garbage[8];
+    int garbage_count;
+
+} KTermRenderBuffer;
+
+
+
+    // ReGIS Parser State
+    struct {
+        int state; // 0=Command, 1=Values, 2=Options, 3=Text String
+        int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
+        int screen_min_x, screen_min_y; // Logical screen extents
+        int screen_max_x, screen_max_y;
+        int save_x, save_y; // Saved position (stack depth 1)
+        uint32_t color; // Current RGBA color
+        int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
+        char command; // Current command letter (P, V, C, T, W, etc.)
+        int params[16]; // Numeric parameters for current command
+        bool params_relative[16]; // True if parameter was explicitly signed (+/-)
+        int param_count; // Number of parameters parsed so far
+        bool has_comma; // Was a comma seen? (Parameter separator)
+        bool has_bracket; // Was an opening bracket seen? (Option/Vector list)
+        bool has_paren; // Was an opening parenthesis seen? (Options)
+        char option_command; // Current option command being parsed
+        bool data_pending; // Has new data arrived since last execution?
+
+        // Robust Number Parsing
+        int current_val;
+        int current_sign;
+        bool parsing_val;
+        bool val_is_relative;
+
+        // Text Command
+        char text_buffer[256];
+        int text_pos;
+        char string_terminator;
+
+        // Curve & Polygon support
+        struct { int x, y; } point_buffer[64];
+        int point_count;
+        char curve_mode; // 'C'ircle, 'A'rc, 'B'spline (Interpolated), 'O'pen (Unclosed)
+
+        // Extended Text Attributes
+        float text_size;
+        float text_angle; // Radians
+
+        // Macrographs
+        char* macros[26]; // Storage for @A through @Z
+        bool recording_macro;
+        int macro_index;
+        char* macro_buffer;
+        size_t macro_len;
+        size_t macro_cap;
+        int recursion_depth;
+
+        // Load Alphabet (L) Support
+        struct {
+            char name[16]; // Name of the alphabet (e.g., "A")
+            int current_char; // The character currently being defined (0-255)
+            int pattern_byte_idx; // Current byte index in the character's pattern (0-31)
+            int hex_nibble; // Parsing state for hex pairs (-1 = expecting high nibble)
+        } load;
+    } regis;
+
+    // Retro Visual Effects
+    struct {
+        float curvature;
+        float scanline_intensity;
+    } visual_effects;
+
+    bool vector_clear_request; // Request to clear the persistent vector layer
+
+    // Dynamic Glyph Cache
+    uint16_t* glyph_map; // Map Unicode Codepoint to Atlas Index
+    uint32_t next_atlas_index;
+    uint32_t atlas_clock_hand; // For Clock eviction algorithm
+    unsigned char* font_atlas_pixels; // persistent CPU copy
+    bool font_atlas_dirty;
+    uint32_t atlas_width;
+    uint32_t atlas_height;
+    uint32_t atlas_cols;
+
+    NotificationCallback notification_callback; // Notification callback (OSC 9)
+
+    // TrueType Font Engine
+    struct {
+        bool loaded;
+        unsigned char* file_buffer;
+        stbtt_fontinfo info;
+        float scale;
+        int ascent;
+        int descent;
+        int line_gap;
+        int baseline;
+    } ttf;
+
+    // LRU Cache for Dynamic Atlas
+    uint64_t* glyph_last_used;   // Timestamp (frame count) of last usage
+    uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
+    uint64_t frame_count;        // Logical clock for LRU
+
+    // Font State
+    int char_width;  // Cell Width (Screen)
+    int char_height; // Cell Height (Screen)
+    int font_data_width;  // Glyph Bitmap Width
+    int font_data_height; // Glyph Bitmap Height
+    const void* current_font_data;
+    bool current_font_is_16bit; // True for >8px wide fonts (e.g. VCR)
+    KTermFontMetric font_metrics[256]; // Current font metrics
+
+    PrinterCallback printer_callback; // Callback for Printer Controller Mode
+#ifdef KTERM_ENABLE_GATEWAY
+    GatewayCallback gateway_callback; // Callback for Gateway Protocol
+#endif
+    TitleCallback title_callback;
+    BellCallback bell_callback;
+    SessionResizeCallback session_resize_callback;
+    KTermErrorCallback error_callback;
+    void* error_user_data;
+
+    RGB_KTermColor color_palette[256];
+    uint32_t charset_lut[32][128];
+    EnhancedTermChar* row_scratch_buffer; // Scratch buffer for row rendering
+
+    // Multiplexer Input Interceptor
+    struct {
+        bool active;
+        int prefix_key_code; // Default 'B' (for Ctrl+B)
+    } mux_input;
+
+    kterm_mutex_t lock; // KTerm Lock (Phase 3)
+    kterm_thread_t main_thread_id; // For main thread assertions
+    int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
+    int regis_target_session;
+    int tektronix_target_session;
+
+    double last_resize_time; // [NEW] For resize throttling
+
+    int kitty_target_session;
+    int sixel_target_session;
+
+    KTermOutputSink output_sink;
+    void* output_sink_ctx;
+
+typedef struct KTerm_T {
+    KTermConfig config;
+    KTermSession sessions[MAX_SESSIONS];
+    KTermLayout* layout;
+    int width;
+    int height;
+    int active_session;
+    int pending_session_switch;
+    bool split_screen_active;
+    int split_row;
+    int session_top;
+    int session_bottom;
+    ResponseCallback response_callback;
+    KTermPipeline compute_pipeline;
+    KTermPipeline texture_blit_pipeline;
+    KTermBuffer terminal_buffer;
+    KTermTexture output_texture;
+    KTermTexture font_texture;
+    KTermTexture sixel_texture;
+    KTermTexture dummy_sixel_texture;
+    KTermTexture clear_texture;
+    bool compute_initialized;
+
+    KTermRenderBuffer render_buffers[2];
+    int rb_front;
+    int rb_back;
+    kterm_mutex_t render_lock;
+
+    KTermBuffer vector_buffer;
+    KTermTexture vector_layer_texture;
+    KTermPipeline vector_pipeline;
+    uint32_t vector_count;
+    GPUVectorLine* vector_staging_buffer;
+    size_t vector_capacity;
+
+    KTermBuffer sixel_buffer;
+    KTermBuffer sixel_palette_buffer;
+    KTermPipeline sixel_pipeline;
+
+    struct {
+        int state;
+        int sub_state;
+        int x, y;
+        int holding_x, holding_y;
+        int extra_byte;
+        bool pen_down;
+    } tektronix;
+
+    struct {
+        int state;
+        int x, y;
+        int screen_min_x, screen_min_y;
+        int screen_max_x, screen_max_y;
+        int save_x, save_y;
+        uint32_t color;
+        int write_mode;
+        char command;
+        int params[16];
+        bool params_relative[16];
+        int param_count;
+        bool has_comma;
+        bool has_bracket;
+        bool has_paren;
+        char option_command;
+        bool data_pending;
+        int current_val;
+        int current_sign;
+        bool parsing_val;
+        bool val_is_relative;
+        char text_buffer[256];
+        int text_pos;
+        char string_terminator;
+        struct { int x, y; } point_buffer[64];
+        int point_count;
+        char curve_mode;
+        float text_size;
+        float text_angle;
+        char* macros[26];
+        bool recording_macro;
+        int macro_index;
+        char* macro_buffer;
+        size_t macro_len;
+        size_t macro_cap;
+        int recursion_depth;
+        struct {
+            char name[16];
+            int current_char;
+            int pattern_byte_idx;
+            int hex_nibble;
+        } load;
+    } regis;
+
+    struct {
+        float curvature;
+        float scanline_intensity;
+    } visual_effects;
+    bool vector_clear_request;
+
+    uint16_t* glyph_map;
+    uint32_t next_atlas_index;
+    uint32_t atlas_clock_hand;
+    unsigned char* font_atlas_pixels;
+    bool font_atlas_dirty;
+    uint32_t atlas_width;
+    uint32_t atlas_height;
+    uint32_t atlas_cols;
+
+    NotificationCallback notification_callback;
+
+    struct {
+        bool loaded;
+        unsigned char* file_buffer;
+        stbtt_fontinfo info;
+        float scale;
+        int ascent;
+        int descent;
+        int line_gap;
+        int baseline;
+    } ttf;
+
+    uint64_t* glyph_last_used;
+    uint32_t* atlas_to_codepoint;
+    uint64_t frame_count;
+
+    int char_width;
+    int char_height;
+    int font_data_width;
+    int font_data_height;
+    const void* current_font_data;
+    bool current_font_is_16bit;
+    KTermFontMetric font_metrics[256];
+
+    PrinterCallback printer_callback;
+#ifdef KTERM_ENABLE_GATEWAY
+    GatewayCallback gateway_callback;
+#endif
+    TitleCallback title_callback;
+    BellCallback bell_callback;
+    SessionResizeCallback session_resize_callback;
+    KTermErrorCallback error_callback;
+    void* error_user_data;
+
+    RGB_KTermColor color_palette[256];
+    uint32_t charset_lut[32][128];
+    EnhancedTermChar* row_scratch_buffer;
+
+    struct {
+        bool active;
+        int prefix_key_code;
+    } mux_input;
+
+    int gateway_target_session;
+    int regis_target_session;
+    int tektronix_target_session;
+    int kitty_target_session;
+    int sixel_target_session;
+
+    double last_resize_time;
+
+    KTermOutputSink output_sink;
+    void* output_sink_ctx;
+
+    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE];
+    int input_pipeline_length;
+    atomic_int pipeline_head;
+    atomic_int pipeline_tail;
+    int pipeline_count;
+    atomic_bool pipeline_overflow;
+    bool xoff_sent;
+
+    KTermInputConfig input;
+
+    struct {
+        int chars_per_frame;
+        double target_frame_time;
+        double time_budget;
+        double avg_process_time;
+        bool burst_mode;
+        int burst_threshold;
+        bool adaptive_processing;
+    } VTperformance;
+
+    char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE];
+    int response_length;
+    bool response_enabled;
+
+    VTParseState parse_state;
+    VTParseState saved_parse_state;
+    char escape_buffer[MAX_COMMAND_BUFFER];
+    int escape_pos;
+    int escape_params[MAX_ESCAPE_PARAMS];
+    char escape_separators[MAX_ESCAPE_PARAMS];
+    int param_count;
+    SavedSGRState sgr_stack[10];
+    int sgr_stack_depth;
+
+    struct {
+        int error_count;
+        bool debugging;
+    } status;
+
+    struct {
+        bool conformance_checking;
+        bool vttest_mode;
+        bool debug_sequences;
+        bool log_unsupported;
+    } options;
+
+    bool session_open;
+    int active_display;
+    bool echo_enabled;
+    bool input_enabled;
+    bool password_mode;
+    bool raw_mode;
+    bool paused;
+    bool printer_available;
+    bool auto_print_enabled;
+    bool printer_controller_enabled;
+    struct {
+        bool report_button_down;
+        bool report_button_up;
+        bool report_on_request_only;
+    } locator_events;
+    bool locator_enabled;
+    struct {
+        size_t used;
+        size_t total;
+    } macro_space;
+    struct {
+        int algorithm;
+        uint32_t last_checksum;
+    } checksum;
+    char tertiary_attributes[128];
+    double visual_bell_timer;
+    struct {
+        uint32_t codepoint;
+        uint32_t min_codepoint;
+        int bytes_remaining;
+    } utf8;
+    struct {
+        int start_x, start_y;
+        int end_x, end_y;
+        bool active;
+        bool dragging;
+    } selection;
+    unsigned int last_char;
+    int last_cursor_y;
+    unsigned char printer_buffer[8];
+    int printer_buf_len;
+    void* user_data;
+    int auto_repeat_rate;
+    int auto_repeat_delay;
+    int preferred_supplemental;
+    bool enable_wide_chars;
+
+    kterm_mutex_t lock;
+    kterm_thread_t main_thread_id;
+} KTerm;
+
+// --- Internal Forward Declarations ---
+
+// Internal forward declares
+static unsigned int KTerm_CalculateRectChecksum(KTerm *term, int top, int left, int bottom, int right);
 #define GET_SESSION(term) (&(term)->sessions[(term)->active_session])
 
 // =============================================================================
@@ -4322,7 +4524,6 @@ void ExecuteDECERA(KTerm* term, KTermSession* session) {
         }
         session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
-#endif
 }
 
 
@@ -4374,7 +4575,6 @@ void ExecuteDECSERA(KTerm* term, KTermSession* session) {
         }
         session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
-#endif
 }
 
 void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) {
@@ -15165,3 +15365,6 @@ bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
 #undef KTERM_GATEWAY_IMPLEMENTATION
 #endif
 
+
+#endif // KTERM_IMPLEMENTATION
+#endif // KTERM_H
