@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.3.44]
+*   **Compilation Fixes:** Resolved structural issues in `kterm.h` where `KTermConfig` was not visible to API consumers and internal structs `KTermSession` and `KTerm` were defined too late in the implementation block.
+*   **Struct Restructuring:** Restored missing fields in `KTermSession` (input config, auto-repeat) and `KTerm` (ReGIS state, visual effects) that were accidentally truncated in previous refactors.
+*   **Safety:** Removed conflicting static forward declarations and cleaned up duplicate struct definitions.
+*   **API Visibility:** Moved `KTermConfig` to the public API section of `kterm.h`.
+
 ## [v2.3.43]
 
 ### Mandatory Op Queue & Decoupling
