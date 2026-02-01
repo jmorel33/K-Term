@@ -28,6 +28,7 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
     6.  [4.6. Window and Title Management](#46-window-and-title-management)
     7.  [4.7. Diagnostics and Testing](#47-diagnostics-and-testing)
     8.  [4.8. Scripting API](#48-scripting-api)
+    9.  [4.9. Post-Flush Grid Access](#49-post-flush-grid-access)
 5.  [Configuration Constants](#configuration-constants)
 6.  [Key Data Structures](#key-data-structures)
 7.  [Implementation Model](#implementation-model)
@@ -46,20 +47,18 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**v2.4.0 Core Advancement: Mandatory Op Queue Decoupling**
+All grid mutations are batched atomically via a lock-free queue — direct writes have been eliminated for absolute thread-safety and efficiency. The post-flush grid is pure and directly addressable, ready for external simulation layers, bytecode hooks, or custom extensions.
+
 **New in v2.4.0:** Major Architecture Overhaul, Safety Hardening, and Feature Consolidation.
-This release represents the culmination of the v2.3 development cycle, delivering a fully decoupled, thread-safe, and robust terminal emulation engine.
+This release represents the culmination of the decoupling architecture, delivering a fully thread-safe and robust engine.
 
-*   **Mandatory Op Queue & Thread Safety (Architecture):**
-    *   **Final Decoupling:** All grid mutations (Resize, Scroll, Rect Ops, Text) are now unconditionally processed via the lock-free `KTermOpQueue`. Direct mutation paths have been removed, ensuring absolute thread safety and atomic, batched updates.
-    *   **JIT Text Shaping:** Introduced Just-In-Time text shaping to dynamically group characters (e.g., base + combining marks) for correct rendering while keeping the grid storage simple.
-    *   **Sink Output Pattern:** Added `KTerm_SetOutputSink` for zero-copy, high-throughput data output, bypassing legacy buffering.
-    *   **Layout Engine:** Decoupled multiplexer logic into `kt_layout.h`, separating geometry management from emulation core.
-
-*   **Security & Stability (Hardening):**
-    *   **Parser Hardening:** Complete rewrite of parsing logic using safe `StreamScanner` primitives and a non-destructive `KTermLexer`.
-    *   **Memory Safety:** Introduced safe allocation wrappers (`KTerm_Calloc` with overflow protection, etc.) and eliminated unsafe string functions.
-    *   **Structured Error Reporting:** New API for visibility into internal errors (allocation, parsing, rendering).
-    *   **Robustness:** Fixed critical race conditions via coarse-grained locking and hardened initialization/destruction paths.
+*   **Mandatory Op Queue:** All mutations (text, scroll, rect ops, vertical ops, resize) are unconditionally queued via `KTermOpQueue`. This atomic batching ensures thread safety and removes all direct mutation paths.
+*   **Grid Post-Flush Purity:** The cells array is guaranteed to be consistent and addressable after `KTerm_Update` (flush), allowing for safe external logic (simulation, bytecode, extensions) to read/write the grid.
+*   **JIT Text Shaping:** Dynamic grouping of characters (e.g., base + combining marks) for correct rendering without complex grid storage.
+*   **Sink Output Pattern:** Zero-copy, high-throughput data output via `KTerm_SetOutputSink`.
+*   **Layout Engine:** Multiplexer logic decoupled into `kt_layout.h`, separating geometry management from the emulation core.
+*   **Security & Stability:** Hardened parser using `StreamScanner`, memory safety wrappers, and structured error reporting.
 
 *   **DEC Compliance & Emulation:**
     *   **Full VT500/VT525 Support:** Implemented esoteric features (DECRQTSR, DECRQUPSS, DECARR, DECRQDE), Soft Fonts (DECDLD), and Rectangular Operations (DECCRA, DECFRA, etc.).
@@ -144,6 +143,8 @@ The library processes a stream of input characters (typically from a host applic
 
 ## Key Features
 
+-   **Mandatory Op Queue Decoupling:** Atomic batching for all mutations — thread-safe, efficient, and robust.
+-   **Post-Flush Grid Access:** Direct, safe poking for custom logic after the update cycle.
 -   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
 -   **Multi-Session Support:** Independent terminal sessions (up to 4) with split-screen compositing and dynamic pane layouts (tmux-style).
 -   **Gateway Protocol:** Runtime introspection and configuration via `DCS GATE` sequences (hardened in v2.3.24).
@@ -191,6 +192,7 @@ graph TD
             InputProc["KTerm_ProcessEvents"]
             EventProc["Event Queue Processor"]
             Parser["VT/ANSI/Gateway Parser"]
+            OpQueue["Op Queue Batching"]
             StateMod["State Modification"]
 
             UpdateLoop -->|"For Each Session"| InputProc
@@ -203,7 +205,8 @@ graph TD
             EventProc -->|"Generate Sequences"| Response["Response Callback (To Host)"]
             EventProc -->|"Zero-Copy Data"| OutputSink["Output Sink (Optional)"]
 
-            Parser -->|"Commands"| StateMod
+            Parser -->|"Queue Ops"| OpQueue
+            OpQueue -->|"Flush & Apply"| StateMod
             StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
             StateMod -->|"Update"| Cursor["Cursor State"]
             StateMod -->|"Update"| Sixel["Sixel State"]
@@ -239,14 +242,15 @@ graph TD
 ### 3.1. Main Loop and Initialization
 
 -   `KTerm_Create()`: Allocates and initializes a new `Terminal` instance. It sets up memory for `KTermSession`s and configures GPU resources via the **Situation** backend (Compute Shaders, SSBOs, Textures). It initializes the dynamic glyph cache and default session states.
--   `KTerm_Update(term)`: The main heartbeat. It iterates through active sessions, processing the **Input Pipeline** (host data) and **Event Queue** (local input). It manages timers (cursor blink, visual bell) and flushes the response buffer to the host.
+-   `KTerm_Update(term)`: The main heartbeat. It iterates through active sessions, processing the **Input Pipeline** (host data) and **Event Queue** (local input). Critically, it flushes the **Op Queue**, ensuring all batched grid mutations are applied atomically before rendering. It also manages timers and flushes the response buffer.
 -   `KTerm_Draw(term)`: Executes the rendering pipeline. It updates the SSBO with the current frame's cell data and dispatches Compute Shaders to render text, graphics, and effects.
 
 ### 3.2. Input Pipeline (Host to Terminal)
 
 -   Data from the host (PTY or application) is written to a session-specific input buffer using `KTerm_WriteChar(term, ...)` or `KTerm_WriteCharToSession(term, ...)`.
 -   `KTerm_ProcessEvents(term)` consumes bytes from this buffer.
--   `KTerm_ProcessChar()` acts as the primary state machine dispatcher, routing characters based on the current parsing state (Normal, Escape, CSI, OSC, DCS, Gateway, Sixel, ReGIS, etc.).
+-   `KTerm_ProcessChar()` acts as the primary state machine dispatcher, routing characters based on the current parsing state.
+-   Mutations (e.g., printing text, scrolling) are not applied immediately; instead, they are pushed to the `KTermOpQueue`. This decoupling ensures thread safety and allows for optimization.
 
 ### 3.3. Escape Sequence Parsing
 
@@ -408,6 +412,34 @@ The **Gateway Protocol** enables configuration via `DCS` sequences sent to the t
 
 -   A set of `Script_` functions provide simple wrappers for common operations:
     `KTerm_Script_PutChar(term, ...)`, `KTerm_Script_Print(term, ...)`, `KTerm_KTerm_Script_Printf(term, ...)`, `KTerm_Script_Cls(term)`, `KTerm_Script_SetColor(term, ...)`.
+
+### 4.9. Post-Flush Grid Access
+
+Thanks to the **Mandatory Op Queue**, the grid state is guaranteed to be stable and consistent immediately after `KTerm_Update` returns. This allows external logic (e.g., test harnesses, game simulations, or accessibility tools) to safely read or modify the grid directly.
+
+```c
+// Process inputs and flush operations
+KTerm_Update(term);
+
+// Safe direct access to the grid (post-flush)
+if (term->session) {
+    int x = 10, y = 5;
+    KTermCell* cell = &term->session->cells[y * term->width + x];
+
+    // Read cell
+    if (cell->rune == L'@') {
+        printf("Player found at %d,%d\n", x, y);
+    }
+
+    // Modify cell (thread-safe until next Update)
+    cell->rune = L'#';
+    cell->fg_color = KTERM_COLOR_RED;
+
+    // Mark region as dirty to ensure GPU upload
+    KTermRect rect = {x, y, 1, 1};
+    KTerm_MarkRegionDirty(term, rect);
+}
+```
 
 ## Configuration Constants & Macros
 
