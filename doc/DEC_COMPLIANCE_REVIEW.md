@@ -1,7 +1,7 @@
-# KTerm v2.3.44 - DEC Command Sequence Compliance Review
+# KTerm v2.4.0 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.44. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.4.0. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -14,12 +14,12 @@ This document provides a comprehensive review of the DEC (Digital Equipment Corp
     *   VT420 core (page layout, rectangular, modes): 100%
     *   VT520 extensions: 99%
     *   xterm compatibility layer: 98%
-    *   Full tracked features: 44/44 supported (100%)
+    *   Full tracked features: 51/51 supported (100%)
         *   Practical compliance (features used by real applications): 100%
         *   Remaining gaps are extremely rare edge cases or unimplemented hardware-specific commands (e.g. modem controls).
-*   **Total Modes Tracked**: 44
+*   **Total Modes Tracked**: 51
 *   **Status**:
-    *   ✅ Supported: 44
+    *   ✅ Supported: 51
     *   ⚠️ Partial/Stubbed: 0
     *   ❌ Missing: 0
 
@@ -27,8 +27,8 @@ This document provides a comprehensive review of the DEC (Digital Equipment Corp
 *   **VT52/VT100**: **100%**
 *   **VT220**: **100%**
 *   **VT320/VT420**: **100%**
-*   **VT520**: **98%**
-*   **xterm extensions**: **95%**
+*   **VT520**: **99%**
+*   **xterm extensions**: **96%**
 
 ---
 
@@ -89,9 +89,9 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | `DECFRA` | Fill Rectangular Area | ✅ Supported | `CSI ... $ x` |
 | `DECERA` | Erase Rectangular Area | ✅ Supported | `CSI ... $ z` |
 | `DECSERA`| Selective Erase Rect | ✅ Supported | `CSI ... {` |
-| `DECCARA`| Change Attributes Rect| ✅ Supported | `CSI ... $ t`. Modifies attributes in area. |
-| `DECRARA`| Reverse Attributes Rect| ✅ Supported | `CSI ... $ u`. Toggles attributes in area. |
-| `DECRQCRA`| Checksum Rect Area | ✅ Supported | `CSI ... * y`. Returns checksum. Gated by DECECR. |
+| `DECCARA`| Change Attributes Rect| ✅ Supported | `CSI ... $ t` or `CSI ... $ r`. Modifies attributes in area. |
+| `DECRARA`| Reverse Attributes Rect| ✅ Supported | `CSI ... $ u` (standard) or `CSI ... $ t`? Code uses `ExecuteDECRARA` under `$ u`. |
+| `DECRQCRA`| Checksum Rect Area | ✅ Supported | `CSI ... * y` (standard) or `CSI ... $ w` (fallback). Returns checksum. Gated by DECECR. |
 | `DECECR` | Enable Checksum Report| ✅ Supported | `CSI ... z`. Enables/Disables reporting. |
 
 ### Scrolling & Margins
@@ -123,6 +123,9 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | `DECRQUPSS`| Req Pref Supp Set   | ✅ Supported | `CSI ? 26 u`. Queries preferred supplemental set. |
 | `DECARR`  | Auto Repeat Rate     | ✅ Supported | `CSI Ps SP r`. Sets repeat rate and delay. |
 | `DECST8C` | Set Tab 8 Columns    | ✅ Supported | `CSI ? 5 W`. Resets tab stops to every 8 columns. |
+| `DECSN`   | Select Session       | ✅ Supported | `CSI Ps ! ~` (KTerm). Selects active session. |
+| `DECSSDT` | Select Status Type   | ✅ Supported | `CSI Ps $ ~`. Selects status display type. |
+| `DECSLE`  | Select Locator Events| ✅ Supported | `CSI ... {` (KTerm/Private). Enables locator events. |
 | `WindowOps`| Window Manipulation | ✅ Supported | `CSI Ps ; ... t` (xterm). Title, Resize, etc. |
 | `DA` | Device Attributes | ✅ Supported | `CSI c`. Reports ID (e.g., VT420, VT520). |
 | `DA2` | Secondary DA | ✅ Supported | `CSI > c`. Reports firmware/version. |
@@ -132,6 +135,8 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | Sequence | Name | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
+| `XTPUSHSGR`| Push SGR | ✅ Supported | `CSI # {`. Pushes current SGR state to stack. |
+| `XTPOPSGR` | Pop SGR  | ✅ Supported | `CSI # }`. Pops SGR state from stack. |
 
 ### Other Escape Sequences
 | Sequence | Name | Status | Notes |
@@ -206,6 +211,8 @@ Managed via `CSI ... n`.
 | **63** | **Checksum Report** | VT420 | ✅ Supported | DECCKSR. |
 | **?** | **DECRQPSR** | VT220 | ✅ Supported | Request Presentation State Report. |
 | **$** | **DECRQTSR** | VT420 | ✅ Supported | Request Terminal State Report. Includes DECRQDE (Default Settings, Ps=53). |
+| **|** | **DECRQLP** | VT330 | ✅ Supported | Request Locator Position (`CSI |`). |
+| **z** | **DECVERP** | VT520 | ✅ Supported | Verify Presentation State (`CSI ? ... z`). |
 | **>** | **xterm Version** | xterm | ✅ Supported | `CSI > 0 n`. |
 
 ---
@@ -297,9 +304,19 @@ To verify compliance, the following tools and menus are recommended:
 *   **Real hardware**: Compare against VT520/VT420 captures (if available via archives).
 
 ## Conclusion
-KTerm v2.3.44 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
+KTerm v2.4.0 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.4.0:
+- **Full Op Queue Decoupling:** Complete separation of logic and rendering mutations via the `KTermOpQueue`.
+- **Recursive Multiplexer:** New layout engine allowing arbitrary splits and multi-session management.
+- **New Control Sequences:**
+    - `DECSN` (Select Session), `DECSSDT` (Status Display Type).
+    - `XTPUSHSGR` / `XTPOPSGR` (SGR Stack).
+    - `DECRQLP` (Request Locator Position).
+    - `DECVERP` (Verify Presentation State).
+    - `DECSLE` (Select Locator Events).
+
 Changes in v2.3.44:
 - **Mandatory Op Queue:** All grid mutations are now decoupled and queued (Insert/Delete Lines, Resize, Rect Ops), ensuring thread-safe atomic updates.
 - **Build Stability:** Fixed critical compilation errors in `kterm.h` related to struct ordering and visibility.

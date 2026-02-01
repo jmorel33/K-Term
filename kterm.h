@@ -47,8 +47,8 @@
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
 #define KTERM_VERSION_PATCH 0
-#define KTERM_VERSION_REVISION "pre"
-#define KTERM_VERSION_STRING "2.4.0-pre (full op queue decoupling)"
+#define KTERM_VERSION_REVISION ""
+#define KTERM_VERSION_STRING "2.4.0 (full op queue decoupling)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
