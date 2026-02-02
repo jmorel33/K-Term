@@ -83,7 +83,7 @@ void TestReGISIntegerOverflow(KTerm* term) {
     // 1.23456789 * 10^8
     // Let's use a smaller number that overflows but fits in float exact if possible?
     // Or just accept the float approximation.
-    // Or test `term->regis.params[0]` directly (which is int) if we could access it?
+    // Or test `term->sessions[0].regis.params[0]` directly (which is int) if we could access it?
     // But `ProcessReGISChar` commits to `text_size` (float) on execution.
     // ReGIS Execute happens on ')' or new command.
     // Let's use `assert` with epsilon or check integer param via position P.
@@ -97,14 +97,14 @@ void TestReGISIntegerOverflow(KTerm* term) {
     for (size_t i = 0; i < strlen(p_cmd); i++) KTerm_ProcessChar(term, GET_SESSION(term), p_cmd[i]);
     KTerm_ProcessChar(term, GET_SESSION(term), ']');
 
-    printf("ReGIS X: %d\n", term->regis.x);
+    printf("ReGIS X: %d\n", term->sessions[0].regis.x);
     // 123456789 should be the value.
     // 123456789 is clamped to 799 in ExecuteReGISCommand!
     // "if (target_x > 799) target_x = 799;"
     // So checking X won't verify the parser overflow logic, it verifies the coordinate clamping logic.
     // Both are safety features!
-    if (term->regis.x != 799) {
-        printf("FAILED: ReGIS X expected 799 (clamped), got %d\n", term->regis.x);
+    if (term->sessions[0].regis.x != 799) {
+        printf("FAILED: ReGIS X expected 799 (clamped), got %d\n", term->sessions[0].regis.x);
         exit(1);
     }
 
@@ -124,7 +124,7 @@ void TestReGISMacroOverflow(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), 'A');
 
     // Check we are recording
-    if (!term->regis.recording_macro) {
+    if (!term->sessions[0].regis.recording_macro) {
         printf("FAILED: Not recording macro\n");
         exit(1);
     }
@@ -139,18 +139,18 @@ void TestReGISMacroOverflow(KTerm* term) {
     }
 
     // Check usage
-    if (term->regis.macro_len > limit) {
-        printf("FAILED: Macro buffer exceeded limit: %zu > %zu\n", term->regis.macro_len, limit);
+    if (term->sessions[0].regis.macro_len > limit) {
+        printf("FAILED: Macro buffer exceeded limit: %zu > %zu\n", term->sessions[0].regis.macro_len, limit);
         exit(1);
     }
 
-    if (term->regis.macro_len < limit) {
+    if (term->sessions[0].regis.macro_len < limit) {
          // It might be == limit or limit-1?
          // Logic: if (len >= limit) return;
          // So max len is limit.
     }
 
-    printf("PASS: ReGIS Macro Overflow handled (Size: %zu)\n", term->regis.macro_len);
+    printf("PASS: ReGIS Macro Overflow handled (Size: %zu)\n", term->sessions[0].regis.macro_len);
 }
 
 void TestSoftFontParsing(KTerm* term) {
