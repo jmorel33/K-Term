@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 1
+#define KTERM_VERSION_PATCH 2
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.1 (ReGIS per-session refactor)"
+#define KTERM_VERSION_STRING "2.4.2 (Stabilization & Lifecycle Fixes)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -3002,9 +3002,9 @@ static void KTerm_InitReGIS(KTerm* term, KTermSession* session) {
     session->regis.screen_max_y = REGIS_HEIGHT - 1;
 
     // Clear Vectors (Graphics)
-    // Note: Vector layer is currently shared/global in KTerm_T.
-    // If sessions have independent vector layers, this needs to change.
-    // Assuming for now it's cleared when the active session resets ReGIS.
+    // Note: Vector output is currently global (shared KTerm buffer).
+    // Resetting any session's ReGIS clears the global vector screen.
+    // Future work: Isolate vector output per-session or via viewports.
     term->vector_count = 0;
     term->vector_clear_request = true;
 }
@@ -3060,8 +3060,7 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
     KTermSession* s = NULL;
 
     // If a target session is set, use it; otherwise use active/focused
-    // Note: ReGIS and Tektronix are currently global in KTerm struct, so they are reset globally.
-    // Kitty is per-session.
+    // ReGIS and Kitty are per-session. Tektronix is still global (for now).
 
     if (flags & GRAPHICS_RESET_KITTY && term->kitty_target_session >= 0) {
         s = &term->sessions[term->kitty_target_session];
@@ -3084,6 +3083,7 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
         // if flags is ALL, s is session (fallback).
         // Let's rely on 's' which should be correct for the specific flag if single flag, or session if ALL.
         // However, for ALL, we want to reset ALL sessions? No, just the active one usually.
+        // [v2.4.1] Updated to pass session pointer for isolation.
         KTerm_InitReGIS(term, s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_TEK)) {
@@ -3135,7 +3135,6 @@ bool KTerm_Init(KTerm* term) {
     term->last_resize_time = -1.0; // Allow immediate first resize
 
     KTerm_InitTektronix(term);
-    KTerm_InitReGIS(term);
 
     // Init Multiplexer
     term->mux_input.active = false;
@@ -3162,6 +3161,7 @@ bool KTerm_Init(KTerm* term) {
         KTerm_InitCharacterSets(term, session);
         KTerm_InitInputState(term, session);
         KTerm_InitSixelGraphics(term, session);
+        KTerm_InitReGIS(term, session);
 
         // Initialize Kitty Graphics
         memset(&term->sessions[i].kitty, 0, sizeof(term->sessions[i].kitty));
@@ -13314,7 +13314,9 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     }
 
     // Copy Sixel Data and Update Texture
-    KTermSession* sixel_session = GET_SESSION(term); // Simplified: Assume active session for sixel
+    // Limitation: Sixel currently supports only one active overlay (from the active session or target).
+    // Background sessions with Sixel data will not render it until they become active.
+    KTermSession* sixel_session = GET_SESSION(term); // Default to active session
     int sixel_y_shift = 0;
     if (sixel_session->sixel.active && sixel_session->sixel.strip_count > 0) {
         // Ensure Texture Exists/Matches/Dirty
@@ -13799,7 +13801,7 @@ void KTerm_Cleanup(KTerm* term) {
         GET_SESSION(term)->bracketed_paste.buffer = NULL;
     }
 
-    // Free ReGIS Macros (Per Session)
+    // Free ReGIS Macros and Sixel Data (Per Session)
     for (int s = 0; s < MAX_SESSIONS; s++) {
         for (int i = 0; i < 26; i++) {
             if (term->sessions[s].regis.macros[i]) {
@@ -13810,6 +13812,11 @@ void KTerm_Cleanup(KTerm* term) {
         if (term->sessions[s].regis.macro_buffer) {
             KTerm_Free(term->sessions[s].regis.macro_buffer);
             term->sessions[s].regis.macro_buffer = NULL;
+        }
+        // Free Sixel graphics data buffer
+        if (term->sessions[s].sixel.data) {
+            KTerm_Free(term->sessions[s].sixel.data);
+            term->sessions[s].sixel.data = NULL;
         }
     }
 
