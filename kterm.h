@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 3
+#define KTERM_VERSION_PATCH 4
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.3 (Multi-Session Graphics & Lifecycle)"
+#define KTERM_VERSION_STRING "2.4.4 (Ring Buffer & Extended Queries)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1959,8 +1959,14 @@ typedef struct KTerm_T {
         bool adaptive_processing;
     } VTperformance;
 
-    char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE];
-    int response_length;
+    // Output Ring Buffer
+    struct {
+        char data[KTERM_OUTPUT_PIPELINE_SIZE];
+        atomic_int head;
+        atomic_int tail;
+        atomic_bool overflow;
+    } response_ring;
+    char answerback_message[256];
     bool response_enabled;
 
     VTParseState parse_state;
@@ -6194,10 +6200,38 @@ void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback) {
 
 void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx) {
     KTermSession* session = GET_SESSION(term);
-    // Flush existing data in active session buffer if switching to Sink
-    if (sink && session->response_length > 0) {
-        sink(ctx, session->answerback_buffer, session->response_length);
-        session->response_length = 0;
+    // Flush from ring buffer if switching
+    int head = atomic_load_explicit(&session->response_ring.head, memory_order_acquire);
+    int tail = atomic_load_explicit(&session->response_ring.tail, memory_order_relaxed);
+
+    if (head != tail) {
+        if (sink) {
+            // New Sink
+            if (tail > head) {
+                sink(ctx, &session->response_ring.data[head], tail - head);
+            } else {
+                sink(ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                if (tail > 0) sink(ctx, &session->response_ring.data[0], tail);
+            }
+        } else if (term->output_sink) {
+             // Old Sink (Flush before removing)
+            if (tail > head) {
+                term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], tail - head);
+            } else {
+                term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                if (tail > 0) term->output_sink(term->output_sink_ctx, &session->response_ring.data[0], tail);
+            }
+        } else if (term->response_callback) {
+             // Old Callback (Flush before mode switch if any)
+             // Typically we don't switch from callback to sink dynamically but good to be safe
+             if (tail > head) {
+                term->response_callback(term, &session->response_ring.data[head], tail - head);
+            } else {
+                term->response_callback(term, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                if (tail > 0) term->response_callback(term, &session->response_ring.data[0], tail);
+            }
+        }
+        atomic_store_explicit(&session->response_ring.head, tail, memory_order_release);
     }
     term->output_sink = sink;
     term->output_sink_ctx = ctx;
@@ -7917,48 +7951,35 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
 }
 // Internal Write Primitive (Handles Sink vs Legacy Buffer)
 static void KTerm_WriteInternal(KTerm* term, const char* data, size_t len, bool is_binary) {
-    if (term->output_sink) {
-        // Zero-copy direct sink output
-        term->output_sink(term->output_sink_ctx, data, len);
-    } else {
-        // Legacy Buffering Logic
-        KTermSession* session = GET_SESSION(term);
-        if (!session->response_enabled) return;
+    (void)is_binary;
+    // Ring Buffering Logic (Always buffer to prevent drops/blocking)
+    KTermSession* session = GET_SESSION(term);
+    if (!session->response_enabled) return;
 
-        size_t capacity = sizeof(session->answerback_buffer);
-        // Reserve 1 byte for null terminator if not binary
-        size_t effective_capacity = is_binary ? capacity : capacity - 1;
+    int tail = atomic_load_explicit(&session->response_ring.tail, memory_order_relaxed);
+    int head = atomic_load_explicit(&session->response_ring.head, memory_order_acquire);
 
-        if (session->response_length + len > effective_capacity) {
-            // Try to flush if we have a callback and data
-            if (term->response_callback && session->response_length > 0) {
-                term->response_callback(term, session->answerback_buffer, session->response_length);
-                session->response_length = 0;
-            }
+    // Calculate free space
+    int free_space;
+    if (head <= tail) free_space = KTERM_OUTPUT_PIPELINE_SIZE - 1 - (tail - head);
+    else free_space = head - tail - 1;
 
-            // Re-check space after potential flush
-            if (session->response_length + len > effective_capacity) {
-                // Buffer is full or data is too big to fit even after flush
-                // We must truncate 'len' to fit remaining space
-                size_t available = effective_capacity - session->response_length;
+    if ((int)len > free_space) {
+        atomic_store_explicit(&session->response_ring.overflow, true, memory_order_relaxed);
+        len = free_space;
+    }
 
-                if (len > available) {
-                    if (session->options.debug_sequences) {
-                        fprintf(stderr, "KTerm_WriteInternal: Response buffer full, dropping %zu bytes\n", len - available);
-                    }
-                    len = available;
-                }
-            }
+    if (len > 0) {
+        int chunk1 = KTERM_OUTPUT_PIPELINE_SIZE - tail;
+        if (chunk1 > (int)len) chunk1 = (int)len;
+        memcpy(&session->response_ring.data[tail], data, chunk1);
+
+        if (chunk1 < (int)len) {
+            memcpy(&session->response_ring.data[0], &data[chunk1], len - chunk1);
         }
 
-        if (len > 0) {
-            memcpy(session->answerback_buffer + session->response_length, data, len);
-            session->response_length += len;
-
-            if (!is_binary) {
-                session->answerback_buffer[session->response_length] = '\0';
-            }
-        }
+        tail = (tail + len) % KTERM_OUTPUT_PIPELINE_SIZE;
+        atomic_store_explicit(&session->response_ring.tail, tail, memory_order_release);
     }
 }
 
@@ -7995,6 +8016,12 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                 KTerm_QueueResponse(term, response);
                 break;
             }
+            case 98: { // Error Reporting (Non-private extension)
+                 char response[32];
+                 snprintf(response, sizeof(response), "\x1B[?98;%dn", session->status.error_count);
+                 KTerm_QueueResponse(term, response);
+                 break;
+            }
             default:
                 if (session->options.log_unsupported) {
                     snprintf(session->conformance.compliance.last_unsupported,
@@ -8006,7 +8033,28 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
         }
     } else {
         switch (command) {
+            case 10: { // Custom: Graphics Capabilities
+                int mask = 0;
+                if (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) mask |= 1;
+                if (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS) mask |= 2;
+                mask |= 4; // Tektronix (Always supported)
+                mask |= 8; // Kitty (Always supported)
+                if (session->conformance.features & KTERM_FEATURE_TRUE_COLOR) mask |= 16;
+
+                char response[32];
+                snprintf(response, sizeof(response), "\x1B[?10;%dn", mask);
+                KTerm_QueueResponse(term, response);
+                break;
+            }
             case 15: KTerm_QueueResponse(term, session->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 20: { // Custom: Macro Status
+                // Report: ? 20 ; <macros_defined> ; <bytes_free> n
+                size_t free_bytes = session->macro_space.total - session->macro_space.used;
+                char response[64];
+                snprintf(response, sizeof(response), "\x1B[?20;%zu;%zun", session->stored_macros.count, free_bytes);
+                KTerm_QueueResponse(term, response);
+                break;
+            }
             case 21: { // DECRS - Report Session Status
                 // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
                 // VT520 spec says DECRS reports on sessions.
@@ -8015,11 +8063,6 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                      if (session->options.debug_sequences) {
                          KTerm_LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
                      }
-                     // Optionally, we could report just session 1 as active, but typically this DSR is for multi-session terminals.
-                     // Let's assume we proceed if we want to be nice to single-session queries, but strictly speaking it's a multi-session feature.
-                     // However, "we need the number of sessions to be accurate" implies we should report what we have.
-                     // If mode is disabled, maybe we shouldn't report? The prompt implies accuracy.
-                     // Let's rely on the flag.
                      break;
                 }
 
@@ -8055,6 +8098,17 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
             case 27: // Locator Type (DECREPTPARM)
                 KTerm_QueueResponse(term, "\x1B[?27;0n"); // No locator
                 break;
+            case 30: { // Custom: Session State
+                // Report: ? 30 ; <active_id> ; <max_sessions> ; <scroll_top> ; <scroll_bottom> n
+                char response[64];
+                snprintf(response, sizeof(response), "\x1B[?30;%d;%d;%d;%dn",
+                         term->active_session + 1,
+                         session->conformance.max_session_count,
+                         session->scroll_top + 1,
+                         session->scroll_bottom + 1);
+                KTerm_QueueResponse(term, response);
+                break;
+            }
             case 53: KTerm_QueueResponse(term, session->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
             case 55: KTerm_QueueResponse(term, "\x1B[?57;0n"); break;
             case 56: KTerm_QueueResponse(term, "\x1B[?56;0n"); break;
@@ -8080,6 +8134,12 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                 snprintf(response, sizeof(response), "\x1B[?12;%dn", term->active_session + 1);
                 KTerm_QueueResponse(term, response);
                 break;
+            }
+            case 98: { // Error Reporting (Private extension)
+                 char response[32];
+                 snprintf(response, sizeof(response), "\x1B[?98;%dn", session->status.error_count);
+                 KTerm_QueueResponse(term, response);
+                 break;
             }
             default:
                 if (session->options.log_unsupported) {
@@ -10022,7 +10082,12 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
         if (session->stored_macros.count >= session->stored_macros.capacity) {
             size_t new_cap = (session->stored_macros.capacity == 0) ? 16 : session->stored_macros.capacity * 2;
             StoredMacro* new_arr = KTerm_Realloc(session->stored_macros.macros, new_cap * sizeof(StoredMacro));
-            if (!new_arr) return;
+            if (!new_arr) {
+                char msg[32];
+                snprintf(msg, sizeof(msg), "\x1BP>%d;2\x1B\\", pid); // Alloc fail
+                KTerm_QueueResponse(term, msg);
+                return;
+            }
             session->stored_macros.macros = new_arr;
             session->stored_macros.capacity = new_cap;
         }
@@ -10031,7 +10096,26 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
         macro->content = NULL;
     }
 
-    if (macro->content) KTerm_Free(macro->content);
+    if (macro->content) {
+        if (session->stored_macros.total_memory_used >= macro->length)
+            session->stored_macros.total_memory_used -= macro->length;
+        KTerm_Free(macro->content);
+    }
+
+    // Check Limits (e.g. 4KB default per session if not configured)
+    size_t limit = session->macro_space.total > 0 ? session->macro_space.total : 4096;
+    size_t new_len = (penc == 1) ? data_len / 2 : data_len;
+
+    if (session->stored_macros.total_memory_used + new_len > limit) {
+        // Error: Full
+        char msg[32];
+        snprintf(msg, sizeof(msg), "\x1BP>%d;1\x1B\\", pid); // 1 = Full
+        KTerm_QueueResponse(term, msg);
+        macro->content = NULL;
+        macro->length = 0;
+        return;
+    }
+
     if (penc == 1) {
         size_t decoded_len = data_len / 2;
         macro->content = KTerm_Malloc(decoded_len + 1);
@@ -10048,7 +10132,19 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
         macro->content = strdup(data_start);
         macro->length = data_len;
     }
-    macro->encoding = penc;
+
+    if (macro->content) {
+        session->stored_macros.total_memory_used += macro->length;
+        macro->encoding = penc; // Store encoding type
+        char msg[32];
+        snprintf(msg, sizeof(msg), "\x1BP>%d;0\x1B\\", pid); // 0 = OK
+        KTerm_QueueResponse(term, msg);
+    } else {
+        // Error: Alloc fail
+        char msg[32];
+        snprintf(msg, sizeof(msg), "\x1BP>%d;2\x1B\\", pid); // 2 = Alloc Fail
+        KTerm_QueueResponse(term, msg);
+    }
     (void)pst;
 }
 
@@ -12651,9 +12747,39 @@ void KTerm_Update(KTerm* term) {
         }
 
         // Flush responses
-        if (session->response_length > 0 && term->response_callback) {
-            term->response_callback(term, session->answerback_buffer, session->response_length);
-            session->response_length = 0;
+        int head = atomic_load_explicit(&session->response_ring.head, memory_order_relaxed);
+        int tail = atomic_load_explicit(&session->response_ring.tail, memory_order_acquire);
+
+        if (head != tail) {
+            if (term->output_sink) {
+                // Determine contiguous chunk
+                if (tail > head) {
+                    term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], tail - head);
+                    head = tail;
+                } else {
+                    // Wrapped
+                    term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                    if (tail > 0) {
+                        term->output_sink(term->output_sink_ctx, &session->response_ring.data[0], tail);
+                    }
+                    head = tail;
+                }
+                atomic_store_explicit(&session->response_ring.head, head, memory_order_release);
+            } else if (term->response_callback) {
+                // Determine contiguous chunk
+                if (tail > head) {
+                    term->response_callback(term, &session->response_ring.data[head], tail - head);
+                    head = tail;
+                } else {
+                    // Wrapped
+                    term->response_callback(term, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                    if (tail > 0) {
+                        term->response_callback(term, &session->response_ring.data[0], tail);
+                    }
+                    head = tail;
+                }
+                atomic_store_explicit(&session->response_ring.head, head, memory_order_release);
+            }
         }
     }
 

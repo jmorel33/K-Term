@@ -1061,6 +1061,26 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
         }
         KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "STATE") == 0) {
+        char response[1024];
+        // Packed State: CURSOR:x,y|SCROLL:t,b|MODES:dec,ansi|ATTR:fg,bg,flags
+        int cx = target_session->cursor.x + 1;
+        int cy = target_session->cursor.y + 1;
+        int st = target_session->scroll_top + 1;
+        int sb = target_session->scroll_bottom + 1;
+
+        // Use unsigned int for modes to avoid warning format specifiers
+        unsigned int dec_m = target_session->dec_modes;
+        int ansi_m = target_session->ansi_modes.insert_replace ? 1 : 0;
+        int fg = target_session->current_fg.value.index; // assuming indexed for simplicity in report, real state might be RGB
+        int bg = target_session->current_bg.value.index;
+        unsigned int attr = target_session->current_attributes;
+
+        snprintf(response, sizeof(response),
+            "\x1BPGATE;KTERM;%s;REPORT;STATE=CURSOR:%d,%d|SCROLL:%d,%d|MODES:%u,%d|ATTR:%d,%d,%u\x1B\\",
+            id, cx, cy, st, sb, dec_m, ansi_m, fg, bg, attr);
+
+        KTerm_QueueResponse(term, response);
     }
 }
 
