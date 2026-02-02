@@ -217,9 +217,10 @@ graph TD
             OpQueue -->|"Flush & Apply"| StateMod
             StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
             StateMod -->|"Update"| Cursor["Cursor State"]
-            StateMod -->|"Update"| Sixel["Sixel State"]
+            StateMod -->|"Update"| Sixel["Sixel State (Per-Session)"]
             StateMod -->|"Update"| ReGIS["ReGIS State (Per-Session)"]
-            StateMod -->|"Update"| Kitty["Kitty Graphics State"]
+            StateMod -->|"Update"| Tektronix["Tektronix State (Per-Session)"]
+            StateMod -->|"Update"| Kitty["Kitty Graphics State (Per-Session)"]
         end
 
         subgraph Rendering_Pipeline ["GPU Rendering Pipeline"]
