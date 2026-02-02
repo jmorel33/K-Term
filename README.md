@@ -53,7 +53,6 @@ Moved ReGIS graphics state (cursor position, macros, colors) from the global `KT
 **v2.4.0 Core Advancement: Mandatory Op Queue Decoupling**
 All grid mutations are batched atomically via a lock-free queue — direct writes have been eliminated for absolute thread-safety and efficiency. The post-flush grid is pure and directly addressable, ready for external simulation layers, bytecode hooks, or custom extensions.
 
-**New in v2.4.1:** Per-Session ReGIS State.
 **New in v2.4.0:** Major Architecture Overhaul, Safety Hardening, and Feature Consolidation.
 This release represents the culmination of the decoupling architecture, delivering a fully thread-safe and robust engine.
 
