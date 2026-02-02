@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.0
+# K-Term Emulation Library v2.4.1
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -47,9 +47,13 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**v2.4.1 Core Advancement: ReGIS Per-Session Architecture**
+Moved ReGIS graphics state (cursor position, macros, colors) from the global `KTerm` struct to the per-session `KTermSession` struct. This ensures that in multi-session environments (e.g., split panes or background sessions), each terminal session maintains its own independent graphics context.
+
 **v2.4.0 Core Advancement: Mandatory Op Queue Decoupling**
 All grid mutations are batched atomically via a lock-free queue — direct writes have been eliminated for absolute thread-safety and efficiency. The post-flush grid is pure and directly addressable, ready for external simulation layers, bytecode hooks, or custom extensions.
 
+**New in v2.4.1:** Per-Session ReGIS State.
 **New in v2.4.0:** Major Architecture Overhaul, Safety Hardening, and Feature Consolidation.
 This release represents the culmination of the decoupling architecture, delivering a fully thread-safe and robust engine.
 
@@ -210,6 +214,7 @@ graph TD
             StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
             StateMod -->|"Update"| Cursor["Cursor State"]
             StateMod -->|"Update"| Sixel["Sixel State"]
+            StateMod -->|"Update"| ReGIS["ReGIS State (Per-Session)"]
             StateMod -->|"Update"| Kitty["Kitty Graphics State"]
         end
 

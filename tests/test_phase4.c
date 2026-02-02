@@ -56,16 +56,16 @@ int main() {
 
     // Verify macro stored (Access internal state directly for test)
     // Note: regis struct is in KTerm (shared)
-    if (term->regis.macros[0] == NULL) {
+    if (term->sessions[0].regis.macros[0] == NULL) {
         printf("FAILURE: Macro A not defined in Session 0\n");
         return 1;
     }
-    printf("Macro A defined: %s\n", term->regis.macros[0]);
+    printf("Macro A defined: %s\n", term->sessions[0].regis.macros[0]);
 
     // Switch to Session 1
     KTerm_SetActiveSession(term, 1);
     // Try to access macro
-    if (term->regis.macros[0] == NULL) {
+    if (term->sessions[0].regis.macros[0] == NULL) {
         printf("Observation: Macro A NOT visible in Session 1 (Isolated)\n");
     } else {
         printf("Observation: Macro A visible in Session 1 (Shared)\n");

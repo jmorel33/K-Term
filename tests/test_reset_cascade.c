@@ -18,18 +18,18 @@ int main() {
     printf("Test 1: RIS (ESC c)\n");
     // Set some graphics state
     session->kitty.image_count = 5;
-    term->regis.state = 1;
+    term->sessions[0].regis.state = 1;
     term->tektronix.state = 1;
 
     // Send RIS
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, 'c');
 
-    if (session->kitty.image_count == 0 && term->regis.state == 0 && term->tektronix.state == 0) {
+    if (session->kitty.image_count == 0 && term->sessions[0].regis.state == 0 && term->tektronix.state == 0) {
         printf("PASS: RIS cleared graphics\n");
     } else {
         printf("FAIL: RIS failed to clear graphics (Kitty=%d, ReGIS=%d, Tek=%d)\n",
-               session->kitty.image_count, term->regis.state, term->tektronix.state);
+               session->kitty.image_count, term->sessions[0].regis.state, term->tektronix.state);
         return 1;
     }
 
@@ -37,7 +37,7 @@ int main() {
     printf("Test 2: DECSTR (CSI ! p)\n");
     // Set some graphics state
     session->kitty.image_count = 3;
-    term->regis.state = 2;
+    term->sessions[0].regis.state = 2;
     term->tektronix.state = 2;
 
     // Send DECSTR: ESC [ ! p
@@ -46,11 +46,11 @@ int main() {
     KTerm_ProcessChar(term, session, '!');
     KTerm_ProcessChar(term, session, 'p');
 
-    if (session->kitty.image_count == 0 && term->regis.state == 0 && term->tektronix.state == 0) {
+    if (session->kitty.image_count == 0 && term->sessions[0].regis.state == 0 && term->tektronix.state == 0) {
         printf("PASS: DECSTR cleared graphics\n");
     } else {
         printf("FAIL: DECSTR failed to clear graphics (Kitty=%d, ReGIS=%d, Tek=%d)\n",
-               session->kitty.image_count, term->regis.state, term->tektronix.state);
+               session->kitty.image_count, term->sessions[0].regis.state, term->tektronix.state);
         return 1;
     }
 

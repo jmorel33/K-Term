@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 0
+#define KTERM_VERSION_PATCH 1
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.0 (full op queue decoupling)"
+#define KTERM_VERSION_STRING "2.4.1 (ReGIS per-session refactor)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1478,6 +1478,62 @@ typedef struct {
 #include <time.h>
 
 // --- Internal Struct Definitions (Early) ---
+typedef struct {
+    int state; // 0=Command, 1=Values, 2=Options, 3=Text String
+    int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
+    int screen_min_x, screen_min_y; // Logical screen extents
+    int screen_max_x, screen_max_y;
+    int save_x, save_y; // Saved position (stack depth 1)
+    uint32_t color; // Current RGBA color
+    int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
+    char command; // Current command letter (P, V, C, T, W, etc.)
+    int params[16]; // Numeric parameters for current command
+    bool params_relative[16]; // True if parameter was explicitly signed (+/-)
+    int param_count; // Number of parameters parsed so far
+    bool has_comma; // Was a comma seen? (Parameter separator)
+    bool has_bracket; // Was an opening bracket seen? (Option/Vector list)
+    bool has_paren; // Was an opening parenthesis seen? (Options)
+    char option_command; // Current option command being parsed
+    bool data_pending; // Has new data arrived since last execution?
+
+    // Robust Number Parsing
+    int current_val;
+    int current_sign;
+    bool parsing_val;
+    bool val_is_relative;
+
+    // Text Command
+    char text_buffer[256];
+    int text_pos;
+    char string_terminator;
+
+    // Curve & Polygon support
+    struct { int x, y; } point_buffer[64];
+    int point_count;
+    char curve_mode; // 'C'ircle, 'A'rc, 'B'spline (Interpolated), 'O'pen (Unclosed)
+
+    // Extended Text Attributes
+    float text_size;
+    float text_angle; // Radians
+
+    // Macrographs
+    char* macros[26]; // Storage for @A through @Z
+    bool recording_macro;
+    int macro_index;
+    char* macro_buffer;
+    size_t macro_len;
+    size_t macro_cap;
+    int recursion_depth;
+
+    // Load Alphabet (L) Support
+    struct {
+        char name[16]; // Name of the alphabet (e.g., "A")
+        int current_char; // The character currently being defined (0-255)
+        int pattern_byte_idx; // Current byte index in the character's pattern (0-31)
+        int hex_nibble; // Parsing state for hex pairs (-1 = expecting high nibble)
+    } load;
+} KTermReGIS;
+
 typedef struct KTermSession_T {
 
     // Operation Queue for Grid Mutations
@@ -1550,6 +1606,7 @@ typedef struct KTermSession_T {
     ProgrammableKeys programmable_keys; // For DECUDK
     StoredMacros stored_macros;         // For DECDMAC
     SixelGraphics sixel;
+    KTermReGIS regis;
     KittyGraphics kitty;
     SoftFont soft_font;                 // For DECDLD
     TitleManager title;
@@ -1763,145 +1820,6 @@ typedef struct {
 
 } KTermRenderBuffer;
 
-
-
-    // ReGIS Parser State
-    struct {
-        int state; // 0=Command, 1=Values, 2=Options, 3=Text String
-        int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
-        int screen_min_x, screen_min_y; // Logical screen extents
-        int screen_max_x, screen_max_y;
-        int save_x, save_y; // Saved position (stack depth 1)
-        uint32_t color; // Current RGBA color
-        int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
-        char command; // Current command letter (P, V, C, T, W, etc.)
-        int params[16]; // Numeric parameters for current command
-        bool params_relative[16]; // True if parameter was explicitly signed (+/-)
-        int param_count; // Number of parameters parsed so far
-        bool has_comma; // Was a comma seen? (Parameter separator)
-        bool has_bracket; // Was an opening bracket seen? (Option/Vector list)
-        bool has_paren; // Was an opening parenthesis seen? (Options)
-        char option_command; // Current option command being parsed
-        bool data_pending; // Has new data arrived since last execution?
-
-        // Robust Number Parsing
-        int current_val;
-        int current_sign;
-        bool parsing_val;
-        bool val_is_relative;
-
-        // Text Command
-        char text_buffer[256];
-        int text_pos;
-        char string_terminator;
-
-        // Curve & Polygon support
-        struct { int x, y; } point_buffer[64];
-        int point_count;
-        char curve_mode; // 'C'ircle, 'A'rc, 'B'spline (Interpolated), 'O'pen (Unclosed)
-
-        // Extended Text Attributes
-        float text_size;
-        float text_angle; // Radians
-
-        // Macrographs
-        char* macros[26]; // Storage for @A through @Z
-        bool recording_macro;
-        int macro_index;
-        char* macro_buffer;
-        size_t macro_len;
-        size_t macro_cap;
-        int recursion_depth;
-
-        // Load Alphabet (L) Support
-        struct {
-            char name[16]; // Name of the alphabet (e.g., "A")
-            int current_char; // The character currently being defined (0-255)
-            int pattern_byte_idx; // Current byte index in the character's pattern (0-31)
-            int hex_nibble; // Parsing state for hex pairs (-1 = expecting high nibble)
-        } load;
-    } regis;
-
-    // Retro Visual Effects
-    struct {
-        float curvature;
-        float scanline_intensity;
-    } visual_effects;
-
-    bool vector_clear_request; // Request to clear the persistent vector layer
-
-    // Dynamic Glyph Cache
-    uint16_t* glyph_map; // Map Unicode Codepoint to Atlas Index
-    uint32_t next_atlas_index;
-    uint32_t atlas_clock_hand; // For Clock eviction algorithm
-    unsigned char* font_atlas_pixels; // persistent CPU copy
-    bool font_atlas_dirty;
-    uint32_t atlas_width;
-    uint32_t atlas_height;
-    uint32_t atlas_cols;
-
-    NotificationCallback notification_callback; // Notification callback (OSC 9)
-
-    // TrueType Font Engine
-    struct {
-        bool loaded;
-        unsigned char* file_buffer;
-        stbtt_fontinfo info;
-        float scale;
-        int ascent;
-        int descent;
-        int line_gap;
-        int baseline;
-    } ttf;
-
-    // LRU Cache for Dynamic Atlas
-    uint64_t* glyph_last_used;   // Timestamp (frame count) of last usage
-    uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
-    uint64_t frame_count;        // Logical clock for LRU
-
-    // Font State
-    int char_width;  // Cell Width (Screen)
-    int char_height; // Cell Height (Screen)
-    int font_data_width;  // Glyph Bitmap Width
-    int font_data_height; // Glyph Bitmap Height
-    const void* current_font_data;
-    bool current_font_is_16bit; // True for >8px wide fonts (e.g. VCR)
-    KTermFontMetric font_metrics[256]; // Current font metrics
-
-    PrinterCallback printer_callback; // Callback for Printer Controller Mode
-#ifdef KTERM_ENABLE_GATEWAY
-    GatewayCallback gateway_callback; // Callback for Gateway Protocol
-#endif
-    TitleCallback title_callback;
-    BellCallback bell_callback;
-    SessionResizeCallback session_resize_callback;
-    KTermErrorCallback error_callback;
-    void* error_user_data;
-
-    RGB_KTermColor color_palette[256];
-    uint32_t charset_lut[32][128];
-    EnhancedTermChar* row_scratch_buffer; // Scratch buffer for row rendering
-
-    // Multiplexer Input Interceptor
-    struct {
-        bool active;
-        int prefix_key_code; // Default 'B' (for Ctrl+B)
-    } mux_input;
-
-    kterm_mutex_t lock; // KTerm Lock (Phase 3)
-    kterm_thread_t main_thread_id; // For main thread assertions
-    int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
-    int regis_target_session;
-    int tektronix_target_session;
-
-    double last_resize_time; // [NEW] For resize throttling
-
-    int kitty_target_session;
-    int sixel_target_session;
-
-    KTermOutputSink output_sink;
-    void* output_sink_ctx;
-
 typedef struct KTerm_T {
     KTermConfig config;
     KTermSession sessions[MAX_SESSIONS];
@@ -1949,50 +1867,6 @@ typedef struct KTerm_T {
         int extra_byte;
         bool pen_down;
     } tektronix;
-
-    struct {
-        int state;
-        int x, y;
-        int screen_min_x, screen_min_y;
-        int screen_max_x, screen_max_y;
-        int save_x, save_y;
-        uint32_t color;
-        int write_mode;
-        char command;
-        int params[16];
-        bool params_relative[16];
-        int param_count;
-        bool has_comma;
-        bool has_bracket;
-        bool has_paren;
-        char option_command;
-        bool data_pending;
-        int current_val;
-        int current_sign;
-        bool parsing_val;
-        bool val_is_relative;
-        char text_buffer[256];
-        int text_pos;
-        char string_terminator;
-        struct { int x, y; } point_buffer[64];
-        int point_count;
-        char curve_mode;
-        float text_size;
-        float text_angle;
-        char* macros[26];
-        bool recording_macro;
-        int macro_index;
-        char* macro_buffer;
-        size_t macro_len;
-        size_t macro_cap;
-        int recursion_depth;
-        struct {
-            char name[16];
-            int current_char;
-            int pattern_byte_idx;
-            int hex_nibble;
-        } load;
-    } regis;
 
     struct {
         float curvature;
@@ -3119,14 +2993,18 @@ static void KTerm_CleanupRenderBuffers(KTerm* term) {
     }
 }
 
-static void KTerm_InitReGIS(KTerm* term) {
-    memset(&term->regis, 0, sizeof(term->regis));
-    term->regis.screen_min_x = 0;
-    term->regis.screen_min_y = 0;
-    term->regis.screen_max_x = REGIS_WIDTH - 1;
-    term->regis.screen_max_y = REGIS_HEIGHT - 1;
+static void KTerm_InitReGIS(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    memset(&session->regis, 0, sizeof(session->regis));
+    session->regis.screen_min_x = 0;
+    session->regis.screen_min_y = 0;
+    session->regis.screen_max_x = REGIS_WIDTH - 1;
+    session->regis.screen_max_y = REGIS_HEIGHT - 1;
 
     // Clear Vectors (Graphics)
+    // Note: Vector layer is currently shared/global in KTerm_T.
+    // If sessions have independent vector layers, this needs to change.
+    // Assuming for now it's cleared when the active session resets ReGIS.
     term->vector_count = 0;
     term->vector_clear_request = true;
 }
@@ -3198,7 +3076,15 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
         KTerm_InitKitty(s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_REGIS)) {
-        KTerm_InitReGIS(term);
+        // If regis_target_session is set, use it, otherwise use 's' (which is session or target)
+        // logic above sets 's' based on flags.
+        // But logic above is mutually exclusive?
+        // if flags has KITTY, s is kitty target.
+        // if flags has REGIS, s is regis target (elif).
+        // if flags is ALL, s is session (fallback).
+        // Let's rely on 's' which should be correct for the specific flag if single flag, or session if ALL.
+        // However, for ALL, we want to reset ALL sessions? No, just the active one usually.
+        KTerm_InitReGIS(term, s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_TEK)) {
         KTerm_InitTektronix(term);
@@ -4661,15 +4547,15 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
         if (ch == 'p' && (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS)) {
             // ReGIS (Remote Graphics Instruction Set)
             // Initialize ReGIS state
-            term->regis.state = 0; // Expecting command
-            term->regis.command = 0;
-            term->regis.x = 0;
-            term->regis.y = 0;
-            term->regis.color = 0xFFFFFFFF; // White
-            term->regis.write_mode = 0; // Default to Overlay/Additive
-            term->regis.param_count = 0;
-            term->regis.has_comma = false;
-            term->regis.has_bracket = false;
+            session->regis.state = 0; // Expecting command
+            session->regis.command = 0;
+            session->regis.x = 0;
+            session->regis.y = 0;
+            session->regis.color = 0xFFFFFFFF; // White
+            session->regis.write_mode = 0; // Default to Overlay/Additive
+            session->regis.param_count = 0;
+            session->regis.has_comma = false;
+            session->regis.has_bracket = false;
 
             session->parse_state = PARSE_REGIS;
             session->escape_pos = 0;
@@ -10403,13 +10289,13 @@ void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char 
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 }
 
-static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
+static void ReGIS_DrawLine(KTerm* term, KTermSession* session, int x0, int y0, int x1, int y1) {
     if (term->vector_count < term->vector_capacity) {
         GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
         // Aspect Ratio Correction
-        float logical_w = (float)(term->regis.screen_max_x - term->regis.screen_min_x + 1);
-        float logical_h = (float)(term->regis.screen_max_y - term->regis.screen_min_y + 1);
+        float logical_w = (float)(session->regis.screen_max_x - session->regis.screen_min_x + 1);
+        float logical_h = (float)(session->regis.screen_max_y - session->regis.screen_min_y + 1);
         if (logical_w <= 0) logical_w = REGIS_WIDTH;
         if (logical_h <= 0) logical_h = REGIS_HEIGHT;
 
@@ -10424,10 +10310,10 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         float x_margin = (screen_w - target_w) / 2.0f;
         float y_margin = (screen_h - target_h) / 2.0f;
 
-        float u0_px = x_margin + ((float)(x0 - term->regis.screen_min_x) * scale_factor);
-        float v0_px = y_margin + ((float)(y0 - term->regis.screen_min_y) * scale_factor);
-        float u1_px = x_margin + ((float)(x1 - term->regis.screen_min_x) * scale_factor);
-        float v1_px = y_margin + ((float)(y1 - term->regis.screen_min_y) * scale_factor);
+        float u0_px = x_margin + ((float)(x0 - session->regis.screen_min_x) * scale_factor);
+        float v0_px = y_margin + ((float)(y0 - session->regis.screen_min_y) * scale_factor);
+        float u1_px = x_margin + ((float)(x1 - session->regis.screen_min_x) * scale_factor);
+        float v1_px = y_margin + ((float)(y1 - session->regis.screen_min_y) * scale_factor);
 
         // Y is inverted in ReGIS (0=Top) vs OpenGL UV (0=Bottom usually)
         line->x0 = u0_px / screen_w;
@@ -10435,9 +10321,9 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         line->x1 = u1_px / screen_w;
         line->y1 = 1.0f - (v1_px / screen_h);
 
-        line->color = term->regis.color;
+        line->color = session->regis.color;
         line->intensity = 1.0f;
-        line->mode = term->regis.write_mode;
+        line->mode = session->regis.write_mode;
         term->vector_count++;
     }
 }
@@ -10446,30 +10332,30 @@ static int ReGIS_CompareInt(const void* a, const void* b) {
     return (*(int*)a - *(int*)b);
 }
 
-static void ReGIS_FillPolygon(KTerm* term) {
-    if (term->regis.point_count < 3) {
-        term->regis.point_count = 0;
+static void ReGIS_FillPolygon(KTerm* term, KTermSession* session) {
+    if (session->regis.point_count < 3) {
+        session->regis.point_count = 0;
         return;
     }
 
     // Scanline Fill Algorithm
-    int min_y = term->regis.screen_max_y, max_y = term->regis.screen_min_y;
-    for(int i=0; i<term->regis.point_count; i++) {
-        if (term->regis.point_buffer[i].y < min_y) min_y = term->regis.point_buffer[i].y;
-        if (term->regis.point_buffer[i].y > max_y) max_y = term->regis.point_buffer[i].y;
+    int min_y = session->regis.screen_max_y, max_y = session->regis.screen_min_y;
+    for(int i=0; i<session->regis.point_count; i++) {
+        if (session->regis.point_buffer[i].y < min_y) min_y = session->regis.point_buffer[i].y;
+        if (session->regis.point_buffer[i].y > max_y) max_y = session->regis.point_buffer[i].y;
     }
-    if (min_y < term->regis.screen_min_y) min_y = term->regis.screen_min_y;
-    if (max_y > term->regis.screen_max_y) max_y = term->regis.screen_max_y;
+    if (min_y < session->regis.screen_min_y) min_y = session->regis.screen_min_y;
+    if (max_y > session->regis.screen_max_y) max_y = session->regis.screen_max_y;
 
     int nodes[64];
     for (int y = min_y; y <= max_y; y++) {
         int node_count = 0;
-        int j = term->regis.point_count - 1;
-        for (int i = 0; i < term->regis.point_count; i++) {
-            int y1 = term->regis.point_buffer[i].y;
-            int y2 = term->regis.point_buffer[j].y;
-            int x1 = term->regis.point_buffer[i].x;
-            int x2 = term->regis.point_buffer[j].x;
+        int j = session->regis.point_count - 1;
+        for (int i = 0; i < session->regis.point_count; i++) {
+            int y1 = session->regis.point_buffer[i].y;
+            int y2 = session->regis.point_buffer[j].y;
+            int x1 = session->regis.point_buffer[i].x;
+            int x2 = session->regis.point_buffer[j].x;
 
             if ((y1 < y && y2 >= y) || (y2 < y && y1 >= y)) {
                 if (node_count < 64) {
@@ -10483,18 +10369,18 @@ static void ReGIS_FillPolygon(KTerm* term) {
 
         for (int i = 0; i < node_count; i += 2) {
             if (i + 1 < node_count) {
-                int x_start = nodes[i] < term->regis.screen_min_x ? term->regis.screen_min_x : nodes[i];
-                int x_end = nodes[i+1] > term->regis.screen_max_x ? term->regis.screen_max_x : nodes[i+1];
-                if (x_start > term->regis.screen_max_x) break;
-                if (x_end < term->regis.screen_min_x) continue;
+                int x_start = nodes[i] < session->regis.screen_min_x ? session->regis.screen_min_x : nodes[i];
+                int x_end = nodes[i+1] > session->regis.screen_max_x ? session->regis.screen_max_x : nodes[i+1];
+                if (x_start > session->regis.screen_max_x) break;
+                if (x_end < session->regis.screen_min_x) continue;
                 if (x_start < x_end) {
                      // Draw horizontal line span
-                     ReGIS_DrawLine(term, x_start, y, x_end, y);
+                     ReGIS_DrawLine(term, session, x_start, y, x_end, y);
                 }
             }
         }
     }
-    term->regis.point_count = 0;
+    session->regis.point_count = 0;
 }
 
 // Cubic B-Spline interpolation
@@ -10513,136 +10399,136 @@ static void ReGIS_EvalBSpline(KTerm* term, int p0x, int p0y, int p1x, int p1y, i
 
 static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
-    if (term->regis.command == 0) return;
-    if (!term->regis.data_pending && term->regis.command != 'S' && term->regis.command != 'W' && term->regis.command != 'F' && term->regis.command != 'R') return;
+    if (session->regis.command == 0) return;
+    if (!session->regis.data_pending && session->regis.command != 'S' && session->regis.command != 'W' && session->regis.command != 'F' && session->regis.command != 'R') return;
 
-    int max_idx = term->regis.param_count;
+    int max_idx = session->regis.param_count;
 
     // --- P: Position ---
-    if (term->regis.command == 'P') {
+    if (session->regis.command == 'P') {
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = term->regis.params[i];
-            bool rel_x = term->regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
+            int val_x = session->regis.params[i];
+            bool rel_x = session->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? session->regis.params[i+1] : session->regis.y;
 
-            if (i+1 > max_idx) val_y = term->regis.y; // Fallback if Y completely missing in pair
+            if (i+1 > max_idx) val_y = session->regis.y; // Fallback if Y completely missing in pair
 
-            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
+            bool rel_y = (i + 1 <= max_idx) ? session->regis.params_relative[i+1] : false;
 
-            int target_x = rel_x ? (term->regis.x + val_x) : val_x;
-            int target_y = rel_y ? (term->regis.y + val_y) : val_y;
+            int target_x = rel_x ? (session->regis.x + val_x) : val_x;
+            int target_y = rel_y ? (session->regis.y + val_y) : val_y;
 
             // Clamp
-            if (target_x < term->regis.screen_min_x) target_x = term->regis.screen_min_x;
-            if (target_x > term->regis.screen_max_x) target_x = term->regis.screen_max_x;
+            if (target_x < session->regis.screen_min_x) target_x = session->regis.screen_min_x;
+            if (target_x > session->regis.screen_max_x) target_x = session->regis.screen_max_x;
 
-            if (target_y < term->regis.screen_min_y) target_y = term->regis.screen_min_y;
-            if (target_y > term->regis.screen_max_y) target_y = term->regis.screen_max_y;
+            if (target_y < session->regis.screen_min_y) target_y = session->regis.screen_min_y;
+            if (target_y > session->regis.screen_max_y) target_y = session->regis.screen_max_y;
 
-            term->regis.x = target_x;
-            term->regis.y = target_y;
+            session->regis.x = target_x;
+            session->regis.y = target_y;
 
-            term->regis.point_count = 0;
+            session->regis.point_count = 0;
         }
     }
     // --- V: Vector (Line) ---
-    else if (term->regis.command == 'V') {
+    else if (session->regis.command == 'V') {
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = term->regis.params[i];
-            bool rel_x = term->regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
-            if (i+1 > max_idx && !rel_x) val_y = term->regis.y;
+            int val_x = session->regis.params[i];
+            bool rel_x = session->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? session->regis.params[i+1] : session->regis.y;
+            if (i+1 > max_idx && !rel_x) val_y = session->regis.y;
 
-            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
+            bool rel_y = (i + 1 <= max_idx) ? session->regis.params_relative[i+1] : false;
 
-            int target_x = rel_x ? (term->regis.x + val_x) : val_x;
-            int target_y = rel_y ? (term->regis.y + val_y) : val_y;
+            int target_x = rel_x ? (session->regis.x + val_x) : val_x;
+            int target_y = rel_y ? (session->regis.y + val_y) : val_y;
 
 
-            if (target_x < term->regis.screen_min_x) target_x = term->regis.screen_min_x;
-            if (target_x > term->regis.screen_max_x) target_x = term->regis.screen_max_x;
-            if (target_y < term->regis.screen_min_y) target_y = term->regis.screen_min_y;
-            if (target_y > term->regis.screen_max_y) target_y = term->regis.screen_max_y;
+            if (target_x < session->regis.screen_min_x) target_x = session->regis.screen_min_x;
+            if (target_x > session->regis.screen_max_x) target_x = session->regis.screen_max_x;
+            if (target_y < session->regis.screen_min_y) target_y = session->regis.screen_min_y;
+            if (target_y > session->regis.screen_max_y) target_y = session->regis.screen_max_y;
 
-            ReGIS_DrawLine(term, term->regis.x, term->regis.y, target_x, target_y);
+            ReGIS_DrawLine(term, session, session->regis.x, session->regis.y, target_x, target_y);
 
-            term->regis.x = target_x;
-            term->regis.y = target_y;
+            session->regis.x = target_x;
+            session->regis.y = target_y;
         }
-        term->regis.point_count = 0;
+        session->regis.point_count = 0;
     }
     // --- F: Polygon Fill ---
-    else if (term->regis.command == 'F') {
+    else if (session->regis.command == 'F') {
         // Collect points but don't draw immediately
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = term->regis.params[i];
-            bool rel_x = term->regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
-            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
+            int val_x = session->regis.params[i];
+            bool rel_x = session->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? session->regis.params[i+1] : session->regis.y;
+            bool rel_y = (i + 1 <= max_idx) ? session->regis.params_relative[i+1] : false;
 
-            int px = rel_x ? (term->regis.x + val_x) : val_x;
+            int px = rel_x ? (session->regis.x + val_x) : val_x;
 
-            int py = rel_y ? (term->regis.y + val_y) : val_y;
+            int py = rel_y ? (session->regis.y + val_y) : val_y;
 
-            if (px < term->regis.screen_min_x) px = term->regis.screen_min_x;
-            if (px > term->regis.screen_max_x) px = term->regis.screen_max_x;
-            if (py < term->regis.screen_min_y) py = term->regis.screen_min_y;
-            if (py > term->regis.screen_max_y) py = term->regis.screen_max_y;
+            if (px < session->regis.screen_min_x) px = session->regis.screen_min_x;
+            if (px > session->regis.screen_max_x) px = session->regis.screen_max_x;
+            if (py < session->regis.screen_min_y) py = session->regis.screen_min_y;
+            if (py > session->regis.screen_max_y) py = session->regis.screen_max_y;
 
-            if (term->regis.point_count < 64) {
-                 if (term->regis.point_count == 0) {
+            if (session->regis.point_count < 64) {
+                 if (session->regis.point_count == 0) {
                      // First point is usually current cursor if implied?
                      // Standard F command might imply current position as start.
                      // We'll add current pos if buffer empty?
                      // ReGIS usually: F(V(P[x,y]...))
                      // Our F implementation just collects points passed to it.
                      // If point_count is 0, we should probably add current cursor?
-                     term->regis.point_buffer[0].x = term->regis.x;
-                     term->regis.point_buffer[0].y = term->regis.y;
-                     term->regis.point_count++;
+                     session->regis.point_buffer[0].x = session->regis.x;
+                     session->regis.point_buffer[0].y = session->regis.y;
+                     session->regis.point_count++;
                  }
-                 term->regis.point_buffer[term->regis.point_count].x = px;
-                 term->regis.point_buffer[term->regis.point_count].y = py;
-                 term->regis.point_count++;
+                 session->regis.point_buffer[session->regis.point_count].x = px;
+                 session->regis.point_buffer[session->regis.point_count].y = py;
+                 session->regis.point_count++;
             }
-            term->regis.x = px;
-            term->regis.y = py;
+            session->regis.x = px;
+            session->regis.y = py;
         }
     }
     // --- C: Circle / Curve ---
-    else if (term->regis.command == 'C') {
-        if (term->regis.option_command == 'B') {
+    else if (session->regis.command == 'C') {
+        if (session->regis.option_command == 'B') {
             // --- B-Spline ---
             for (int i = 0; i <= max_idx; i += 2) {
-                int val_x = term->regis.params[i];
-                bool rel_x = term->regis.params_relative[i];
-                int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
-                bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
+                int val_x = session->regis.params[i];
+                bool rel_x = session->regis.params_relative[i];
+                int val_y = (i + 1 <= max_idx) ? session->regis.params[i+1] : session->regis.y;
+                bool rel_y = (i + 1 <= max_idx) ? session->regis.params_relative[i+1] : false;
 
-                int px = rel_x ? (term->regis.x + val_x) : val_x;
-                int py = rel_y ? (term->regis.y + val_y) : val_y;
+                int px = rel_x ? (session->regis.x + val_x) : val_x;
+                int py = rel_y ? (session->regis.y + val_y) : val_y;
 
-                if (term->regis.point_count < 64) {
-                    if (term->regis.point_count == 0) {
-                        term->regis.point_buffer[0].x = term->regis.x;
-                        term->regis.point_buffer[0].y = term->regis.y;
-                        term->regis.point_count++;
+                if (session->regis.point_count < 64) {
+                    if (session->regis.point_count == 0) {
+                        session->regis.point_buffer[0].x = session->regis.x;
+                        session->regis.point_buffer[0].y = session->regis.y;
+                        session->regis.point_count++;
                     }
-                    term->regis.point_buffer[term->regis.point_count].x = px;
-                    term->regis.point_buffer[term->regis.point_count].y = py;
-                    term->regis.point_count++;
+                    session->regis.point_buffer[session->regis.point_count].x = px;
+                    session->regis.point_buffer[session->regis.point_count].y = py;
+                    session->regis.point_count++;
                 }
-                term->regis.x = px;
-                term->regis.y = py;
+                session->regis.x = px;
+                session->regis.y = py;
             }
 
             // Safety check to prevent infinite loops if points aren't consumed correctly
-            if (term->regis.point_count >= 4) {
-                for (int i = 0; i <= term->regis.point_count - 4; i++) {
-                    int p0x = term->regis.point_buffer[i].x;   int p0y = term->regis.point_buffer[i].y;
-                    int p1x = term->regis.point_buffer[i+1].x; int p1y = term->regis.point_buffer[i+1].y;
-                    int p2x = term->regis.point_buffer[i+2].x; int p2y = term->regis.point_buffer[i+2].y;
-                    int p3x = term->regis.point_buffer[i+3].x; int p3y = term->regis.point_buffer[i+3].y;
+            if (session->regis.point_count >= 4) {
+                for (int i = 0; i <= session->regis.point_count - 4; i++) {
+                    int p0x = session->regis.point_buffer[i].x;   int p0y = session->regis.point_buffer[i].y;
+                    int p1x = session->regis.point_buffer[i+1].x; int p1y = session->regis.point_buffer[i+1].y;
+                    int p2x = session->regis.point_buffer[i+2].x; int p2y = session->regis.point_buffer[i+2].y;
+                    int p3x = session->regis.point_buffer[i+3].x; int p3y = session->regis.point_buffer[i+3].y;
 
                     int seg_steps = 10;
                     int last_x = -1, last_y = -1;
@@ -10652,34 +10538,34 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
                         int tx, ty;
                         ReGIS_EvalBSpline(term, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, &tx, &ty);
                         if (last_x != -1) {
-                            ReGIS_DrawLine(term, last_x, last_y, tx, ty);
+                            ReGIS_DrawLine(term, session, last_x, last_y, tx, ty);
                         }
                         last_x = tx;
                         last_y = ty;
                     }
                 }
                 int keep = 3;
-                if (term->regis.point_count > keep) {
+                if (session->regis.point_count > keep) {
                     for(int k=0; k<keep; k++) {
-                        term->regis.point_buffer[k] = term->regis.point_buffer[term->regis.point_count - keep + k];
+                        session->regis.point_buffer[k] = session->regis.point_buffer[session->regis.point_count - keep + k];
                     }
-                    term->regis.point_count = keep;
+                    session->regis.point_count = keep;
                 }
             }
         }
-        else if (term->regis.option_command == 'A') {
+        else if (session->regis.option_command == 'A') {
             // --- Arc ---
             if (max_idx >= 0) {
-                int cx_val = term->regis.params[0];
-                bool cx_rel = term->regis.params_relative[0];
-                int cy_val = (1 <= max_idx) ? term->regis.params[1] : term->regis.y;
-                bool cy_rel = (1 <= max_idx) ? term->regis.params_relative[1] : false;
+                int cx_val = session->regis.params[0];
+                bool cx_rel = session->regis.params_relative[0];
+                int cy_val = (1 <= max_idx) ? session->regis.params[1] : session->regis.y;
+                bool cy_rel = (1 <= max_idx) ? session->regis.params_relative[1] : false;
 
-                int cx = cx_rel ? (term->regis.x + cx_val) : cx_val;
-                int cy = cy_rel ? (term->regis.y + cy_val) : cy_val;
+                int cx = cx_rel ? (session->regis.x + cx_val) : cx_val;
+                int cy = cy_rel ? (session->regis.y + cy_val) : cy_val;
 
-                int sx = term->regis.x;
-                int sy = term->regis.y;
+                int sx = session->regis.x;
+                int sy = session->regis.y;
 
                 float dx = (float)(sx - cx);
                 float dy = (float)(sy - cy);
@@ -10688,7 +10574,7 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
 
                 float degrees = 0;
                 if (max_idx >= 2) {
-                    degrees = (float)term->regis.params[2];
+                    degrees = (float)session->regis.params[2];
                 }
 
                 int segments = (int)(fabsf(degrees) / 5.0f);
@@ -10703,36 +10589,36 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
                     current_angle += rad_step;
                     int nx = cx + (int)(cosf(current_angle) * radius);
                     int ny = cy + (int)(sinf(current_angle) * radius);
-                    ReGIS_DrawLine(term, last_x, last_y, nx, ny);
+                    ReGIS_DrawLine(term, session, last_x, last_y, nx, ny);
                     last_x = nx;
                     last_y = ny;
                 }
 
-                term->regis.x = last_x;
-                term->regis.y = last_y;
+                session->regis.x = last_x;
+                session->regis.y = last_y;
             }
         }
         else {
             // --- Standard Circle ---
             for (int i = 0; i <= max_idx; i += 2) {
-                 int val1 = term->regis.params[i];
-                 bool rel1 = term->regis.params_relative[i];
+                 int val1 = session->regis.params[i];
+                 bool rel1 = session->regis.params_relative[i];
 
                  int radius = 0;
                  if (i + 1 > max_idx) {
                      radius = val1;
                  } else {
-                     int val2 = term->regis.params[i+1];
-                     bool rel2 = term->regis.params_relative[i+1];
-                     int px = rel1 ? (term->regis.x + val1) : val1;
-                     int py = rel2 ? (term->regis.y + val2) : val2;
-                     float dx = (float)(px - term->regis.x);
-                     float dy = (float)(py - term->regis.y);
+                     int val2 = session->regis.params[i+1];
+                     bool rel2 = session->regis.params_relative[i+1];
+                     int px = rel1 ? (session->regis.x + val1) : val1;
+                     int py = rel2 ? (session->regis.y + val2) : val2;
+                     float dx = (float)(px - session->regis.x);
+                     float dy = (float)(py - session->regis.y);
                      radius = (int)sqrtf(dx*dx + dy*dy);
                  }
 
-                 int cx = term->regis.x;
-                 int cy = term->regis.y;
+                 int cx = session->regis.x;
+                 int cy = session->regis.y;
                  int segments = 32;
                  float angle_step = 6.283185f / segments;
 
@@ -10746,104 +10632,104 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
                     int x2 = cx + (int)(cosf(a2) * radius);
                     int y2 = cy + (int)(sinf(a2) * radius);
 
-                    ReGIS_DrawLine(term, x1, y1, x2, y2);
+                    ReGIS_DrawLine(term, session, x1, y1, x2, y2);
                  }
             }
         }
     }
     // --- S: Screen Control ---
-    else if (term->regis.command == 'S') {
-        if (term->regis.option_command == 'E') {
+    else if (session->regis.command == 'S') {
+        if (session->regis.option_command == 'E') {
              // Screen Erase (and optional addressing per prompt behavior)
-             if (term->regis.param_count >= 3) {
+             if (session->regis.param_count >= 3) {
                  // S(E[x1,y1][x2,y2]) - Set addressing extent and erase
-                 term->regis.screen_min_x = term->regis.params[0];
-                 term->regis.screen_min_y = term->regis.params[1];
-                 term->regis.screen_max_x = term->regis.params[2];
-                 term->regis.screen_max_y = term->regis.params[3];
+                 session->regis.screen_min_x = session->regis.params[0];
+                 session->regis.screen_min_y = session->regis.params[1];
+                 session->regis.screen_max_x = session->regis.params[2];
+                 session->regis.screen_max_y = session->regis.params[3];
              }
              term->vector_count = 0;
              term->vector_clear_request = true;
-        } else if (term->regis.option_command == 'A') {
+        } else if (session->regis.option_command == 'A') {
              // Screen Addressing S(A[x1,y1][x2,y2])
-             if (term->regis.param_count >= 3) {
-                 term->regis.screen_min_x = term->regis.params[0];
-                 term->regis.screen_min_y = term->regis.params[1];
-                 term->regis.screen_max_x = term->regis.params[2];
-                 term->regis.screen_max_y = term->regis.params[3];
+             if (session->regis.param_count >= 3) {
+                 session->regis.screen_min_x = session->regis.params[0];
+                 session->regis.screen_min_y = session->regis.params[1];
+                 session->regis.screen_max_x = session->regis.params[2];
+                 session->regis.screen_max_y = session->regis.params[3];
              }
         }
     }
     // --- W: Write Control ---
-    else if (term->regis.command == 'W') {
+    else if (session->regis.command == 'W') {
         // Handle explicit KTermColor Index selection W(I...)
-        if (term->regis.option_command == 'I') {
-             int color_idx = term->regis.params[0];
+        if (session->regis.option_command == 'I') {
+             int color_idx = session->regis.params[0];
              if (color_idx >= 0 && color_idx < 16) {
                  RGB_KTermColor c = term->color_palette[color_idx];
-                 term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
+                 session->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
              }
         }
         // Handle Writing Modes
-        else if (term->regis.option_command == 'R') {
-             term->regis.write_mode = 1; // Replace
-        } else if (term->regis.option_command == 'E') {
-             term->regis.write_mode = 2; // Erase
-        } else if (term->regis.option_command == 'V') {
-             term->regis.write_mode = 0; // Overlay (Additive)
-        } else if (term->regis.option_command == 'C') {
+        else if (session->regis.option_command == 'R') {
+             session->regis.write_mode = 1; // Replace
+        } else if (session->regis.option_command == 'E') {
+             session->regis.write_mode = 2; // Erase
+        } else if (session->regis.option_command == 'V') {
+             session->regis.write_mode = 0; // Overlay (Additive)
+        } else if (session->regis.option_command == 'C') {
              // W(C) is ambiguous: could be Complement or KTermColor
              // If we have parameters (e.g. W(C1)), treat as KTermColor (Legacy behavior).
              // If no parameters (e.g. W(C)), treat as Complement (XOR).
 
-             if (term->regis.param_count > 0) {
+             if (session->regis.param_count > 0) {
                  // Likely KTermColor Index W(C1)
-                 int color_idx = term->regis.params[0];
+                 int color_idx = session->regis.params[0];
                  if (color_idx >= 0 && color_idx < 16) {
                      RGB_KTermColor c = term->color_palette[color_idx];
-                     term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
+                     session->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
                  }
              } else {
-                 term->regis.write_mode = 3; // Complement (XOR)
+                 session->regis.write_mode = 3; // Complement (XOR)
              }
         }
     }
     // --- T: Text Attributes ---
-    else if (term->regis.command == 'T') {
-        if (term->regis.option_command == 'S') {
+    else if (session->regis.command == 'T') {
+        if (session->regis.option_command == 'S') {
              // Size
-             term->regis.text_size = (float)term->regis.params[0];
-             if (term->regis.text_size <= 0) term->regis.text_size = 1;
+             session->regis.text_size = (float)session->regis.params[0];
+             if (session->regis.text_size <= 0) session->regis.text_size = 1;
         }
-        if (term->regis.option_command == 'D') {
+        if (session->regis.option_command == 'D') {
              // Direction (degrees)
-             term->regis.text_angle = (float)term->regis.params[0] * 3.14159f / 180.0f;
+             session->regis.text_angle = (float)session->regis.params[0] * 3.14159f / 180.0f;
         }
     }
     // --- L: Load Alphabet ---
-    else if (term->regis.command == 'L') {
+    else if (session->regis.command == 'L') {
         // L command logic is primarily handled in ProcessReGISChar during string/hex parsing.
         // This block handles parameterized options like S (Size) if provided.
-        if (term->regis.option_command == 'S') {
+        if (session->regis.option_command == 'S') {
              // Character Cell Size (e.g. L(S1) or L(S[8,16]))
              int w = 8;
              int h = 16;
-             if (term->regis.param_count >= 0) { // param_count is max index
+             if (session->regis.param_count >= 0) { // param_count is max index
                  // Check if it's an index or explicit size
-                 if (term->regis.params[0] == 1) { w=8; h=16; }
-                 else if (term->regis.params[0] == 0) { w=8; h=16; } // Default
+                 if (session->regis.params[0] == 1) { w=8; h=16; }
+                 else if (session->regis.params[0] == 0) { w=8; h=16; } // Default
                  else {
                      // Assume width
-                     w = term->regis.params[0];
-                     if (term->regis.param_count >= 1) h = term->regis.params[1];
+                     w = session->regis.params[0];
+                     if (session->regis.param_count >= 1) h = session->regis.params[1];
                  }
              }
              session->soft_font.char_width = w;
              session->soft_font.char_height = h;
-        } else if (term->regis.option_command == 'A') {
+        } else if (session->regis.option_command == 'A') {
              // Alphabet selection L(A1)
-             if (term->regis.param_count >= 0) {
-                 int alpha = term->regis.params[0];
+             if (session->regis.param_count >= 0) {
+                 int alpha = session->regis.params[0];
                  // We only really support loading into "soft font" slot (conceptually A1)
                  // A0 is typically the hardware ROM font.
                  if (alpha != 1) {
@@ -10857,50 +10743,50 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
         }
     }
     // --- R: Report ---
-    else if (term->regis.command == 'R') {
-         if (term->regis.option_command == 'P') {
+    else if (session->regis.command == 'R') {
+         if (session->regis.option_command == 'P') {
              char buf[64];
-             snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", term->regis.x, term->regis.y);
+             snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", session->regis.x, session->regis.y);
              KTerm_QueueResponse(term, buf);
          }
     }
 
-    term->regis.data_pending = false;
+    session->regis.data_pending = false;
 }
 
 static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char ch) {
     if (ch == 0x1B) { // ESC \ (ST)
-        if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush pending fill
-        if (term->regis.state == 1 || term->regis.state == 3) {
+        if (session->regis.command == 'F') ReGIS_FillPolygon(term, session); // Flush pending fill
+        if (session->regis.state == 1 || session->regis.state == 3) {
             ExecuteReGISCommand(term, session);
         }
         session->parse_state = VT_PARSE_ESCAPE;
         return;
     }
 
-    if (term->regis.recording_macro) {
-        if (ch == ';' && term->regis.macro_len > 0 && term->regis.macro_buffer[term->regis.macro_len-1] == '@') {
+    if (session->regis.recording_macro) {
+        if (ch == ';' && session->regis.macro_len > 0 && session->regis.macro_buffer[session->regis.macro_len-1] == '@') {
              // End of macro definition (@;)
-             term->regis.macro_buffer[term->regis.macro_len-1] = '\0'; // Remove @
-             term->regis.recording_macro = false;
+             session->regis.macro_buffer[session->regis.macro_len-1] = '\0'; // Remove @
+             session->regis.recording_macro = false;
              // Store macro in slot
-             if (term->regis.macro_index >= 0 && term->regis.macro_index < 26) {
-                 if (term->regis.macros[term->regis.macro_index]) KTerm_Free(term->regis.macros[term->regis.macro_index]);
-                 term->regis.macros[term->regis.macro_index] = strdup(term->regis.macro_buffer);
+             if (session->regis.macro_index >= 0 && session->regis.macro_index < 26) {
+                 if (session->regis.macros[session->regis.macro_index]) KTerm_Free(session->regis.macros[session->regis.macro_index]);
+                 session->regis.macros[session->regis.macro_index] = strdup(session->regis.macro_buffer);
              }
-             if (term->regis.macro_buffer) { KTerm_Free(term->regis.macro_buffer); term->regis.macro_buffer = NULL; }
+             if (session->regis.macro_buffer) { KTerm_Free(session->regis.macro_buffer); session->regis.macro_buffer = NULL; }
              return;
         }
         // Append
-        if (!term->regis.macro_buffer) {
-             term->regis.macro_cap = 1024;
-             term->regis.macro_buffer = KTerm_Malloc(term->regis.macro_cap);
-             term->regis.macro_len = 0;
+        if (!session->regis.macro_buffer) {
+             session->regis.macro_cap = 1024;
+             session->regis.macro_buffer = KTerm_Malloc(session->regis.macro_cap);
+             session->regis.macro_len = 0;
         }
 
         // Enforce Macro Space Limit
         size_t limit = session->macro_space.total > 0 ? session->macro_space.total : 4096;
-        if (term->regis.macro_len >= limit) {
+        if (session->regis.macro_len >= limit) {
              if (session->options.debug_sequences) {
                  KTerm_LogUnsupportedSequence(term, "ReGIS Macro storage limit exceeded");
              }
@@ -10910,65 +10796,65 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
              return;
         }
 
-        if (term->regis.macro_len >= term->regis.macro_cap - 1) {
-             size_t new_cap = term->regis.macro_cap * 2;
+        if (session->regis.macro_len >= session->regis.macro_cap - 1) {
+             size_t new_cap = session->regis.macro_cap * 2;
              if (new_cap > limit + 1) new_cap = limit + 1; // +1 for null terminator
 
-             if (new_cap > term->regis.macro_cap) {
-                 term->regis.macro_cap = new_cap;
-                 term->regis.macro_buffer = KTerm_Realloc(term->regis.macro_buffer, term->regis.macro_cap);
+             if (new_cap > session->regis.macro_cap) {
+                 session->regis.macro_cap = new_cap;
+                 session->regis.macro_buffer = KTerm_Realloc(session->regis.macro_buffer, session->regis.macro_cap);
              }
         }
 
         // Final check against capacity to be safe
-        if (term->regis.macro_len < term->regis.macro_cap - 1) {
-            term->regis.macro_buffer[term->regis.macro_len++] = ch;
-            term->regis.macro_buffer[term->regis.macro_len] = '\0';
+        if (session->regis.macro_len < session->regis.macro_cap - 1) {
+            session->regis.macro_buffer[session->regis.macro_len++] = ch;
+            session->regis.macro_buffer[session->regis.macro_len] = '\0';
         }
         return;
     }
 
-    if (term->regis.state == 3) { // Parsing Text String
-        if (ch == term->regis.string_terminator) {
-            term->regis.text_buffer[term->regis.text_pos] = '\0';
+    if (session->regis.state == 3) { // Parsing Text String
+        if (ch == session->regis.string_terminator) {
+            session->regis.text_buffer[session->regis.text_pos] = '\0';
 
-            if (term->regis.command == 'L') {
+            if (session->regis.command == 'L') {
                 // Load Alphabet Logic
-                if (term->regis.option_command == 'A') {
+                if (session->regis.option_command == 'A') {
                     // Set Alphabet Name
-                    strncpy(term->regis.load.name, term->regis.text_buffer, 15);
-                    term->regis.load.name[15] = '\0';
-                    term->regis.option_command = 0; // Reset
+                    strncpy(session->regis.load.name, session->regis.text_buffer, 15);
+                    session->regis.load.name[15] = '\0';
+                    session->regis.option_command = 0; // Reset
                 } else {
                     // Define Character
-                    if (term->regis.text_pos > 0) {
-                        term->regis.load.current_char = (unsigned char)term->regis.text_buffer[0];
-                        term->regis.load.pattern_byte_idx = 0;
-                        term->regis.load.hex_nibble = -1;
+                    if (session->regis.text_pos > 0) {
+                        session->regis.load.current_char = (unsigned char)session->regis.text_buffer[0];
+                        session->regis.load.pattern_byte_idx = 0;
+                        session->regis.load.hex_nibble = -1;
                         // Clear existing pattern for this char
-                        memset(session->soft_font.font_data[term->regis.load.current_char], 0, 32);
-                        session->soft_font.loaded[term->regis.load.current_char] = true;
+                        memset(session->soft_font.font_data[session->regis.load.current_char], 0, 32);
+                        session->soft_font.loaded[session->regis.load.current_char] = true;
                         session->soft_font.active = true;
                     }
                 }
             } else {
                 // Text Drawing with attributes
-                float scale = (term->regis.text_size > 0) ? term->regis.text_size : 1.0f;
+                float scale = (session->regis.text_size > 0) ? session->regis.text_size : 1.0f;
                 // Base scale 1 = 8x16? ReGIS default size 1 is roughly 9x16 grid?
                 // Existing code used scale 2.0f. Let's base it on that.
                 scale *= 2.0f;
 
-                float cos_a = cosf(term->regis.text_angle);
-                float sin_a = sinf(term->regis.text_angle);
+                float cos_a = cosf(session->regis.text_angle);
+                float sin_a = sinf(session->regis.text_angle);
 
-                int start_x = term->regis.x;
-                int start_y = term->regis.y;
+                int start_x = session->regis.x;
+                int start_y = session->regis.y;
 
                 const unsigned char* font_base = vga_perfect_8x8_font;
                 bool use_soft_font = session->soft_font.active;
 
-                for(int i=0; term->regis.text_buffer[i] != '\0'; i++) {
-                    unsigned char c = (unsigned char)term->regis.text_buffer[i];
+                for(int i=0; session->regis.text_buffer[i] != '\0'; i++) {
+                    unsigned char c = (unsigned char)session->regis.text_buffer[i];
 
                     // Use dynamic height if soft font is active
                     int max_rows = use_soft_font ? session->soft_font.char_height : 16;
@@ -11017,9 +10903,9 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
                                     line->y0 = 1.0f - (fy0 / ((float)REGIS_HEIGHT));
                                     line->x1 = fx1 / ((float)REGIS_WIDTH);
                                     line->y1 = 1.0f - (fy1 / ((float)REGIS_HEIGHT));
-                                    line->color = term->regis.color;
+                                    line->color = session->regis.color;
                                     line->intensity = 1.0f;
-                                    line->mode = term->regis.write_mode;
+                                    line->mode = session->regis.write_mode;
                                     term->vector_count++;
                                  }
                                 c_bit += len - 1;
@@ -11028,16 +10914,16 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
                     }
                 }
                 // Update cursor position to end of string
-                float total_width = term->regis.text_pos * 9 * scale;
-                term->regis.x = start_x + (int)(total_width * cos_a);
-                term->regis.y = start_y + (int)(total_width * sin_a);
+                float total_width = session->regis.text_pos * 9 * scale;
+                session->regis.x = start_x + (int)(total_width * cos_a);
+                session->regis.y = start_y + (int)(total_width * sin_a);
             }
 
-            term->regis.state = 1;
-            term->regis.text_pos = 0;
+            session->regis.state = 1;
+            session->regis.text_pos = 0;
         } else {
-            if (term->regis.text_pos < 255) {
-                term->regis.text_buffer[term->regis.text_pos++] = ch;
+            if (session->regis.text_pos < 255) {
+                session->regis.text_buffer[session->regis.text_pos++] = ch;
             }
         }
         return;
@@ -11045,124 +10931,124 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 
     if (ch <= 0x20 || ch == 0x7F) return;
 
-    if (term->regis.state == 0) { // Expecting Command
+    if (session->regis.state == 0) { // Expecting Command
         if (ch == '@') {
             // Macro
-            term->regis.command = '@';
-            term->regis.state = 1;
+            session->regis.command = '@';
+            session->regis.state = 1;
             return;
         }
         if (isalpha(ch)) {
-            term->regis.command = toupper(ch);
-            term->regis.state = 1;
-            term->regis.param_count = 0;
-            term->regis.has_bracket = false;
-            term->regis.has_paren = false;
-            term->regis.point_count = 0; // Reset curve points on new command
+            session->regis.command = toupper(ch);
+            session->regis.state = 1;
+            session->regis.param_count = 0;
+            session->regis.has_bracket = false;
+            session->regis.has_paren = false;
+            session->regis.point_count = 0; // Reset curve points on new command
             for(int i=0; i<16; i++) {
-                term->regis.params[i] = 0;
-                term->regis.params_relative[i] = false;
+                session->regis.params[i] = 0;
+                session->regis.params_relative[i] = false;
             }
         }
-    } else if (term->regis.state == 1) { // Expecting Values/Options
-        if (term->regis.command == '@') {
+    } else if (session->regis.state == 1) { // Expecting Values/Options
+        if (session->regis.command == '@') {
              if (ch == ':') {
                  // Definition
-                 term->regis.option_command = ':'; // Flag next char as macro name
+                 session->regis.option_command = ':'; // Flag next char as macro name
                  return;
              }
-             if (term->regis.option_command == ':') {
+             if (session->regis.option_command == ':') {
                  // Macro Name
                  if (isalpha(ch)) {
-                     term->regis.macro_index = toupper(ch) - 'A';
-                     term->regis.recording_macro = true;
-                     term->regis.macro_len = 0;
-                     term->regis.option_command = 0;
+                     session->regis.macro_index = toupper(ch) - 'A';
+                     session->regis.recording_macro = true;
+                     session->regis.macro_len = 0;
+                     session->regis.option_command = 0;
                  }
                  return;
              }
              // Execute Macro
              if (isalpha(ch)) {
                  int idx = toupper(ch) - 'A';
-                 if (idx >= 0 && idx < 26 && term->regis.macros[idx]) {
-                     if (term->regis.recursion_depth < 16) {
-                         term->regis.recursion_depth++;
+                 if (idx >= 0 && idx < 26 && session->regis.macros[idx]) {
+                     if (session->regis.recursion_depth < 16) {
+                         session->regis.recursion_depth++;
                          // Push macro content to parser
-                         const char* m = term->regis.macros[idx];
+                         const char* m = session->regis.macros[idx];
                          // Reset state to 0 for macro context?
                          // Macros usually contain full commands.
-                         int saved_state = term->regis.state;
-                         term->regis.state = 0;
+                         int saved_state = session->regis.state;
+                         session->regis.state = 0;
                          for (int k=0; m[k]; k++) ProcessReGISChar(term, session, m[k]);
-                         term->regis.state = saved_state;
-                         term->regis.recursion_depth--;
+                         session->regis.state = saved_state;
+                         session->regis.recursion_depth--;
                      } else {
                          if (session->options.debug_sequences) {
                              KTerm_LogUnsupportedSequence(term, "ReGIS Macro recursion depth exceeded");
                          }
                      }
                  }
-                 term->regis.command = 0;
-                 term->regis.state = 0;
+                 session->regis.command = 0;
+                 session->regis.state = 0;
              }
              return;
         }
 
         if (ch == '\'' || ch == '"') {
-             if (term->regis.command == 'T' || term->regis.command == 'L') {
-                 term->regis.state = 3;
-                 term->regis.string_terminator = ch;
-                 term->regis.text_pos = 0;
+             if (session->regis.command == 'T' || session->regis.command == 'L') {
+                 session->regis.state = 3;
+                 session->regis.string_terminator = ch;
+                 session->regis.text_pos = 0;
                  return;
              }
         }
         if (ch == '[') {
-            term->regis.has_bracket = true;
-            term->regis.has_comma = false;
-            term->regis.parsing_val = false;
+            session->regis.has_bracket = true;
+            session->regis.has_comma = false;
+            session->regis.parsing_val = false;
         } else if (ch == ']') {
-            if (term->regis.parsing_val) {
-                 term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
-                 term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
+            if (session->regis.parsing_val) {
+                 session->regis.params[session->regis.param_count] = session->regis.current_sign * session->regis.current_val;
+                 session->regis.params_relative[session->regis.param_count] = session->regis.val_is_relative;
             }
-            term->regis.parsing_val = false;
-            term->regis.has_bracket = false;
+            session->regis.parsing_val = false;
+            session->regis.has_bracket = false;
 
             // Special case for S command: Accumulate parameters for [x1,y1][x2,y2]
-            if (term->regis.command != 'S') {
+            if (session->regis.command != 'S') {
                 ExecuteReGISCommand(term, session);
-                term->regis.param_count = 0;
+                session->regis.param_count = 0;
                 for(int i=0; i<16; i++) {
-                    term->regis.params[i] = 0;
-                    term->regis.params_relative[i] = false;
+                    session->regis.params[i] = 0;
+                    session->regis.params_relative[i] = false;
                 }
             } else {
                 // Prepare for next parameter set
-                if (term->regis.param_count < 15) {
-                    term->regis.param_count++;
-                    term->regis.params[term->regis.param_count] = 0;
-                    term->regis.params_relative[term->regis.param_count] = false;
+                if (session->regis.param_count < 15) {
+                    session->regis.param_count++;
+                    session->regis.params[session->regis.param_count] = 0;
+                    session->regis.params_relative[session->regis.param_count] = false;
                 }
             }
         } else if (ch == '(') {
-            term->regis.has_paren = true;
-            term->regis.parsing_val = false;
+            session->regis.has_paren = true;
+            session->regis.parsing_val = false;
         } else if (ch == ')') {
-            if (term->regis.parsing_val) {
-                 term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
-                 term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
+            if (session->regis.parsing_val) {
+                 session->regis.params[session->regis.param_count] = session->regis.current_sign * session->regis.current_val;
+                 session->regis.params_relative[session->regis.param_count] = session->regis.val_is_relative;
             }
-            term->regis.has_paren = false;
-            term->regis.parsing_val = false;
+            session->regis.has_paren = false;
+            session->regis.parsing_val = false;
             ExecuteReGISCommand(term, session);
             // Don't reset point count here, as options might modify curve mode
             // But we reset param count for next block
-            term->regis.param_count = 0;
+            session->regis.param_count = 0;
             for(int i=0; i<16; i++) {
-                term->regis.params[i] = 0;
-                term->regis.params_relative[i] = false;
+                session->regis.params[i] = 0;
+                session->regis.params_relative[i] = false;
             }
-        } else if (term->regis.command == 'L' && isxdigit(ch)) {
+        } else if (session->regis.command == 'L' && isxdigit(ch)) {
             // Hex parsing for Load Alphabet
             // Assuming ReGIS "hex string" format (pairs of hex digits)
             int val = 0;
@@ -11170,69 +11056,69 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
             else if (ch >= 'A' && ch <= 'F') val = ch - 'A' + 10;
             else if (ch >= 'a' && ch <= 'f') val = ch - 'a' + 10;
 
-            if (term->regis.load.hex_nibble == -1) {
-                term->regis.load.hex_nibble = val;
+            if (session->regis.load.hex_nibble == -1) {
+                session->regis.load.hex_nibble = val;
             } else {
-                int byte = (term->regis.load.hex_nibble << 4) | val;
-                term->regis.load.hex_nibble = -1;
+                int byte = (session->regis.load.hex_nibble << 4) | val;
+                session->regis.load.hex_nibble = -1;
 
-                if (term->regis.load.pattern_byte_idx < 32) {
-                    GET_SESSION(term)->soft_font.font_data[term->regis.load.current_char][term->regis.load.pattern_byte_idx++] = byte;
+                if (session->regis.load.pattern_byte_idx < 32) {
+                    GET_SESSION(term)->soft_font.font_data[session->regis.load.current_char][session->regis.load.pattern_byte_idx++] = byte;
                 }
             }
             // Defer texture update to KTerm_Draw
             GET_SESSION(term)->soft_font.dirty = true;
 
         } else if (isdigit(ch) || ch == '-' || ch == '+') {
-            if (!term->regis.parsing_val) {
-                term->regis.parsing_val = true;
-                term->regis.current_val = 0;
-                term->regis.current_sign = 1;
-                term->regis.val_is_relative = false;
+            if (!session->regis.parsing_val) {
+                session->regis.parsing_val = true;
+                session->regis.current_val = 0;
+                session->regis.current_sign = 1;
+                session->regis.val_is_relative = false;
             }
             if (ch == '-') {
-                term->regis.current_sign = -1;
-                term->regis.val_is_relative = true;
+                session->regis.current_sign = -1;
+                session->regis.val_is_relative = true;
             } else if (ch == '+') {
-                term->regis.current_sign = 1;
-                term->regis.val_is_relative = true;
+                session->regis.current_sign = 1;
+                session->regis.val_is_relative = true;
             } else if (isdigit(ch)) {
                 // Protect against integer overflow
-                if (term->regis.current_val < 100000000) { // Reasonable limit for coords/params
-                    term->regis.current_val = term->regis.current_val * 10 + (ch - '0');
+                if (session->regis.current_val < 100000000) { // Reasonable limit for coords/params
+                    session->regis.current_val = session->regis.current_val * 10 + (ch - '0');
                 }
             }
-            term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
-            term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
-            term->regis.data_pending = true;
+            session->regis.params[session->regis.param_count] = session->regis.current_sign * session->regis.current_val;
+            session->regis.params_relative[session->regis.param_count] = session->regis.val_is_relative;
+            session->regis.data_pending = true;
         } else if (ch == ',') {
-            if (term->regis.parsing_val) {
-                term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
-                term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
-                term->regis.parsing_val = false;
+            if (session->regis.parsing_val) {
+                session->regis.params[session->regis.param_count] = session->regis.current_sign * session->regis.current_val;
+                session->regis.params_relative[session->regis.param_count] = session->regis.val_is_relative;
+                session->regis.parsing_val = false;
             }
-            if (term->regis.param_count < 15) {
-                term->regis.param_count++;
-                term->regis.params[term->regis.param_count] = 0;
-                term->regis.params_relative[term->regis.param_count] = false;
+            if (session->regis.param_count < 15) {
+                session->regis.param_count++;
+                session->regis.params[session->regis.param_count] = 0;
+                session->regis.params_relative[session->regis.param_count] = false;
             }
-            term->regis.has_comma = true;
+            session->regis.has_comma = true;
         } else if (isalpha(ch)) {
-            if (term->regis.has_paren) {
-                 term->regis.option_command = toupper(ch);
-                 term->regis.param_count = 0;
-                 term->regis.parsing_val = false;
+            if (session->regis.has_paren) {
+                 session->regis.option_command = toupper(ch);
+                 session->regis.param_count = 0;
+                 session->regis.parsing_val = false;
             } else {
-                if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush fill on new command
+                if (session->regis.command == 'F') ReGIS_FillPolygon(term, session); // Flush fill on new command
                 ExecuteReGISCommand(term, session);
-                term->regis.command = toupper(ch);
-                term->regis.state = 1;
-                term->regis.param_count = 0;
-                term->regis.parsing_val = false;
-                term->regis.point_count = 0; // Reset on new command
+                session->regis.command = toupper(ch);
+                session->regis.state = 1;
+                session->regis.param_count = 0;
+                session->regis.parsing_val = false;
+                session->regis.point_count = 0; // Reset on new command
                 for(int i=0; i<16; i++) {
-                    term->regis.params[i] = 0;
-                    term->regis.params_relative[i] = false;
+                    session->regis.params[i] = 0;
+                    session->regis.params_relative[i] = false;
                 }
             }
         }
@@ -13913,16 +13799,18 @@ void KTerm_Cleanup(KTerm* term) {
         GET_SESSION(term)->bracketed_paste.buffer = NULL;
     }
 
-    // Free ReGIS Macros
-    for (int i = 0; i < 26; i++) {
-        if (term->regis.macros[i]) {
-            KTerm_Free(term->regis.macros[i]);
-            term->regis.macros[i] = NULL;
+    // Free ReGIS Macros (Per Session)
+    for (int s = 0; s < MAX_SESSIONS; s++) {
+        for (int i = 0; i < 26; i++) {
+            if (term->sessions[s].regis.macros[i]) {
+                KTerm_Free(term->sessions[s].regis.macros[i]);
+                term->sessions[s].regis.macros[i] = NULL;
+            }
         }
-    }
-    if (term->regis.macro_buffer) {
-        KTerm_Free(term->regis.macro_buffer);
-        term->regis.macro_buffer = NULL;
+        if (term->sessions[s].regis.macro_buffer) {
+            KTerm_Free(term->sessions[s].regis.macro_buffer);
+            term->sessions[s].regis.macro_buffer = NULL;
+        }
     }
 
     KTerm_ClearEvents(term); // Ensure input pipeline is empty and reset

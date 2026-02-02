@@ -1,12 +1,26 @@
 # Update Log
 
-## [v2.3.44] (pre-release)
+## [v2.4.1]
+
+### ReGIS Per-Session State
+- **Refactoring:** Moved ReGIS graphics state (cursor position, macros, colors) from the global `KTerm` struct to the per-session `KTermSession` struct. This ensures that in multi-session environments (e.g., split panes or background sessions), each terminal session maintains its own independent graphics context.
+- **Cleanup:** Fixed a duplicate `struct` definition issue where a block of code defining `regis` was erroneously duplicated in the header. Extracted the ReGIS state definition into a named `KTermReGIS` typedef for clarity.
+- **API Update:** Updated `KTerm_InitReGIS` and internal helpers to operate on specific session instances.
+
+## [v2.4.0]
 
 ### Finalize Op Queue Decoupling – Mandatory Mode Achieved
 
 - Made op queue **mandatory** (removed `use_op_queue` flag and all fallback paths).
 - All grid mutations (cell set, scroll, rect ops, vertical insert/delete, resize) now unconditionally queue operations.
 - Added `KTERM_OP_RESIZE_GRID` + full queuing for dynamic resizes (Gateway/host-triggered).
+- Cleaned up struct ordering, forward declarations, font includes, and test compilation issues.
+- Tests: `test_full_decoupling.c` verifies deferred mutations; rect/vertical suites pass cleanly.
+- Docs: Updated to reflect mandatory queue, full coverage, and post-flush grid purity.
+
+This completes the multi-version refactor arc (started v2.3.40) — grid is now fully declarative/batched, thread-safe, and directly addressable after flush. Ready for per-cell extensions, bytecode, and next-gen renderer integration.
+
+## [v2.3.44] (pre-release)
 - Cleaned up struct ordering, forward declarations, font includes, and test compilation issues.
 - Tests: `test_full_decoupling.c` verifies deferred mutations; rect/vertical suites pass cleanly.
 - Docs: Updated to reflect mandatory queue, full coverage, and post-flush grid purity.
