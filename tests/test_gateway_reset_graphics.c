@@ -51,11 +51,11 @@ int main() {
 
     // --- Test 3: Reset Tektronix ---
     printf("Test 3: Reset Tektronix\n");
-    term->tektronix.state = 1;
+    session->tektronix.state = 1;
     const char* seq3 = "\x1BPGATE;KTERM;0;RESET;TEK\x1B\\";
     for (int i = 0; seq3[i] != '\0'; i++) KTerm_ProcessChar(term, session, (unsigned char)seq3[i]);
 
-    if (term->tektronix.state == 0) {
+    if (session->tektronix.state == 0) {
         printf("PASS: Tektronix Reset\n");
     } else {
         printf("FAIL: Tektronix Reset\n");
@@ -66,16 +66,16 @@ int main() {
     printf("Test 4: Reset All Graphics\n");
     session->kitty.image_count = 3;
     term->sessions[0].regis.state = 2;
-    term->tektronix.state = 2;
+    session->tektronix.state = 2;
 
     const char* seq4 = "\x1BPGATE;KTERM;0;RESET;GRAPHICS\x1B\\";
     for (int i = 0; seq4[i] != '\0'; i++) KTerm_ProcessChar(term, session, (unsigned char)seq4[i]);
 
-    if (session->kitty.image_count == 0 && term->sessions[0].regis.state == 0 && term->tektronix.state == 0) {
+    if (session->kitty.image_count == 0 && term->sessions[0].regis.state == 0 && session->tektronix.state == 0) {
         printf("PASS: All Graphics Reset\n");
     } else {
         printf("FAIL: All Graphics Reset (Kitty=%d, ReGIS=%d, Tek=%d)\n",
-               session->kitty.image_count, term->sessions[0].regis.state, term->tektronix.state);
+               session->kitty.image_count, term->sessions[0].regis.state, session->tektronix.state);
         return 1;
     }
 

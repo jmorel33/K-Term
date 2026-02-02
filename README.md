@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.2
+# K-Term Emulation Library v2.4.3
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.3: Multi-Session Graphics & Lifecycle Fixes**
+*   **Tektronix Isolation:** Moved Tektronix graphics state from global storage to per-session storage, ensuring that vector graphics in one session do not bleed into others.
+*   **Kitty Lifecycle:** Fixed Kitty graphics lifecycle issues during resize events. Images now correctly track their logical position in the scrollback buffer when the grid is resized, preventing visual artifacts or lost images.
+*   **Initialization:** Standardized graphics subsystem initialization (Sixel, ReGIS, Tektronix, Kitty) within `KTerm_InitSession`.
 
 **v2.4.1 Core Advancement: ReGIS Per-Session Architecture**
 Moved ReGIS graphics state (cursor position, macros, colors) from the global `KTerm` struct to the per-session `KTermSession` struct. This ensures that in multi-session environments (e.g., split panes or background sessions), each terminal session maintains its own independent graphics context.

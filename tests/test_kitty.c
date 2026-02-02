@@ -113,7 +113,7 @@ int main() {
     printf("Initializing Terminal...\n");
     KTermConfig config = {0};
     term = KTerm_Create(config);
-    KTerm_SetLevel(term, VT_LEVEL_XTERM);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_XTERM);
 
     TestChunkedTransmission();
     TestPlacement();
