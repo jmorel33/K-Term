@@ -47,6 +47,16 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.4.4: Conversational Completeness & Output Refactor**
+*   **Per-Session Output Ring:** Replaced the legacy linear output buffer with a lock-free, per-session ring buffer (`response_ring`). This ensures thread-safe, non-blocking response generation in multi-session environments and prevents data drops under load.
+*   **Expanded Query Support:** Added new DSR queries for inspecting internal state:
+    *   `CSI ? 10 n`: Graphics capabilities bitmask (Sixel, ReGIS, Kitty, etc.).
+    *   `CSI ? 20 n`: Macro storage usage (slots used, free bytes).
+    *   `CSI ? 30 n`: Session state (active ID, max sessions, scroll region).
+    *   `CSI 98 n`: Internal error count.
+*   **Macro Acknowledgments:** Macro definitions now reply with `DCS > ID ; Status ST` (0=Success, 1=Full, 2=Error), allowing hosts to verify uploads.
+*   **Gateway State Snapshot:** New `GET;STATE` command returns a packed, comprehensive snapshot of the terminal's state (cursor, modes, attributes, scroll region) for seamless reattachment or debugging.
+
 **New in v2.4.3: Multi-Session Graphics & Lifecycle Fixes**
 *   **Tektronix Isolation:** Moved Tektronix graphics state from global storage to per-session storage, ensuring that vector graphics in one session do not bleed into others.
 *   **Kitty Lifecycle:** Fixed Kitty graphics lifecycle issues during resize events. Images now correctly track their logical position in the scrollback buffer when the grid is resized, preventing visual artifacts or lost images.

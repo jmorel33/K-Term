@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.2
+# kterm.h - Technical Reference Manual v2.4.4
 
 **(c) 2026 Jacques Morel**
 
@@ -263,11 +263,11 @@ graph TD
 
 The terminal needs to send data back to the host in response to certain queries or events. This is handled by the output pipeline, or response system.
 
--   **Mechanism:** When the terminal needs to send a response (e.g., a cursor position report `CSI {row};{col} R`), it queues the response.
+-   **Mechanism:** In v2.4.4, each `KTermSession` maintains its own lock-free **Response Ring Buffer** (`response_ring`). This ensures that responses from multiple sessions (e.g., background queries) are safely queued without contention or blocking.
 -   **Events:** The following events generate responses:
     -   **User Input:** Keystrokes (`KTerm_UpdateKeyboard(term)`) and mouse events (`KTerm_UpdateMouse(term)`) are translated into the appropriate VT sequences and queued.
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
--   **Sink (Modern):** Applications can register an `OutputSink` using `KTerm_SetOutputSink`. This bypasses internal buffering, delivering response data directly to the callback as it is generated (zero-copy). This is the preferred method for high-performance integration.
+-   **Sink (Modern):** Applications can register an `OutputSink` using `KTerm_SetOutputSink`. This flushes the ring buffer and subsequently bypasses it, delivering response data directly to the callback as it is generated (zero-copy). This is the preferred method for high-performance integration.
 
 #### 1.3.7. Session Management (Multiplexer)
 
@@ -442,8 +442,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pm l` | `l` | RM | **Reset Mode.** Disables an ANSI or DEC private mode. See Mode table below. |
 | **Device & Status Reporting**| | | |
 | `CSI Ps c` | `c` | DA | **Device Attributes.** `Ps=0` (or omitted) for Primary DA. `>c` for Secondary DA. `=c` for Tertiary DA. |
-| `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
-| `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-Specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
+| `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). `Ps=98`: Error Count. |
+| `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-Specific DSR.** `?10n`: Graphics Caps. `?20n`: Macro Storage. `?30n`: Session State. `?15n`: Printer. `?26n`: Keyboard. `?63n`: Checksum. |
 | `CSI ? 26 ; Ps u`| `u` | DECRQPKU | **Request Programmed Key.** Queries UDK definition for key `Ps`. |
 | `CSI Ps x` | `x` | DECREQTPARM | **Request KTerm Parameters.** Reports terminal settings. |
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
@@ -714,6 +714,7 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
     -   `Pst`: Storage location (0=Volatile, 1=Non-volatile). KTerm currently stores all macros in session memory (volatile).
     -   `Penc`: Encoding (0=Text, 1=Hex Pairs).
     -   `content`: The sequence to be stored.
+    -   **Response:** `DCS > Pid ; Status ST` (0=Success, 1=Storage Full, 2=Error).
 -   **Invoke Macro (DECINVM):** `CSI Pid * z`
     -   Replays the content of the macro with ID `Pid` into the input pipeline.
 -   **Refresh Rate (DECSRFR):** `CSI Ps " t`
@@ -876,6 +877,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
 | `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
+| `GET;STATE`   | - | Responds with `DCS GATE;KTERM;0;STATE;CURSOR:x,y\|SCROLL:t,b\|... ST`. |
 | `GET;OUTPUT` | - | Responds with `DCS GATE;KTERM;0;REPORT;OUTPUT=<1|0> ST`. |
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
 | `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
