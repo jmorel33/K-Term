@@ -933,7 +933,7 @@ static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const c
     if (s_idx != -1) {
         if (strcmp(subcmd, "REGIS_SESSION") == 0) {
              term->regis_target_session = s_idx;
-             KTerm_InitReGIS(term);
+             KTerm_InitReGIS(term, session);
         } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
              term->tektronix_target_session = s_idx;
              KTerm_InitTektronix(term);

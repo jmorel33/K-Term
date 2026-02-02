@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.4.2]
+
+### Stabilization & Lifecycle Fixes
+- **Graphics Lifecycle:** Fixed a confirmed memory leak where Sixel graphics data for background sessions was not correctly freed during `KTerm_Cleanup`.
+- **ReGIS Isolation:** Enforced strict per-session isolation for ReGIS state (colors, positions, macros) by updating `KTerm_InitReGIS` to accept an explicit session context. This resolves potential state crosstalk in multi-session environments.
+- **Documentation:** Updated API documentation to transparently acknowledge that while ReGIS *state* is isolated, the vector output layer is currently a global shared resource. Sixel rendering is also clarified as being limited to the active session overlay for now.
+- **Testing:** Added comprehensive stress tests (`stress_op_queue`, `stress_resize`) and isolation verification (`verify_regis_isolation`) to the test suite.
+
 ## [v2.4.1]
 
 ### ReGIS Per-Session State
