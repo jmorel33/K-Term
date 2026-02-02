@@ -936,10 +936,10 @@ static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const c
              KTerm_InitReGIS(term, session);
         } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
              term->tektronix_target_session = s_idx;
-             KTerm_InitTektronix(term);
+             KTerm_InitTektronix(term, session);
         } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
              term->kitty_target_session = s_idx;
-             KTerm_InitKitty(session);
+             KTerm_InitKitty(term, session);
         } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
              term->sixel_target_session = s_idx;
              KTerm_InitSixelGraphics(term, session);

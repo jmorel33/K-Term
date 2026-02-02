@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 2
+#define KTERM_VERSION_PATCH 3
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.2 (Stabilization & Lifecycle Fixes)"
+#define KTERM_VERSION_STRING "2.4.3 (Multi-Session Graphics & Lifecycle)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1534,6 +1534,15 @@ typedef struct {
     } load;
 } KTermReGIS;
 
+typedef struct {
+    int state;
+    int sub_state;
+    int x, y;
+    int holding_x, holding_y;
+    int extra_byte;
+    bool pen_down;
+} KTermTektronix;
+
 typedef struct KTermSession_T {
 
     // Operation Queue for Grid Mutations
@@ -1607,6 +1616,7 @@ typedef struct KTermSession_T {
     StoredMacros stored_macros;         // For DECDMAC
     SixelGraphics sixel;
     KTermReGIS regis;
+    KTermTektronix tektronix;
     KittyGraphics kitty;
     SoftFont soft_font;                 // For DECDLD
     TitleManager title;
@@ -1858,15 +1868,6 @@ typedef struct KTerm_T {
     KTermBuffer sixel_buffer;
     KTermBuffer sixel_palette_buffer;
     KTermPipeline sixel_pipeline;
-
-    struct {
-        int state;
-        int sub_state;
-        int x, y;
-        int holding_x, holding_y;
-        int extra_byte;
-        bool pen_down;
-    } tektronix;
 
     struct {
         float curvature;
@@ -3009,16 +3010,20 @@ static void KTerm_InitReGIS(KTerm* term, KTermSession* session) {
     term->vector_clear_request = true;
 }
 
-static void KTerm_InitTektronix(KTerm* term) {
-    memset(&term->tektronix, 0, sizeof(term->tektronix));
-    term->tektronix.extra_byte = -1;
+static void KTerm_InitTektronix(KTerm* term, KTermSession* session) {
+    memset(&session->tektronix, 0, sizeof(session->tektronix));
+    session->tektronix.extra_byte = -1;
 
     // Clear Vectors (Graphics) - Shared with ReGIS
+    // Note: Vector output buffer is still global on KTerm, so clearing it affects all sessions.
+    // Ideally, this should only clear if this session is active or we have per-session vector buffers.
+    // For now, we keep the global clear behavior on reset.
     term->vector_count = 0;
     term->vector_clear_request = true;
 }
 
-static void KTerm_InitKitty(KTermSession* session) {
+static void KTerm_InitKitty(KTerm* term, KTermSession* session) {
+    (void)term; // Unused for now, but kept for consistency/future-proofing
     // Free existing images
     if (session->kitty.images) {
         for (int k = 0; k < session->kitty.image_count; k++) {
@@ -3072,7 +3077,7 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
     if (!s) s = session;  // Fallback
 
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_KITTY)) {
-        KTerm_InitKitty(s);
+        KTerm_InitKitty(term, s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_REGIS)) {
         // If regis_target_session is set, use it, otherwise use 's' (which is session or target)
@@ -3087,7 +3092,7 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
         KTerm_InitReGIS(term, s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_TEK)) {
-        KTerm_InitTektronix(term);
+        KTerm_InitTektronix(term, s);
     }
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_SIXEL)) {
         KTermSession* sixel_s = session;
@@ -3134,8 +3139,6 @@ bool KTerm_Init(KTerm* term) {
     term->visual_effects.scanline_intensity = 0.0f;
     term->last_resize_time = -1.0; // Allow immediate first resize
 
-    KTerm_InitTektronix(term);
-
     // Init Multiplexer
     term->mux_input.active = false;
     term->mux_input.prefix_key_code = 'B';
@@ -3160,14 +3163,6 @@ bool KTerm_Init(KTerm* term) {
         KTerm_InitTabStops(term, session);
         KTerm_InitCharacterSets(term, session);
         KTerm_InitInputState(term, session);
-        KTerm_InitSixelGraphics(term, session);
-        KTerm_InitReGIS(term, session);
-
-        // Initialize Kitty Graphics
-        memset(&term->sessions[i].kitty, 0, sizeof(term->sessions[i].kitty));
-        term->sessions[i].kitty.images = NULL;
-        term->sessions[i].kitty.image_count = 0;
-        term->sessions[i].kitty.image_capacity = 0;
 
         // Only the first session is active by default in the multiplexer
         if (i > 0) {
@@ -7453,10 +7448,10 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
             case 38: // DECTEK - Tektronix Mode
                 if (enable) {
                     session->parse_state = PARSE_TEKTRONIX;
-                    term->tektronix.state = 0; // Alpha
-                    term->tektronix.x = 0;
-                    term->tektronix.y = 0;
-                    term->tektronix.pen_down = false;
+                    session->tektronix.state = 0; // Alpha
+                    session->tektronix.x = 0;
+                    session->tektronix.y = 0;
+                    session->tektronix.pen_down = false;
                     term->vector_count = 0; // Clear screen on entry
                 } else {
                     session->parse_state = VT_PARSE_NORMAL;
@@ -11138,28 +11133,28 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
 
     // 2. Control Codes
     if (ch == 0x1D) { // GS - Graph Mode
-        term->tektronix.state = 1; // Graph
-        term->tektronix.pen_down = false; // First coord is Dark (Move)
-        term->tektronix.extra_byte = -1;
+        session->tektronix.state = 1; // Graph
+        session->tektronix.pen_down = false; // First coord is Dark (Move)
+        session->tektronix.extra_byte = -1;
         return;
     }
     if (ch == 0x1F) { // US - Alpha Mode (Text)
-        term->tektronix.state = 0; // Alpha
+        session->tektronix.state = 0; // Alpha
         return;
     }
     if (ch == 0x0C) { // FF - Clear Screen
         term->vector_count = 0;
-        term->tektronix.pen_down = false;
-        term->tektronix.extra_byte = -1;
+        session->tektronix.pen_down = false;
+        session->tektronix.extra_byte = -1;
         return;
     }
     if (ch < 0x20) {
-        if (term->tektronix.state == 0) KTerm_ProcessControlChar(term, session, ch);
+        if (session->tektronix.state == 0) KTerm_ProcessControlChar(term, session, ch);
         return;
     }
 
     // 3. Alpha Mode Handling
-    if (term->tektronix.state == 0) {
+    if (session->tektronix.state == 0) {
         KTerm_ProcessNormalChar(term, session, ch);
         return;
     }
@@ -11176,24 +11171,24 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
 
     if (ch >= 0x20 && ch <= 0x3F) {
         // HiY or HiX
-        if (term->tektronix.sub_state == 1) { // Previous was LoY/Extra
+        if (session->tektronix.sub_state == 1) { // Previous was LoY/Extra
             // Interpret as HiX
             // HiX bits (7-11)
-            term->tektronix.holding_x = (term->tektronix.holding_x & 0x07F) | (val << 7);
-            term->tektronix.sub_state = 2; // Seen HiX
-            term->tektronix.extra_byte = -1; // Reset extra
+            session->tektronix.holding_x = (session->tektronix.holding_x & 0x07F) | (val << 7);
+            session->tektronix.sub_state = 2; // Seen HiX
+            session->tektronix.extra_byte = -1; // Reset extra
         } else {
             // Interpret as HiY
             // HiY bits (7-11)
-            term->tektronix.holding_y = (term->tektronix.holding_y & 0x07F) | (val << 7);
-            term->tektronix.sub_state = 0; // Seen HiY
-            term->tektronix.extra_byte = -1; // Reset extra
+            session->tektronix.holding_y = (session->tektronix.holding_y & 0x07F) | (val << 7);
+            session->tektronix.sub_state = 0; // Seen HiY
+            session->tektronix.extra_byte = -1; // Reset extra
         }
     } else if (ch >= 0x60 && ch <= 0x7F) {
         // LoY or Extra Byte
-        if (term->tektronix.extra_byte != -1) {
+        if (session->tektronix.extra_byte != -1) {
             // We already have a buffered byte -> It was Extra.
-            int eb = term->tektronix.extra_byte;
+            int eb = session->tektronix.extra_byte;
             // Decode Extra Byte (Bits 1-5 of eb correspond to LSBs)
             // Tek 4014 Extra Byte Format:
             // Bits 4-3: Y LSBs (Bits 0-1 of Y)
@@ -11202,39 +11197,39 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
             int y_lsb = (eb >> 2) & 0x03;
 
             // Apply LSBs (Bits 0-1)
-            term->tektronix.holding_x = (term->tektronix.holding_x & ~0x03) | x_lsb;
-            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x03) | y_lsb;
+            session->tektronix.holding_x = (session->tektronix.holding_x & ~0x03) | x_lsb;
+            session->tektronix.holding_y = (session->tektronix.holding_y & ~0x03) | y_lsb;
 
             // Current 'val' is the real LoY (Bits 2-6)
-            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x07C) | (val << 2);
+            session->tektronix.holding_y = (session->tektronix.holding_y & ~0x07C) | (val << 2);
 
-            term->tektronix.extra_byte = -1; // Consumed
-            term->tektronix.sub_state = 1; // LoY processed
+            session->tektronix.extra_byte = -1; // Consumed
+            session->tektronix.sub_state = 1; // LoY processed
         } else {
             // Potential LoY or Extra.
-            term->tektronix.extra_byte = val; // Store raw value
+            session->tektronix.extra_byte = val; // Store raw value
 
             // Apply as LoY (Standard 10-bit behavior compat)
-            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x07C) | (val << 2);
-            term->tektronix.sub_state = 1; // Flag: Next could be HiX
+            session->tektronix.holding_y = (session->tektronix.holding_y & ~0x07C) | (val << 2);
+            session->tektronix.sub_state = 1; // Flag: Next could be HiX
         }
     } else if (ch >= 0x40 && ch <= 0x5F) {
         // LoX - Trigger
-        term->tektronix.holding_x = (term->tektronix.holding_x & ~0x07C) | (val << 2);
+        session->tektronix.holding_x = (session->tektronix.holding_x & ~0x07C) | (val << 2);
 
         // Reset extra byte (sequence ended)
-        term->tektronix.extra_byte = -1;
+        session->tektronix.extra_byte = -1;
 
         // DRAW
-        if (term->tektronix.pen_down) {
+        if (session->tektronix.pen_down) {
             if (term->vector_count < term->vector_capacity) {
                 GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
                 // 12-bit Coordinate Normalization (0-4095 -> 0.0-1.0)
-                float norm_x1 = (float)term->tektronix.x / 4096.0f;
-                float norm_y1 = (float)term->tektronix.y / 4096.0f;
-                float norm_x2 = (float)term->tektronix.holding_x / 4096.0f;
-                float norm_y2 = (float)term->tektronix.holding_y / 4096.0f;
+                float norm_x1 = (float)session->tektronix.x / 4096.0f;
+                float norm_y1 = (float)session->tektronix.y / 4096.0f;
+                float norm_x2 = (float)session->tektronix.holding_x / 4096.0f;
+                float norm_y2 = (float)session->tektronix.holding_y / 4096.0f;
 
                 // Flip Y (Tektronix 0,0 is bottom-left)
                 norm_y1 = 1.0f - norm_y1;
@@ -11253,10 +11248,10 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
         }
 
         // Update Position
-        term->tektronix.x = term->tektronix.holding_x;
-        term->tektronix.y = term->tektronix.holding_y;
-        term->tektronix.pen_down = true;
-        term->tektronix.sub_state = 0;
+        session->tektronix.x = session->tektronix.holding_x;
+        session->tektronix.y = session->tektronix.holding_y;
+        session->tektronix.pen_down = true;
+        session->tektronix.sub_state = 0;
     }
 }
 
@@ -14103,6 +14098,56 @@ static void KTerm_ApplyResizeOp(KTerm* term, KTermSession* session, KTermOp* op)
         }
     }
 
+    // --- Remap Kitty Image start_row ---
+    if (session->kitty.images) {
+        int old_head = session->screen_head;
+        int old_height = session->buffer_height;
+        int history = session->history_rows_populated;
+
+        for (int k = 0; k < session->kitty.image_count; k++) {
+            KittyImageBuffer* img = &session->kitty.images[k];
+
+            // Calculate logical offset from the old top-left (screen_head)
+            // Range: 0 to old_height-1
+            // 0 = Top of visible screen, old_height-1 = Bottom of history (one line above top)
+            int offset = (img->start_row - old_head + old_height) % old_height;
+
+            int logical_y = 0;
+
+            if (offset < old_rows) {
+                // Visible region (0 to old_rows-1)
+                logical_y = offset;
+            } else if (offset >= old_height - history) {
+                // History region (negative Y mapped to end of buffer logic)
+                logical_y = offset - old_height;
+            } else {
+                // Image is in the "discarded" history gap. Mark invisible.
+                img->visible = false;
+                continue;
+            }
+
+            // Safety check for deep history aliasing
+            if (logical_y < 0 && -logical_y >= new_buffer_height) {
+                img->visible = false;
+                continue;
+            }
+
+            // Calculate NEW absolute index in the NEW buffer (Head=0)
+            int new_start_row;
+            if (logical_y >= 0) {
+                new_start_row = logical_y;
+            } else {
+                new_start_row = new_buffer_height + logical_y;
+            }
+
+            // Clamp
+            if (new_start_row < 0) new_start_row += new_buffer_height;
+            new_start_row %= new_buffer_height;
+
+            img->start_row = new_start_row;
+        }
+    }
+
     // Commit changes
     if (session->screen_buffer) KTerm_Free(session->screen_buffer);
     session->screen_buffer = new_screen_buffer;
@@ -14503,6 +14548,12 @@ bool KTerm_InitSession(KTerm* term, int index) {
     // Initialize Op Queue
     KTerm_InitOpQueue(&session->op_queue);
     session->dirty_rect = (KTermRect){0, 0, 0, 0};
+
+    // Initialize Graphics Subsystems (Safely resets if already initialized)
+    KTerm_InitSixelGraphics(term, session);
+    KTerm_InitReGIS(term, session);
+    KTerm_InitTektronix(term, session);
+    KTerm_InitKitty(term, session);
 
     // Initialize session defaults
     EnhancedTermChar default_char = {

@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.4.3]
+
+### Multi-Session Graphics & Lifecycle Fixes
+- **Tektronix Isolation:** Moved Tektronix graphics state from global storage to per-session storage (`KTermSession`), ensuring that vector graphics in one session do not bleed into others. Updated `ProcessTektronixChar` and initialization logic to use the session-specific context.
+- **Kitty Lifecycle:** Fixed Kitty graphics lifecycle issues during resize events. Implemented `KTerm_ApplyResizeOp` remapping logic to correctly update the logical `start_row` of images when the terminal grid is resized, preventing visual artifacts or lost images in the scrollback buffer.
+- **Initialization:** Standardized graphics subsystem initialization (Sixel, ReGIS, Tektronix, Kitty) within `KTerm_InitSession`, removing redundant global initialization code and ensuring all sessions start with a clean, isolated state.
+- **API Update:** Updated `KTerm_InitKitty` signature to match Sixel/ReGIS patterns for consistency.
+
 ## [v2.4.2]
 
 ### Stabilization & Lifecycle Fixes
