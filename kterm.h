@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 4
+#define KTERM_VERSION_PATCH 5
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.4 (Ring Buffer & Extended Queries)"
+#define KTERM_VERSION_STRING "2.4.5 (Hardened Conversational Interface)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -715,6 +715,74 @@ typedef struct {
 // =============================================================================
 // ENHANCED KEYBOARD WITH FULL VT SUPPORT
 // =============================================================================
+
+// Standardized Key Codes for KTerm Input
+typedef enum {
+    KTERM_KEY_UNKNOWN = 0,
+    KTERM_KEY_SPACE = 32,
+    KTERM_KEY_APOSTROPHE = 39,
+    KTERM_KEY_COMMA = 44,
+    KTERM_KEY_MINUS = 45,
+    KTERM_KEY_PERIOD = 46,
+    KTERM_KEY_SLASH = 47,
+    KTERM_KEY_0 = 48, KTERM_KEY_1, KTERM_KEY_2, KTERM_KEY_3, KTERM_KEY_4,
+    KTERM_KEY_5, KTERM_KEY_6, KTERM_KEY_7, KTERM_KEY_8, KTERM_KEY_9,
+    KTERM_KEY_SEMICOLON = 59,
+    KTERM_KEY_EQUAL = 61,
+    KTERM_KEY_A = 65, KTERM_KEY_B, KTERM_KEY_C, KTERM_KEY_D, KTERM_KEY_E,
+    KTERM_KEY_F, KTERM_KEY_G, KTERM_KEY_H, KTERM_KEY_I, KTERM_KEY_J,
+    KTERM_KEY_K, KTERM_KEY_L, KTERM_KEY_M, KTERM_KEY_N, KTERM_KEY_O,
+    KTERM_KEY_P, KTERM_KEY_Q, KTERM_KEY_R, KTERM_KEY_S, KTERM_KEY_T,
+    KTERM_KEY_U, KTERM_KEY_V, KTERM_KEY_W, KTERM_KEY_X, KTERM_KEY_Y,
+    KTERM_KEY_Z,
+    KTERM_KEY_LEFT_BRACKET = 91,
+    KTERM_KEY_BACKSLASH = 92,
+    KTERM_KEY_RIGHT_BRACKET = 93,
+    KTERM_KEY_GRAVE_ACCENT = 96,
+    KTERM_KEY_ESCAPE = 256,
+    KTERM_KEY_ENTER,
+    KTERM_KEY_TAB,
+    KTERM_KEY_BACKSPACE,
+    KTERM_KEY_INSERT,
+    KTERM_KEY_DELETE,
+    KTERM_KEY_RIGHT,
+    KTERM_KEY_LEFT,
+    KTERM_KEY_DOWN,
+    KTERM_KEY_UP,
+    KTERM_KEY_PAGE_UP,
+    KTERM_KEY_PAGE_DOWN,
+    KTERM_KEY_HOME,
+    KTERM_KEY_END,
+    KTERM_KEY_CAPS_LOCK,
+    KTERM_KEY_SCROLL_LOCK,
+    KTERM_KEY_NUM_LOCK,
+    KTERM_KEY_PRINT_SCREEN,
+    KTERM_KEY_PAUSE,
+    KTERM_KEY_F1, KTERM_KEY_F2, KTERM_KEY_F3, KTERM_KEY_F4, KTERM_KEY_F5,
+    KTERM_KEY_F6, KTERM_KEY_F7, KTERM_KEY_F8, KTERM_KEY_F9, KTERM_KEY_F10,
+    KTERM_KEY_F11, KTERM_KEY_F12, KTERM_KEY_F13, KTERM_KEY_F14, KTERM_KEY_F15,
+    KTERM_KEY_F16, KTERM_KEY_F17, KTERM_KEY_F18, KTERM_KEY_F19, KTERM_KEY_F20,
+    KTERM_KEY_F21, KTERM_KEY_F22, KTERM_KEY_F23, KTERM_KEY_F24,
+    KTERM_KEY_KP_0, KTERM_KEY_KP_1, KTERM_KEY_KP_2, KTERM_KEY_KP_3, KTERM_KEY_KP_4,
+    KTERM_KEY_KP_5, KTERM_KEY_KP_6, KTERM_KEY_KP_7, KTERM_KEY_KP_8, KTERM_KEY_KP_9,
+    KTERM_KEY_KP_DECIMAL,
+    KTERM_KEY_KP_DIVIDE,
+    KTERM_KEY_KP_MULTIPLY,
+    KTERM_KEY_KP_SUBTRACT,
+    KTERM_KEY_KP_ADD,
+    KTERM_KEY_KP_ENTER,
+    KTERM_KEY_KP_EQUAL,
+    KTERM_KEY_LEFT_SHIFT,
+    KTERM_KEY_LEFT_CONTROL,
+    KTERM_KEY_LEFT_ALT,
+    KTERM_KEY_LEFT_SUPER,
+    KTERM_KEY_RIGHT_SHIFT,
+    KTERM_KEY_RIGHT_CONTROL,
+    KTERM_KEY_RIGHT_ALT,
+    KTERM_KEY_RIGHT_SUPER,
+    KTERM_KEY_MENU
+} KTermKey;
+
 typedef enum {
     KEY_PRIORITY_LOW = 0,
     KEY_PRIORITY_NORMAL = 1,
@@ -723,7 +791,7 @@ typedef enum {
 } KeyPriority; // For prioritizing events in the buffer (e.g., Ctrl+C)
 
 typedef struct {
-    int key_code;           // Generic key code (backend specific)
+    int key_code;           // KTermKey enum or compatible
     bool ctrl, shift, alt, meta;
     bool is_repeat;
     KeyPriority priority;
@@ -740,6 +808,11 @@ typedef struct {
     int keyboard_variant; // For DECSKCV (0-15)
     char function_keys[24][32];
     bool auto_process;
+
+    // Kitty Keyboard Protocol
+    int kitty_keyboard_flags;   // Current active flags
+    int kitty_keyboard_stack[16]; // Stack for push/pop
+    int kitty_keyboard_stack_depth;
 
     // Event Buffer
     KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
@@ -1718,6 +1791,14 @@ typedef struct KTermSession_T {
         int burst_threshold;
         bool adaptive_processing;
     } VTperformance;
+
+    // Output Ring Buffer
+    struct {
+        char data[KTERM_OUTPUT_PIPELINE_SIZE];
+        atomic_int head;
+        atomic_int tail;
+        atomic_bool overflow;
+    } response_ring;
 
     char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE];
     int response_length;
@@ -2867,6 +2948,11 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
     session->input.keyboard_variant = 0; // Standard
     session->input.use_software_repeat = true;
 
+    // Kitty Keyboard Protocol Defaults
+    session->input.kitty_keyboard_flags = 0;
+    session->input.kitty_keyboard_stack_depth = 0;
+    memset(session->input.kitty_keyboard_stack, 0, sizeof(session->input.kitty_keyboard_stack));
+
     // Initialize function key mappings
     const char* function_key_sequences[] = {
         "\x1BOP", "\x1BOQ", "\x1BOR", "\x1BOS", // F1–F4
@@ -3557,21 +3643,21 @@ void ExecuteDECRQPKU(KTerm* term, KTermSession* session) {
     // F17=31, F18=32, F19=33, F20=34
 
     switch(key_num) {
-        case 17: sit_key = SIT_KEY_F6; break;
-        case 18: sit_key = SIT_KEY_F7; break;
-        case 19: sit_key = SIT_KEY_F8; break;
-        case 20: sit_key = SIT_KEY_F9; break;
-        case 21: sit_key = SIT_KEY_F10; break;
-        case 23: sit_key = SIT_KEY_F11; break;
-        case 24: sit_key = SIT_KEY_F12; break;
-        case 25: sit_key = SIT_KEY_F13; break;
-        case 26: sit_key = SIT_KEY_F14; break;
-        case 28: sit_key = SIT_KEY_F15; break;
-        case 29: sit_key = SIT_KEY_F16; break;
-        case 31: sit_key = SIT_KEY_F17; break;
-        case 32: sit_key = SIT_KEY_F18; break;
-        case 33: sit_key = SIT_KEY_F19; break;
-        case 34: sit_key = SIT_KEY_F20; break;
+        case 17: sit_key = KTERM_KEY_F6; break;
+        case 18: sit_key = KTERM_KEY_F7; break;
+        case 19: sit_key = KTERM_KEY_F8; break;
+        case 20: sit_key = KTERM_KEY_F9; break;
+        case 21: sit_key = KTERM_KEY_F10; break;
+        case 23: sit_key = KTERM_KEY_F11; break;
+        case 24: sit_key = KTERM_KEY_F12; break;
+        case 25: sit_key = KTERM_KEY_F13; break;
+        case 26: sit_key = KTERM_KEY_F14; break;
+        case 28: sit_key = KTERM_KEY_F15; break;
+        case 29: sit_key = KTERM_KEY_F16; break;
+        case 31: sit_key = KTERM_KEY_F17; break;
+        case 32: sit_key = KTERM_KEY_F18; break;
+        case 33: sit_key = KTERM_KEY_F19; break;
+        case 34: sit_key = KTERM_KEY_F20; break;
         default: sit_key = 0; break;
     }
 
@@ -6646,7 +6732,8 @@ static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* para
     }
 
     StreamScanner scanner = { .ptr = params, .len = strlen(params), .pos = 0 };
-    if (Stream_Peek(&scanner) == '?') {
+    char prefix = Stream_Peek(&scanner);
+    if (prefix == '?' || prefix == '>' || prefix == '<' || prefix == '=') {
         Stream_Consume(&scanner);
     }
 
@@ -9130,13 +9217,42 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t) / DECRARA
             break;
         case 'u': // L_CSI_u_RES_CUR
-            if(strstr(session->escape_buffer, "$")) {
+            // Kitty Keyboard Protocol (CSI > u, CSI < u, CSI = u, CSI ? u)
+            if (session->escape_buffer[0] == '>') {
+                int flags = KTerm_GetCSIParam(term, session, 0, 0);
+                if (session->input.kitty_keyboard_stack_depth < 16) {
+                    session->input.kitty_keyboard_stack[session->input.kitty_keyboard_stack_depth++] = session->input.kitty_keyboard_flags;
+                }
+                session->input.kitty_keyboard_flags = flags;
+            } else if (session->escape_buffer[0] == '<') {
+                if (session->input.kitty_keyboard_stack_depth > 0) {
+                    session->input.kitty_keyboard_flags = session->input.kitty_keyboard_stack[--session->input.kitty_keyboard_stack_depth];
+                } else {
+                    session->input.kitty_keyboard_flags = 0;
+                }
+            } else if (session->escape_buffer[0] == '=') {
+                int flags = KTerm_GetCSIParam(term, session, 0, 0);
+                int mode = KTerm_GetCSIParam(term, session, 1, 1);
+                switch(mode) {
+                    case 1: session->input.kitty_keyboard_flags = flags; break;
+                    case 2: session->input.kitty_keyboard_flags |= flags; break;
+                    case 3: session->input.kitty_keyboard_flags &= ~flags; break;
+                }
+            } else if(strstr(session->escape_buffer, "$")) {
                 if (private_mode) ExecuteDECRQTSR(term, session);
                 else ExecuteDECRARA(term, session);
             }
-            else if(private_mode) ExecuteDECRQPKU(term, session); // Also handles DECRQUPSS
+            else if(private_mode) {
+                if (session->param_count == 0) {
+                     char resp[64];
+                     snprintf(resp, sizeof(resp), "\x1B[?%du", session->input.kitty_keyboard_flags);
+                     KTerm_QueueResponse(term, resp);
+                } else {
+                     ExecuteDECRQPKU(term, session);
+                }
+            }
             else KTerm_ExecuteRestoreCursor(term, session);
-            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA / DECRQPKU / DECRQTSR
+            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA / DECRQPKU / DECRQTSR / Kitty
             break;
         case 'v': // L_CSI_v_RECTCOPY
             if(strstr(session->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term, session); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
@@ -15308,8 +15424,75 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
     }
 }
 
+static void KTerm_TranslateKey(KTermSession* session, KTermEvent* event) {
+    if (!session || !event) return;
+
+    // Kitty Keyboard Protocol Handling
+    if (session->input.kitty_keyboard_flags != 0) {
+        int mods = 1;
+        if (event->shift) mods += 1;
+        if (event->alt) mods += 2;
+        if (event->ctrl) mods += 4;
+        if (event->meta) mods += 8;
+
+        int code = 0;
+        bool is_func = false;
+
+        // Map KTermKey to Kitty Code
+        if (event->key_code >= KTERM_KEY_A && event->key_code <= KTERM_KEY_Z) {
+            code = event->key_code + (event->shift ? 0 : 32); // 'A'=65, 'a'=97
+        } else if (event->key_code >= KTERM_KEY_0 && event->key_code <= KTERM_KEY_9) {
+            code = event->key_code;
+        } else {
+            switch(event->key_code) {
+                case KTERM_KEY_ESCAPE: code = 27; break;
+                case KTERM_KEY_ENTER: code = 13; break;
+                case KTERM_KEY_TAB: code = 9; break;
+                case KTERM_KEY_BACKSPACE: code = 127; break;
+                case KTERM_KEY_INSERT: code = 57349; is_func = true; break;
+                case KTERM_KEY_DELETE: code = 57350; is_func = true; break;
+                case KTERM_KEY_LEFT: code = 57351; is_func = true; break;
+                case KTERM_KEY_RIGHT: code = 57352; is_func = true; break;
+                case KTERM_KEY_UP: code = 57353; is_func = true; break;
+                case KTERM_KEY_DOWN: code = 57354; is_func = true; break;
+                case KTERM_KEY_PAGE_UP: code = 57355; is_func = true; break;
+                case KTERM_KEY_PAGE_DOWN: code = 57356; is_func = true; break;
+                case KTERM_KEY_HOME: code = 57357; is_func = true; break;
+                case KTERM_KEY_END: code = 57358; is_func = true; break;
+                case KTERM_KEY_PRINT_SCREEN: code = 57367; is_func = true; break;
+                case KTERM_KEY_PAUSE: code = 57368; is_func = true; break;
+                case KTERM_KEY_MENU: code = 57369; is_func = true; break;
+                default:
+                    if (event->key_code >= KTERM_KEY_F1 && event->key_code <= KTERM_KEY_F12) {
+                        code = 57370 + (event->key_code - KTERM_KEY_F1); is_func = true;
+                    } else if (event->key_code >= KTERM_KEY_KP_0 && event->key_code <= KTERM_KEY_KP_EQUAL) {
+                        code = 57418 + (event->key_code - KTERM_KEY_KP_0); is_func = true;
+                    }
+                    break;
+            }
+        }
+
+        if (code != 0) {
+            // Text or CSI u
+            if (!is_func && mods == 1 && code >= 32 && code <= 126) {
+                 event->sequence[0] = (char)code;
+                 event->sequence[1] = '\0';
+            } else {
+                 snprintf(event->sequence, sizeof(event->sequence), "\x1B[%d;%du", code, mods);
+            }
+            return; // Done
+        }
+    }
+}
+
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
     KTermSession* session = GET_SESSION(term);
+
+    // Apply Key Translation (Kitty or Legacy)
+    // If sequence is empty OR Kitty Mode is active (force override), translate
+    if (event.sequence[0] == '\0' || session->input.kitty_keyboard_flags != 0) {
+        KTerm_TranslateKey(session, &event);
+    }
 
     // Apply 8-bit controls transform if enabled (S8C1T)
     if (session->input.use_8bit_controls && event.sequence[0] == '\x1B' && event.sequence[1] >= 0x40 && event.sequence[1] <= 0x5F && event.sequence[2] == '\0') {

@@ -56,7 +56,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.10. Retro Visual Effects](#410-retro-visual-effects)
     *   [4.11. ReGIS Graphics](#411-regis-graphics)
     *   [4.12. Gateway Protocol](#412-gateway-protocol)
-    *   [4.13. Kitty Graphics Protocol](#413-kitty-graphics-protocol)
+    *   [4.13. Kitty Protocols (Graphics & Keyboard)](#413-kitty-protocols-graphics--keyboard)
     *   [4.14. IBM PC / DOS Compatibility Mode](#414-ibm-pc--dos-compatibility-mode)
     *   [4.15. Dynamic Font Switching & Glyph Centering](#415-dynamic-font-switching--glyph-centering)
     *   [4.16. Printer Controller Mode](#416-printer-controller-mode)
@@ -142,6 +142,7 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Sixel Graphics:** Full support for Sixel graphics (`DCS P q ... ST`) including scrolling modes and cursor placement.
     -   **ReGIS Graphics:** Resolution-independent vector graphics.
     -   **Tektronix 4010/4014:** Vector graphics emulation mode.
+    -   **Modern Input:** Full implementation of the **Kitty Keyboard Protocol** for unambiguous key events (modifiers, release events).
 -   **Rich Text Styling:**
     -   **Underline Styles:** Support for Curly, Dotted, and Dashed underlines via SGR 4:x.
     -   **Attribute Stack:** Push/Pop SGR state (`CSI # {` / `CSI # }`) for robust styling in nested TUI contexts.
@@ -955,7 +956,11 @@ Slots 64-255 are fixed at a period of 1.0 seconds.
 | 62 | 50.723424 | 50723.424 | 0.020 |
 | 63 | 60.000000 | 60000.000 | 0.017 |
 
-### 4.13. Kitty Graphics Protocol
+### 4.13. Kitty Protocols (Graphics & Keyboard)
+
+KTerm implements both the visual and input protocols defined by the Kitty terminal emulator, bringing modern capabilities to the emulation engine.
+
+#### 4.13.1. Kitty Graphics Protocol
 
 v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for displaying high-performance raster graphics in the terminal.
 
@@ -971,6 +976,24 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     -   **Composition:** Images are composited using a dedicated `texture_blit.comp` compute shader, ensuring correct alpha blending and clipping to the specific split-pane they belong to.
     -   **Memory Safety:** Enforces strict VRAM limits (default 64MB) per session to prevent denial-of-service attacks via graphics spam.
     -   **Delete/Clear:** Supports `a=d` (Delete) command with various actions (e.g., `d=a` for all, `d=i` by ID, `d=p` by placement).
+
+#### 4.13.2. Kitty Keyboard Protocol
+
+**v2.4.5** implements the Kitty Keyboard Protocol, a progressive enhancement to standard VT keyboard handling that solves longstanding ambiguity issues (e.g., distinguishing `Tab` from `Ctrl+I`, or `Enter` from `Ctrl+Enter`).
+
+-   **Mechanism:** Applications enable this mode using CSI sequences. Once active, KTerm reports key events using the `CSI u` format.
+-   **Sequences:**
+    -   `CSI > flags u`: Push current flags to a stack and set new flags (Enable).
+    -   `CSI < u`: Pop flags from the stack (Disable/Restore).
+    -   `CSI = flags ; mode u`: Set or modify flags directly.
+    -   `CSI ? flags u`: Query support.
+-   **Format:** `CSI key ; modifiers u`
+    -   `key`: Unicode codepoint or functional key code (from Kitty's Private Use Area).
+    -   `modifiers`: Bitmask + 1 (`1=None`, `2=Shift`, `3=Alt`, `4=Alt+Shift`, `5=Ctrl`, ...).
+-   **Features:**
+    -   **Disambiguation:** Keys like `Tab`, `Escape`, `Enter` are reported distinctly from their control-code equivalents.
+    -   **Modifiers:** Shift, Alt, Ctrl, and Super are reported reliably for all keys.
+    -   **Release Events:** Can optionally report key release events (if requested via flags).
 
 ### 4.14. IBM PC / DOS Compatibility Mode
 

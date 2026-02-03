@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.3
+# K-Term Emulation Library v2.4.5
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.5: Hardened Conversational Interface**
+*   **Kitty Keyboard Protocol:** Full implementation of the progressive keyboard enhancement protocol (`CSI > 1 u`), enabling unambiguous key reporting (distinguishing `Tab` vs `Ctrl+I`, `Enter` vs `Ctrl+Enter`), explicit modifier reporting (Shift, Alt, Ctrl, Super), and key release events.
+*   **Input Hardening:** Introduced `KTermKey` enum for standardized key codes and hardened the `ParseCSI` logic to correctly handle modern prefix parameters (e.g., `>`).
+*   **Ring Buffer Integration:** Finalized the per-session `response_ring` integration for robust, lock-free output interleaving in high-throughput conversational scenarios (AI streaming, chat UIs).
 
 **New in v2.4.4: Conversational Completeness & Output Refactor**
 *   **Per-Session Output Ring:** Replaced the legacy linear output buffer with a lock-free, per-session ring buffer (`response_ring`). This ensures thread-safe, non-blocking response generation in multi-session environments and prevents data drops under load.
