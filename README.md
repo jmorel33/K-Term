@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.7
+# K-Term Emulation Library v2.4.9
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.9: Session Routing, Queries, Macros, State Snapshot**
+*   **Per-Session Response Routing:** Fixed critical data contention issues in multi-session environments. Responses (`DSR`, `OSC`) are now routed exclusively to the originating session's ring buffer (`response_ring`) instead of the active session, ensuring 100% reliable output handling for background tasks.
+*   **Expanded Query Handlers:** Added support for `CSI ?10n` (Graphics Capabilities), `?20n` (Macro Storage), and `?30n` (Session State). Fixed `CSI 98n` (Error Reporting) to comply with standard syntax.
+*   **Macro Acknowledgements:** Implemented robust success/error reporting for DCS macro definitions (`\x1BP1$sOK\x1B\` / `\x1BP1$sERR\x1B\`), enabling reliable upload flows for host applications.
+*   **State Snapshot:** Added `DECRQSS` (`DCS $ q`) support for state snapshots (`state` argument), returning a packed, parsable string of the terminal's cursor, modes, and attributes for session persistence or debugging.
 
 **New in v2.4.8: Parser Hardening & Fuzzing Support**
 *   **Malicious Input Resilience:** Introduced configurable limits for Sixel graphics (`max_sixel_width`/`height`), Kitty graphics (`max_kitty_image_pixels`), and grid operations (`max_ops_per_flush`) to prevent DoS attacks via memory exhaustion or CPU hogging.
@@ -241,8 +247,12 @@ graph TD
             EventQueue["Event Queue (Keyboard/Mouse)"] --> EventProc
 
             InputProc -->|"Byte Stream"| Parser
-            EventProc -->|"Generate Sequences"| Response["Response Callback (To Host)"]
-            EventProc -->|"Zero-Copy Data"| OutputSink["Output Sink (Optional)"]
+
+            Parser -->|"Queue Response"| ResponseRing["Per-Session Response Ring"]
+            EventProc -->|"Generate Sequences"| ResponseRing
+
+            ResponseRing -->|"Drain"| Response["Response Callback (To Host)"]
+            ResponseRing -->|"Drain (Zero-Copy)"| OutputSink["Output Sink (Optional)"]
 
             Parser -->|"Queue Ops"| OpQueue
             OpQueue -->|"Flush & Apply"| StateMod

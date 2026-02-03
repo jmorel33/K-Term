@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.4.9]
+
+### Session Routing, Queries, Macros, State Snapshot
+- **Per-Session Response Routing:** Fixed critical data contention issues in multi-session environments. Responses (`DSR`, `OSC`) are now routed exclusively to the originating session's ring buffer (`response_ring`) instead of the active session, ensuring 100% reliable output handling for background tasks.
+- **Expanded Query Handlers:** Added support for `CSI ?10n` (Graphics Capabilities), `?20n` (Macro Storage), and `?30n` (Session State). Fixed `CSI 98n` (Error Reporting) to comply with standard syntax.
+- **Macro Acknowledgements:** Implemented robust success/error reporting for DCS macro definitions (`\x1BP1$sOK\x1B\` / `\x1BP1$sERR\x1B\`), enabling reliable upload flows for host applications.
+- **State Snapshot:** Added `DECRQSS` (`DCS $ q`) support for state snapshots (`state` argument), returning a packed, parsable string of the terminal's cursor, modes, and attributes for session persistence or debugging.
+
 ## [v2.4.8]
 
 ### Parser Hardening & Fuzzing Support
