@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include "mock_situation.h"
 
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
