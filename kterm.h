@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 6
+#define KTERM_VERSION_PATCH 7
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.6 (Conversational UI Hardening)"
+#define KTERM_VERSION_STRING "2.4.7 (Memory & Sanitizer Hardening)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -3090,6 +3090,17 @@ static void KTerm_CleanupRenderBuffers(KTerm* term) {
 
 static void KTerm_InitReGIS(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
+    // Cleanup existing allocations to prevent leaks on reset
+    for (int i = 0; i < 26; i++) {
+        if (session->regis.macros[i]) {
+            KTerm_Free(session->regis.macros[i]);
+            session->regis.macros[i] = NULL;
+        }
+    }
+    if (session->regis.macro_buffer) {
+        KTerm_Free(session->regis.macro_buffer);
+        session->regis.macro_buffer = NULL;
+    }
     memset(&session->regis, 0, sizeof(session->regis));
     session->regis.screen_min_x = 0;
     session->regis.screen_min_y = 0;
@@ -12668,7 +12679,7 @@ void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
 
     // Update Answerback string based on level
     if (level == VT_LEVEL_ANSI_SYS) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "ANSI.SYS");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "ANSI.SYS");
         // Force IBM Font
         KTerm_SetFont(term, "IBM");
         // Enforce authentic CGA palette (using the standard definitions)
@@ -12676,25 +12687,25 @@ void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
             term->color_palette[i] = (RGB_KTermColor){ cga_colors[i].r, cga_colors[i].g, cga_colors[i].b, 255 };
         }
     } else if (level == VT_LEVEL_XTERM) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm xterm");
     } else if (level >= VT_LEVEL_525) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT525");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT525");
     } else if (level >= VT_LEVEL_520) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT520");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT520");
     } else if (level >= VT_LEVEL_420) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT420");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT420");
     } else if (level >= VT_LEVEL_340) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT340");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT340");
     } else if (level >= VT_LEVEL_320) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT320");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT320");
     } else if (level >= VT_LEVEL_220) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT220");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT220");
     } else if (level >= VT_LEVEL_102) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT102");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT102");
     } else if (level >= VT_LEVEL_100) {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT100");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT100");
     } else {
-        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT52");
+        snprintf(session->answerback_buffer, KTERM_OUTPUT_PIPELINE_SIZE, "kterm VT52");
     }
 
     // Update Device Attribute strings based on the level.
@@ -13989,6 +14000,11 @@ void KTerm_Cleanup(KTerm* term) {
             session->tab_stops.stops = NULL;
         }
 
+        if (session->row_dirty) {
+            KTerm_Free(session->row_dirty);
+            session->row_dirty = NULL;
+        }
+
         // Free Kitty Graphics resources per session
         if (session->kitty.images) {
             for (int k = 0; k < session->kitty.image_count; k++) {
@@ -14044,6 +14060,11 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->vector_staging_buffer) {
         KTerm_Free(term->vector_staging_buffer);
         term->vector_staging_buffer = NULL;
+    }
+
+    if (term->row_scratch_buffer) {
+        KTerm_Free(term->row_scratch_buffer);
+        term->row_scratch_buffer = NULL;
     }
 
     // Free Sixel graphics data buffer
