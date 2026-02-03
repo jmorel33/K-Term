@@ -1266,6 +1266,7 @@ void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); //
 // void UpdateKeyboard(KTerm* term);  // Removed in v2.1
 // bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Removed in v2.1
 void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
+void KTerm_SetFocus(KTerm* term, bool focused); // Report focus state (CSI I/O)
 void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24
 
 // KTerm control and modes
