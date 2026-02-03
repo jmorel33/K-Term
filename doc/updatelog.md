@@ -1,5 +1,24 @@
 # Update Log
 
+## [v2.4.5]
+
+### Hardened Conversational Interface & Kitty Protocol
+- **Kitty Keyboard Protocol:** Full implementation of the progressive keyboard enhancement protocol (`CSI > 1 u`), enabling unambiguous key reporting (distinguishing `Tab` vs `Ctrl+I`, `Enter` vs `Ctrl+Enter`), explicit modifier reporting (Shift, Alt, Ctrl, Super), and key release events.
+- **Input Hardening:** Introduced `KTermKey` enum for standardized key codes and hardened the `ParseCSI` logic to correctly handle modern prefix parameters (e.g., `>`).
+- **Ring Buffer Integration:** Finalized the per-session `response_ring` integration for robust, lock-free output interleaving in high-throughput conversational scenarios (AI streaming, chat UIs).
+
+## [v2.4.4]
+
+### Conversational Completeness & Output Refactor
+- **Per-Session Output Ring:** Replaced the legacy linear output buffer with a lock-free, per-session ring buffer (`response_ring`). This ensures thread-safe, non-blocking response generation in multi-session environments and prevents data drops under load.
+- **Expanded Query Support:** Added new DSR queries for inspecting internal state:
+    -   `CSI ? 10 n`: Graphics capabilities bitmask (Sixel, ReGIS, Kitty, etc.).
+    -   `CSI ? 20 n`: Macro storage usage (slots used, free bytes).
+    -   `CSI ? 30 n`: Session state (active ID, max sessions, scroll region).
+    -   `CSI 98 n`: Internal error count.
+- **Macro Acknowledgments:** Macro definitions now reply with `DCS > ID ; Status ST` (0=Success, 1=Full, 2=Error), allowing hosts to verify uploads.
+- **Gateway State Snapshot:** New `GET;STATE` command returns a packed, comprehensive snapshot of the terminal's state (cursor, modes, attributes, scroll region) for seamless reattachment or debugging.
+
 ## [v2.4.3]
 
 ### Multi-Session Graphics & Lifecycle Fixes
