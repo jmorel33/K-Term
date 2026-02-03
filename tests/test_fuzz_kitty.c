@@ -101,6 +101,25 @@ void TestFuzzKitty(KTerm* term) {
     // Let's just verify normal operation after fuzzing.
 }
 
+void TestPixelLimit(void) {
+    printf("Testing Pixel Limit...\n");
+    KTermConfig config = {0};
+    KTerm* term;
+    const char* seq = "\x1B_Ga=t,s=100,v=100;\x1B\\";
+
+    config.max_kitty_image_pixels = 1000; // 1000 pixels max
+    term = KTerm_Create(config);
+
+    // Send Image with 100x100 = 10000 pixels (Exceeds limit)
+    feed_data(term, seq, strlen(seq));
+
+    // Verify rejection
+    // If rejected, image_count should be 0 (or not incremented if existing)
+    assert(GET_SESSION(term)->kitty.image_count == 0);
+    printf("Passed Pixel Limit Test.\n");
+    KTerm_Destroy(term);
+}
+
 int main() {
     KTermConfig config = {0};
     KTerm* term = KTerm_Create(config);
@@ -110,8 +129,10 @@ int main() {
     // (Implicitly enabled in XTERM level)
 
     TestFuzzKitty(term);
-
     KTerm_Destroy(term);
+
+    TestPixelLimit();
+
     printf("Fuzzing Test Completed Successfully.\n");
     return 0;
 }

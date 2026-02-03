@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.8]
+
+### Parser Hardening & Fuzzing Support
+- **Malicious Input Resilience:** Introduced configurable limits for Sixel graphics (`max_sixel_width`/`height`), Kitty graphics (`max_kitty_image_pixels`), and grid operations (`max_ops_per_flush`) to prevent DoS attacks via memory exhaustion or CPU hogging.
+- **Continuous Fuzzing:** Added `tests/libfuzzer_target.c` and GitHub Actions workflow for continuous regression fuzzing with libFuzzer/AddressSanitizer, targeting parser robustness against malformed sequences.
+- **Strict Mode:** Exposed `strict_mode` in `KTermConfig` to enforce stricter parsing rules.
+
 ## [v2.4.7]
 
 ### Memory & Sanitizer Hardening

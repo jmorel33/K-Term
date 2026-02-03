@@ -47,6 +47,11 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.4.8: Parser Hardening & Fuzzing Support**
+*   **Malicious Input Resilience:** Introduced configurable limits for Sixel graphics (`max_sixel_width`/`height`), Kitty graphics (`max_kitty_image_pixels`), and grid operations (`max_ops_per_flush`) to prevent DoS attacks via memory exhaustion or CPU hogging.
+*   **Continuous Fuzzing:** Added `tests/libfuzzer_target.c` and GitHub Actions workflow for continuous regression fuzzing with libFuzzer/AddressSanitizer, targeting parser robustness against malformed sequences.
+*   **Strict Mode:** Exposed `strict_mode` in `KTermConfig` to enforce stricter parsing rules.
+
 **New in v2.4.7: Memory & Sanitizer Hardening**
 *   **ReGIS Memory Safety:** Fixed memory leaks in ReGIS macro handling by properly freeing existing macros before re-initialization or reset commands (`RESET;REGIS`).
 *   **Shutdown Cleanup:** Enhanced `KTerm_Cleanup` to ensure all internal buffers (e.g., `row_dirty`, `row_scratch_buffer`) are freed, eliminating leaks on session destruction.

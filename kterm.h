@@ -1217,6 +1217,13 @@ typedef struct {
     int width;
     int height;
     ResponseCallback response_callback;
+
+    // Hardening / Limits
+    int max_sixel_width;       // Default: 0 (Unlimited/Term Width)
+    int max_sixel_height;      // Default: 0 (Unlimited/Term Height)
+    int max_kitty_image_pixels;// Default: 0 (Unlimited/Memory Limit applies)
+    int max_ops_per_flush;     // Default: 0 (Unlimited)
+    bool strict_mode;          // Enable strict parsing mode
 } KTermConfig;
 
 KTerm* KTerm_Create(KTermConfig config);
@@ -2897,7 +2904,7 @@ static const struct KTermInterval kterm_ambiguous_table[] = {
 void KTerm_InitVTConformance(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
     GET_SESSION(term)->conformance.level = VT_LEVEL_XTERM;
-    session->conformance.strict_mode = false;
+    session->conformance.strict_mode = term->config.strict_mode;
     KTerm_SetLevel(term, session, session->conformance.level);
     session->conformance.compliance.unsupported_sequences = 0;
     session->conformance.compliance.partial_implementations = 0;
@@ -2975,6 +2982,8 @@ KTerm* KTerm_Create(KTermConfig config) {
     if (!term) return NULL;
 
     // Apply config
+    term->config = config; // Store configuration
+
     if (config.width > 0) term->width = config.width;
     else term->width = DEFAULT_TERM_WIDTH;
 
@@ -11505,6 +11514,14 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
     }
 
     if (kitty->cmd.action == 't' || kitty->cmd.action == 'T' || kitty->cmd.action == 'f') {
+        // Check Limits
+        if (term->config.max_kitty_image_pixels > 0 && kitty->cmd.width > 0 && kitty->cmd.height > 0) {
+            if ((long long)kitty->cmd.width * kitty->cmd.height > term->config.max_kitty_image_pixels) {
+                if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Image exceeds max_kitty_image_pixels");
+                return;
+            }
+        }
+
         KittyImageBuffer* img = NULL;
 
         // Ensure images array exists
@@ -12107,7 +12124,19 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                     target_session->sixel.repeat_count = 0;
                 }
 
-                for (int r = 0; r < repeat; r++) {
+                int actual_repeat = repeat;
+                if (term->config.max_sixel_width > 0) {
+                    int remaining = term->config.max_sixel_width - target_session->sixel.pos_x;
+                    if (remaining < 0) remaining = 0;
+                    if (actual_repeat > remaining) actual_repeat = remaining;
+                }
+
+                for (int r = 0; r < actual_repeat; r++) {
+                    // Check Height Limit
+                    if (term->config.max_sixel_height > 0 && target_session->sixel.pos_y >= term->config.max_sixel_height) {
+                        break;
+                    }
+
                     // Buffer Growth Logic
                     if (target_session->sixel.strip_count >= target_session->sixel.strip_capacity) {
                         size_t new_cap = target_session->sixel.strip_capacity * 2;
@@ -12129,7 +12158,7 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                         strip->color_index = target_session->sixel.color_index;
                     }
                 }
-                target_session->sixel.pos_x += repeat;
+                target_session->sixel.pos_x += actual_repeat;
                 if (target_session->sixel.pos_x > target_session->sixel.max_x) {
                     target_session->sixel.max_x = target_session->sixel.pos_x;
                 }
@@ -14767,7 +14796,11 @@ static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
 
 void KTerm_FlushOps(KTerm* term, KTermSession* session) {
     KTermOpQueue* queue = &session->op_queue;
+    int ops_processed = 0;
     while (queue->count > 0) {
+        if (term->config.max_ops_per_flush > 0 && ops_processed >= term->config.max_ops_per_flush) break;
+        ops_processed++;
+
         KTermOp* op = &queue->ops[queue->head];
 
         switch(op->type) {
