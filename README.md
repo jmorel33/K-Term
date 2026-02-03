@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.6
+# K-Term Emulation Library v2.4.7
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.7: Memory & Sanitizer Hardening**
+*   **ReGIS Memory Safety:** Fixed memory leaks in ReGIS macro handling by properly freeing existing macros before re-initialization or reset commands (`RESET;REGIS`).
+*   **Shutdown Cleanup:** Enhanced `KTerm_Cleanup` to ensure all internal buffers (e.g., `row_dirty`, `row_scratch_buffer`) are freed, eliminating leaks on session destruction.
+*   **Buffer Hardening:** Mitigated buffer overflow risks in `KTerm_SetLevel` by enforcing correct size limits on the answerback buffer.
+*   **Sanitizer Compliance:** The codebase is now verified clean under AddressSanitizer (ASan) and Valgrind, ensuring robust operation in CI environments.
 
 **New in v2.4.6: Conversational UI Hardening**
 *   **Synchronized Output (DECSET 2026):** Implemented support for synchronized updates (`\x1B[?2026h` ... `\x1B[?2026l`), preventing visual tearing during batched high-speed text output (e.g., LLM streaming).

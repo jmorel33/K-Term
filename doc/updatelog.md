@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.4.7]
+
+### Memory & Sanitizer Hardening
+- **ReGIS Memory Safety:** Fixed memory leaks in ReGIS macro handling by properly freeing existing macros before re-initialization or reset commands (`RESET;REGIS`).
+- **Shutdown Cleanup:** Enhanced `KTerm_Cleanup` to ensure all internal buffers (e.g., `row_dirty`, `row_scratch_buffer`) are freed, eliminating leaks on session destruction.
+- **Buffer Hardening:** Mitigated buffer overflow risks in `KTerm_SetLevel` by enforcing correct size limits on the answerback buffer.
+- **Sanitizer Compliance:** The codebase is now verified clean under AddressSanitizer (ASan) and Valgrind, ensuring robust operation in CI environments.
+
 ## [v2.4.6]
 
 ### Conversational UI Hardening

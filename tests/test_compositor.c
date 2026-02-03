@@ -79,7 +79,7 @@ int main() {
 
     // Test 2: Split Screen (Vertical)
     printf("Test 2: Recursive Split Rendering... ");
-    KTermPane* root = term->layout_root;
+    KTermPane* root = term->layout->root;
     KTermPane* new_pane = KTerm_SplitPane(term, root, PANE_SPLIT_VERTICAL, 0.5f);
     int s1_idx = new_pane->session_index;
 

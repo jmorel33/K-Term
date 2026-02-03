@@ -28,7 +28,7 @@ void test_split_screen_input_leak() {
 
     // Create split: Root -> Split(Horizontal) -> [A:0, B:1]
     // Current layout root is Leaf 0.
-    KTermPane* root = term->layout_root;
+    KTermPane* root = term->layout->root;
     // SplitPane(target, type, ratio)
     // We want to split root.
     KTermPane* new_pane = KTerm_SplitPane(term, root, PANE_SPLIT_HORIZONTAL, 0.5f);
@@ -42,17 +42,17 @@ void test_split_screen_input_leak() {
 
     KTerm_Cleanup(term); free(term);
     term = KTerm_Create(config);
-    root = term->layout_root;
+    root = term->layout->root;
     new_pane = KTerm_SplitPane(term, root, PANE_SPLIT_HORIZONTAL, 0.5f);
 
     // Now Child A has session 0, Child B has session 1.
     // Verify layout
-    assert(term->layout_root->type == PANE_SPLIT_HORIZONTAL);
-    assert(term->layout_root->child_a->session_index == 0);
-    assert(term->layout_root->child_b->session_index == 1);
+    assert(term->layout->root->type == PANE_SPLIT_HORIZONTAL);
+    assert(term->layout->root->child_a->session_index == 0);
+    assert(term->layout->root->child_b->session_index == 1);
 
     // Focus session 1 (Child B)
-    term->focused_pane = term->layout_root->child_b;
+    term->layout->focused = term->layout->root->child_b;
     KTerm_SetActiveSession(term, 1);
 
     // Queue Input Event
