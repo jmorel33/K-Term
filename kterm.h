@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 5
+#define KTERM_VERSION_PATCH 6
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.5 (Hardened Conversational Interface)"
+#define KTERM_VERSION_STRING "2.4.6 (Conversational UI Hardening)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -117,7 +117,7 @@ void KTerm_Free(void* ptr);
 #define MAX_SESSIONS 4
 #define DEFAULT_WINDOW_HEIGHT (DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)
 #define MAX_ESCAPE_PARAMS 32
-#define MAX_COMMAND_BUFFER 512 // General purpose buffer for commands, OSC, DCS etc.
+#define MAX_COMMAND_BUFFER 262144 // General purpose buffer for commands, OSC, DCS etc.
 #define MAX_TAB_STOPS 256 // Max columns for tab stops, ensure it's >= DEFAULT_TERM_WIDTH
 #define MAX_TITLE_LENGTH 256
 #define MAX_RECT_OPERATIONS 16
@@ -1827,6 +1827,7 @@ typedef struct KTermSession_T {
 
     kterm_mutex_t lock; // Session Lock (Phase 3)
     int preferred_supplemental;
+    bool synchronized_update; // DECSET 2026
 } KTermSession;
 static inline EnhancedTermChar* GetScreenRow(KTermSession* session, int row) {
     // Access logical row 'row' (0 to HEIGHT-1 or -scrollback) relative to the visible screen top.
@@ -6276,6 +6277,17 @@ void KTerm_ClearEvents(KTerm* term) {
     GET_SESSION(term)->pipeline_overflow = false;
 }
 
+int KTerm_GetPendingEventCount(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
+    int head = atomic_load_explicit(&session->pipeline_head, memory_order_relaxed);
+    int tail = atomic_load_explicit(&session->pipeline_tail, memory_order_relaxed);
+    return (head - tail + KTERM_INPUT_PIPELINE_SIZE) % KTERM_INPUT_PIPELINE_SIZE;
+}
+
+bool KTerm_IsEventOverflow(KTerm* term) {
+    return atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
+}
+
 // =============================================================================
 // BASIC IMPLEMENTATIONS FOR MISSING FUNCTIONS
 // =============================================================================
@@ -7738,6 +7750,11 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                     session->mouse.enabled = false;
                     session->mouse.cursor_x = -1; session->mouse.cursor_y = -1;
                 }
+                break;
+
+            case 2026: // Synchronized Output
+                session->synchronized_update = enable;
+                // Note: Disabling triggers update next frame automatically via row_dirty
                 break;
 
             case 1016: // Pixel Position Mouse Mode
@@ -13418,6 +13435,9 @@ static bool RecursiveUpdateSSBO(KTerm* term, KTermPane* pane, KTermRenderBuffer*
         if (pane->session_index >= 0 && pane->session_index < MAX_SESSIONS) {
             KTermSession* session = &term->sessions[pane->session_index];
             if (session->session_open) {
+                // DECSET 2026: If synchronized update is active, defer visual updates
+                if (session->synchronized_update) return false;
+
                 // Iterate over visible rows of the pane
                 for (int y = 0; y < pane->height; y++) {
                     // Check if this row is dirty in the session
@@ -14977,6 +14997,8 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->options.debug_sequences = false;
     session->options.log_unsupported = true;
 
+    session->synchronized_update = false;
+
     session->session_open = true;
     session->echo_enabled = true;
     session->input_enabled = true;
@@ -15413,6 +15435,19 @@ void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
         session->input.keypad_application_mode = enable;
     } else if (strcmp(mode, "keypad_numeric") == 0) {
         session->input.keypad_application_mode = !enable;
+    }
+}
+
+void KTerm_SetFocus(KTerm* term, bool focused) {
+    KTermSession* session = GET_SESSION(term);
+
+    // Only report if state actually changes
+    if (session->mouse.focused == focused) return;
+    session->mouse.focused = focused;
+
+    if (session->mouse.focus_tracking) {
+        const char* seq = focused ? "\x1B[I" : "\x1B[O";
+        KTerm_QueueResponse(term, seq);
     }
 }
 

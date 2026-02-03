@@ -47,6 +47,11 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.4.6: Conversational UI Hardening**
+*   **Synchronized Output (DECSET 2026):** Implemented support for synchronized updates (`\x1B[?2026h` ... `\x1B[?2026l`), preventing visual tearing during batched high-speed text output (e.g., LLM streaming).
+*   **Focus Tracking:** Added Focus In/Out event reporting (`\x1B[I` / `\x1B[O`) via `KTerm_SetFocus`, enabling host applications to dim interfaces or pause updates when inactive.
+*   **Clipboard Hardening:** Increased `MAX_COMMAND_BUFFER` to 256KB to robustly handle large `OSC 52` clipboard copy/paste payloads and improved verification tests for malicious base64 inputs.
+
 **New in v2.4.5: Hardened Conversational Interface**
 *   **Kitty Keyboard Protocol:** Full implementation of the progressive keyboard enhancement protocol (`CSI > 1 u`), enabling unambiguous key reporting (distinguishing `Tab` vs `Ctrl+I`, `Enter` vs `Ctrl+Enter`), explicit modifier reporting (Shift, Alt, Ctrl, Super), and key release events.
 *   **Input Hardening:** Introduced `KTermKey` enum for standardized key codes and hardened the `ParseCSI` logic to correctly handle modern prefix parameters (e.g., `>`).
