@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 7
+#define KTERM_VERSION_PATCH 9
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.7 (Memory & Sanitizer Hardening)"
+#define KTERM_VERSION_STRING "2.4.9 (Session Routing & State Snapshots)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -8075,10 +8075,10 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
     }
 }
 // Internal Write Primitive (Handles Sink vs Legacy Buffer)
-static void KTerm_WriteInternal(KTerm* term, const char* data, size_t len, bool is_binary) {
+static void KTerm_WriteInternal(KTerm* term, KTermSession* session, const char* data, size_t len, bool is_binary) {
     (void)is_binary;
     // Ring Buffering Logic (Always buffer to prevent drops/blocking)
-    KTermSession* session = GET_SESSION(term);
+    if (!session) session = GET_SESSION(term);
     if (!session->response_enabled) return;
 
     int tail = atomic_load_explicit(&session->response_ring.tail, memory_order_relaxed);
@@ -8110,12 +8110,22 @@ static void KTerm_WriteInternal(KTerm* term, const char* data, size_t len, bool 
 
 void KTerm_QueueResponse(KTerm* term, const char* response) {
     if (!response) return;
-    KTerm_WriteInternal(term, response, strlen(response), false);
+    KTerm_WriteInternal(term, NULL, response, strlen(response), false);
 }
 
 void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
     if (!data || len == 0) return;
-    KTerm_WriteInternal(term, data, len, true);
+    KTerm_WriteInternal(term, NULL, data, len, true);
+}
+
+void KTerm_QueueSessionResponse(KTerm* term, KTermSession* session, const char* response) {
+    if (!response) return;
+    KTerm_WriteInternal(term, session, response, strlen(response), false);
+}
+
+void KTerm_QueueSessionResponseBytes(KTerm* term, KTermSession* session, const char* data, size_t len) {
+    if (!data || len == 0) return;
+    KTerm_WriteInternal(term, session, data, len, true);
 }
 
 // Enhanced ExecuteDSR function with new handlers
@@ -8128,7 +8138,7 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
 
     if (!private_mode) {
         switch (command) {
-            case 5: KTerm_QueueResponse(term, "\x1B[0n"); break;
+            case 5: KTerm_QueueSessionResponse(term, session, "\x1B[0n"); break;
             case 6: {
                 int row = session->cursor.y + 1;
                 int col = session->cursor.x + 1;
@@ -8138,13 +8148,13 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                 }
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[%d;%dR", row, col);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
             case 98: { // Error Reporting (Non-private extension)
                  char response[32];
-                 snprintf(response, sizeof(response), "\x1B[?98;%dn", session->status.error_count);
-                 KTerm_QueueResponse(term, response);
+                 snprintf(response, sizeof(response), "\x1B[98;%dn", session->status.error_count);
+                 KTerm_QueueSessionResponse(term, session, response);
                  break;
             }
             default:
@@ -8158,26 +8168,32 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
         }
     } else {
         switch (command) {
-            case 10: { // Custom: Graphics Capabilities
+            case 10: { // Graphics Capabilities (Sixel/ReGIS/Tek/Kitty/TrueColor)
                 int mask = 0;
                 if (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) mask |= 1;
                 if (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS) mask |= 2;
-                mask |= 4; // Tektronix (Always supported)
-                mask |= 8; // Kitty (Always supported)
+                mask |= 4; // Tektronix
+                mask |= 8; // Kitty
                 if (session->conformance.features & KTERM_FEATURE_TRUE_COLOR) mask |= 16;
-
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?10;%dn", mask);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
-            case 15: KTerm_QueueResponse(term, session->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
-            case 20: { // Custom: Macro Status
-                // Report: ? 20 ; <macros_defined> ; <bytes_free> n
+            case 15: KTerm_QueueSessionResponse(term, session, session->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 20: { // Macro Storage (Free ; Loaded)
                 size_t free_bytes = session->macro_space.total - session->macro_space.used;
                 char response[64];
-                snprintf(response, sizeof(response), "\x1B[?20;%zu;%zun", session->stored_macros.count, free_bytes);
-                KTerm_QueueResponse(term, response);
+                snprintf(response, sizeof(response), "\x1B[?20;%zu;%zun", free_bytes, session->stored_macros.count);
+                KTerm_QueueSessionResponse(term, session, response);
+                break;
+            }
+            case 30: { // Session State (ActiveID ; Count ; Region)
+                char response[64];
+                int id = 0;
+                for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) id = i;
+                snprintf(response, sizeof(response), "\x1B[?30;%d;%d;%d;%dn", id + 1, MAX_SESSIONS, session->cols, session->rows);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
             case 21: { // DECRS - Report Session Status
@@ -8210,38 +8226,27 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                     }
                 }
                 snprintf(response + offset, sizeof(response) - offset, "\x1B\\");
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
-            case 25: KTerm_QueueResponse(term, session->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
+            case 25: KTerm_QueueSessionResponse(term, session, session->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?27;%dn", session->input.keyboard_dialect);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
             case 27: // Locator Type (DECREPTPARM)
-                KTerm_QueueResponse(term, "\x1B[?27;0n"); // No locator
+                KTerm_QueueSessionResponse(term, session, "\x1B[?27;0n"); // No locator
                 break;
-            case 30: { // Custom: Session State
-                // Report: ? 30 ; <active_id> ; <max_sessions> ; <scroll_top> ; <scroll_bottom> n
-                char response[64];
-                snprintf(response, sizeof(response), "\x1B[?30;%d;%d;%d;%dn",
-                         term->active_session + 1,
-                         session->conformance.max_session_count,
-                         session->scroll_top + 1,
-                         session->scroll_bottom + 1);
-                KTerm_QueueResponse(term, response);
-                break;
-            }
-            case 53: KTerm_QueueResponse(term, session->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
-            case 55: KTerm_QueueResponse(term, "\x1B[?57;0n"); break;
-            case 56: KTerm_QueueResponse(term, "\x1B[?56;0n"); break;
+            case 53: KTerm_QueueSessionResponse(term, session, session->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
+            case 55: KTerm_QueueSessionResponse(term, session, "\x1B[?57;0n"); break;
+            case 56: KTerm_QueueSessionResponse(term, session, "\x1B[?56;0n"); break;
             case 62: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?62;%zu;%zun",
                          session->macro_space.used, session->macro_space.total);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
             case 63: {
@@ -8250,20 +8255,20 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                 char response[64];
                 snprintf(response, sizeof(response), "\x1B[?63;%d;%d;%04Xn",
                          page, session->checksum.algorithm, session->checksum.last_checksum);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
-            case 75: KTerm_QueueResponse(term, "\x1B[?75;0n"); break;
+            case 75: KTerm_QueueSessionResponse(term, session, "\x1B[?75;0n"); break;
             case 12: { // DECRSN - Report Session Number
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?12;%dn", term->active_session + 1);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
                 break;
             }
             case 98: { // Error Reporting (Private extension)
                  char response[32];
                  snprintf(response, sizeof(response), "\x1B[?98;%dn", session->status.error_count);
-                 KTerm_QueueResponse(term, response);
+                 KTerm_QueueSessionResponse(term, session, response);
                  break;
             }
             default:
@@ -8338,14 +8343,14 @@ static void ExecuteDECRQPSR(KTerm* term, KTermSession* session) {
             snprintf(response, sizeof(response), "DCS 2 $u %d ; %d;%d;%d;%d ST",
                      session->conformance.level, session->sixel.x, session->sixel.y,
                      session->sixel.width, session->sixel.height);
-            KTerm_QueueResponse(term, response);
+            KTerm_QueueSessionResponse(term, session, response);
             break;
         case 2: // Sixel color palette
             for (int i = 0; i < 256; i++) {
                 RGB_KTermColor c = term->color_palette[i];
                 snprintf(response, sizeof(response), "DCS 1 $u #%d;%d;%d;%d ST",
                          i, c.r, c.g, c.b);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
             }
             break;
         case 3: // ReGIS (unsupported)
@@ -8552,7 +8557,7 @@ void ExecuteDECRQM(KTerm* term, KTermSession* session) {
         snprintf(response, sizeof(response), "\x1B[%d;%d$y", mode, mode_state);
     }
 
-    KTerm_QueueResponse(term, response);
+    KTerm_QueueSessionResponse(term, session, response);
 }
 
 static void ExecuteDECSCUSR_Internal(KTerm* term, KTermSession* session) { // Set Cursor Style
@@ -8706,7 +8711,7 @@ void ExecuteWindowOps(KTerm* term, KTermSession* session) {
             break;
 
         case 11: // Report window state
-            KTerm_QueueResponse(term, "\x1B[1t"); // Always report "not iconified"
+            KTerm_QueueSessionResponse(term, session, "\x1B[1t"); // Always report "not iconified"
             break;
 
         case 13: // Report window position
@@ -8719,7 +8724,7 @@ void ExecuteWindowOps(KTerm* term, KTermSession* session) {
                 } else {
                     snprintf(response, sizeof(response), "\x1B[3;%d;%dt", 100, 100); // Dummy values
                 }
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
             }
             break;
 
@@ -8728,7 +8733,7 @@ void ExecuteWindowOps(KTerm* term, KTermSession* session) {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[9;%d;%dt",
                         KTerm_GetScreenHeight() / DEFAULT_CHAR_HEIGHT, KTerm_GetScreenWidth() / DEFAULT_CHAR_WIDTH);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
             }
             break;
 
@@ -8736,7 +8741,7 @@ void ExecuteWindowOps(KTerm* term, KTermSession* session) {
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]L%s\x1B\\", session->title.icon_title);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
             }
             break;
 
@@ -8744,7 +8749,7 @@ void ExecuteWindowOps(KTerm* term, KTermSession* session) {
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]l%s\x1B\\", session->title.window_title);
-                KTerm_QueueResponse(term, response);
+                KTerm_QueueSessionResponse(term, session, response);
             }
             break;
 
@@ -8818,7 +8823,7 @@ void ExecuteDECREQTPARM(KTerm* term, KTermSession* session) {
     // Format: CSI sol ; par ; nbits ; xspeed ; rspeed ; clkmul ; flags x
     // Simplified response with standard values
     snprintf(response, sizeof(response), "\x1B[%d;1;1;120;120;1;0x", parm + 2);
-    KTerm_QueueResponse(term, response);
+    KTerm_QueueSessionResponse(term, session, response);
 }
 
 void ExecuteDECTST(KTerm* term, KTermSession* session) {
@@ -9284,7 +9289,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
                 if (session->param_count == 0) {
                      char resp[64];
                      snprintf(resp, sizeof(resp), "\x1B[?%du", session->input.kitty_keyboard_flags);
-                     KTerm_QueueResponse(term, resp);
+                     KTerm_QueueSessionResponse(term, session, resp);
                 } else {
                      ExecuteDECRQPKU(term, session);
                 }
@@ -9402,7 +9407,7 @@ void ResetCursorKTermColor(KTerm* term) {
     GET_SESSION(term)->cursor.color.value.index = COLOR_WHITE;
 }
 
-void ProcessKTermColorCommand(KTerm* term, const char* data) {
+void ProcessKTermColorCommand(KTerm* term, KTermSession* session, const char* data) {
     // Format: color_index;rgb:rr/gg/bb or color_index;?
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
@@ -9417,7 +9422,7 @@ void ProcessKTermColorCommand(KTerm* term, const char* data) {
             RGB_KTermColor c = term->color_palette[color_index];
             snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
                     color_index, c.r, c.g, c.b);
-            KTerm_QueueResponse(term, response);
+            KTerm_QueueSessionResponse(term, session, response);
         }
     } else if (Stream_MatchToken(&scanner, "rgb")) {
         // Set color: rgb:rr/gg/bb
@@ -9462,7 +9467,7 @@ void ResetKTermColorPalette(KTerm* term, const char* data) {
     }
 }
 
-void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
+void ProcessForegroundKTermColorCommand(KTerm* term, KTermSession* session, const char* data) {
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
     if (Stream_Peek(&scanner) == '?') {
@@ -9476,7 +9481,7 @@ void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\",
                     fg.value.rgb.r, fg.value.rgb.g, fg.value.rgb.b);
         }
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
     } else if (Stream_MatchToken(&scanner, "rgb")) {
          if (!Stream_Expect(&scanner, ':')) return;
          unsigned int r, g, b;
@@ -9489,7 +9494,7 @@ void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
     }
 }
 
-void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
+void ProcessBackgroundKTermColorCommand(KTerm* term, KTermSession* session, const char* data) {
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
     if (Stream_Peek(&scanner) == '?') {
@@ -9503,7 +9508,7 @@ void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\",
                     bg.value.rgb.r, bg.value.rgb.g, bg.value.rgb.b);
         }
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
     } else if (Stream_MatchToken(&scanner, "rgb")) {
          if (!Stream_Expect(&scanner, ':')) return;
          unsigned int r, g, b;
@@ -9516,7 +9521,7 @@ void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
     }
 }
 
-void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
+void ProcessCursorKTermColorCommand(KTerm* term, KTermSession* session, const char* data) {
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
     if (Stream_Peek(&scanner) == '?') {
@@ -9530,7 +9535,7 @@ void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\",
                     cursor_color.value.rgb.r, cursor_color.value.rgb.g, cursor_color.value.rgb.b);
         }
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
     } else if (Stream_MatchToken(&scanner, "rgb")) {
          if (!Stream_Expect(&scanner, ':')) return;
          unsigned int r, g, b;
@@ -9609,7 +9614,7 @@ static void EncodeBase64(const unsigned char* input, size_t input_len, char* out
     if (out_pos < out_max) output[out_pos] = 0;
 }
 
-void ProcessClipboardCommand(KTerm* term, const char* data) {
+void ProcessClipboardCommand(KTerm* term, KTermSession* session, const char* data) {
     // Clipboard operations: c;base64data or c;?
     // data format is: Pc;Pd
     // Pc = clipboard selection (c, p, s, 0-7)
@@ -9635,9 +9640,9 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
                 EncodeBase64((const unsigned char*)clipboard_text, text_len, encoded_data, encoded_len);
                 char response_header[16];
                 snprintf(response_header, sizeof(response_header), "\x1B]52;%c;", clipboard_selector);
-                KTerm_QueueResponse(term, response_header);
-                KTerm_QueueResponse(term, encoded_data);
-                KTerm_QueueResponse(term, "\x1B\\");
+                KTerm_QueueSessionResponse(term, session, response_header);
+                KTerm_QueueSessionResponse(term, session, encoded_data);
+                KTerm_QueueSessionResponse(term, session, "\x1B\\");
                 KTerm_Free(encoded_data);
             }
             KTerm_FreeString((char*)clipboard_text);
@@ -9645,7 +9650,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
             // Empty clipboard response
             char response[16];
             snprintf(response, sizeof(response), "\x1B]52;%c;\x1B\\", clipboard_selector);
-            KTerm_QueueResponse(term, response);
+            KTerm_QueueSessionResponse(term, session, response);
         }
     } else {
         // Set clipboard data (base64 encoded)
@@ -9699,19 +9704,19 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
             break;
 
         case 4: // Set/query color palette
-            ProcessKTermColorCommand(term, data);
+            ProcessKTermColorCommand(term, session, data);
             break;
 
         case 10: // Query/set foreground color
-            ProcessForegroundKTermColorCommand(term, data);
+            ProcessForegroundKTermColorCommand(term, session, data);
             break;
 
         case 11: // Query/set background color
-            ProcessBackgroundKTermColorCommand(term, data);
+            ProcessBackgroundKTermColorCommand(term, session, data);
             break;
 
         case 12: // Query/set cursor color
-            ProcessCursorKTermColorCommand(term, data);
+            ProcessCursorKTermColorCommand(term, session, data);
             break;
 
         case 50: // Set font
@@ -9719,7 +9724,7 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
             break;
 
         case 52: // Clipboard operations
-            ProcessClipboardCommand(term, data);
+            ProcessClipboardCommand(term, session, data);
             break;
 
         case 104: // Reset color palette
@@ -9776,7 +9781,7 @@ void ProcessTermcapRequest(KTerm* term, KTermSession* session, const char* reque
         snprintf(response, sizeof(response), "\x1BP0+r%s\x1B\\", request);
     }
 
-    KTerm_QueueResponse(term, response);
+    KTerm_QueueSessionResponse(term, session, response);
 }
 
 // Helper function to convert a single hex character to its integer value
@@ -10022,7 +10027,7 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
 
 void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* request) {
     // DECRQSS - Request Status String
-    char response[MAX_COMMAND_BUFFER];
+    char response[2048];
 
     if (strcmp(request, "m") == 0) {
         // Request SGR status - Reconstruct SGR string
@@ -10073,16 +10078,32 @@ void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* reques
         }
 
         snprintf(response, sizeof(response), "\x1BP1$r%sm\x1B\\", sgr);
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
     } else if (strcmp(request, "r") == 0) {
         // Request scrolling region
         snprintf(response, sizeof(response), "\x1BP1$r%d;%dr\x1B\\",
                 GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "q") == 0 || strcmp(request, "state") == 0) {
+        // State Snapshot
+        int cx = session->cursor.x + 1;
+        int cy = session->cursor.y + 1;
+        int st = session->scroll_top + 1;
+        int sb = session->scroll_bottom + 1;
+        unsigned int dec_m = session->dec_modes;
+        int ansi_m = session->ansi_modes.insert_replace ? 1 : 0;
+        int fg = session->current_fg.value.index;
+        int bg = session->current_bg.value.index;
+        unsigned int attr = session->current_attributes;
+
+        snprintf(response, sizeof(response),
+            "\x1BP1$rCURSOR:%d,%d|SCROLL:%d,%d|MODES:%u,%d|ATTR:%d,%d,%u\x1B\\",
+            cx, cy, st, sb, dec_m, ansi_m, fg, bg, attr);
+        KTerm_QueueSessionResponse(term, session, response);
     } else {
         // Unknown request
         snprintf(response, sizeof(response), "\x1BP0$r%s\x1B\\", request);
-        KTerm_QueueResponse(term, response);
+        KTerm_QueueSessionResponse(term, session, response);
     }
 }
 
@@ -10237,9 +10258,7 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
             size_t new_cap = (session->stored_macros.capacity == 0) ? 16 : session->stored_macros.capacity * 2;
             StoredMacro* new_arr = KTerm_Realloc(session->stored_macros.macros, new_cap * sizeof(StoredMacro));
             if (!new_arr) {
-                char msg[32];
-                snprintf(msg, sizeof(msg), "\x1BP>%d;2\x1B\\", pid); // Alloc fail
-                KTerm_QueueResponse(term, msg);
+                KTerm_QueueSessionResponse(term, session, "\x1BP1$sERR\x1B\\"); // Alloc fail
                 return;
             }
             session->stored_macros.macros = new_arr;
@@ -10262,9 +10281,7 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
 
     if (session->stored_macros.total_memory_used + new_len > limit) {
         // Error: Full
-        char msg[32];
-        snprintf(msg, sizeof(msg), "\x1BP>%d;1\x1B\\", pid); // 1 = Full
-        KTerm_QueueResponse(term, msg);
+        KTerm_QueueSessionResponse(term, session, "\x1BP1$sERR\x1B\\");
         macro->content = NULL;
         macro->length = 0;
         return;
@@ -10290,14 +10307,10 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
     if (macro->content) {
         session->stored_macros.total_memory_used += macro->length;
         macro->encoding = penc; // Store encoding type
-        char msg[32];
-        snprintf(msg, sizeof(msg), "\x1BP>%d;0\x1B\\", pid); // 0 = OK
-        KTerm_QueueResponse(term, msg);
+        KTerm_QueueSessionResponse(term, session, "\x1BP1$sOK\x1B\\");
     } else {
         // Error: Alloc fail
-        char msg[32];
-        snprintf(msg, sizeof(msg), "\x1BP>%d;2\x1B\\", pid); // 2 = Alloc Fail
-        KTerm_QueueResponse(term, msg);
+        KTerm_QueueSessionResponse(term, session, "\x1BP1$sERR\x1B\\");
     }
     (void)pst;
 }
@@ -10992,7 +11005,7 @@ static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
          if (session->regis.option_command == 'P') {
              char buf[64];
              snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", session->regis.x, session->regis.y);
-             KTerm_QueueResponse(term, buf);
+             KTerm_QueueSessionResponse(term, session, buf);
          }
     }
 
@@ -11905,7 +11918,7 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 break;
 
             case 'Z': // Identify
-                KTerm_QueueResponse(term, "\x1B/Z");
+                KTerm_QueueSessionResponse(term, session, "\x1B/Z");
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
@@ -12337,7 +12350,7 @@ void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session) {
 
     char response[32];
     snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
-    KTerm_QueueResponse(term, response);
+    KTerm_QueueSessionResponse(term, session, response);
 }
 
 void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
@@ -12975,7 +12988,7 @@ void KTerm_Update(KTerm* term) {
 
             // 1. Send Sequence to Host
             if (event->sequence[0] != '\0') {
-                KTerm_QueueResponse(term, event->sequence);
+                KTerm_QueueSessionResponse(term, session, event->sequence);
 
                 // 2. Local Echo
                 if ((session->dec_modes & KTERM_MODE_LOCALECHO) || (session->dec_modes & KTERM_MODE_DECHDPXM)) {
@@ -13010,7 +13023,7 @@ void KTerm_Update(KTerm* term) {
             if (pos < term->width + 1) {
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
-                KTerm_QueueResponse(term, print_buffer);
+                KTerm_QueueSessionResponse(term, session, print_buffer);
             }
         }
         GET_SESSION(term)->last_cursor_y = GET_SESSION(term)->cursor.y;
@@ -15502,7 +15515,7 @@ void KTerm_SetFocus(KTerm* term, bool focused) {
 
     if (session->mouse.focus_tracking) {
         const char* seq = focused ? "\x1B[I" : "\x1B[O";
-        KTerm_QueueResponse(term, seq);
+        KTerm_QueueSessionResponse(term, session, seq);
     }
 }
 
