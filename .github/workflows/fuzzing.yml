@@ -1,0 +1,29 @@
+name: Continuous Fuzzing
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang llvm
+
+    - name: Build LibFuzzer Target
+      # Compiling with -fsanitize=fuzzer links the libFuzzer runtime which provides main()
+      # -I. allows finding kterm.h from root
+      # -Itests allows finding mock_situation.h
+      run: |
+        clang -O1 -g -fsanitize=fuzzer,address,undefined -I. -Itests tests/libfuzzer_target.c -o kterm_fuzzer -lm
+
+    - name: Run Fuzzer (Regression)
+      # Run for 30 seconds to catch immediate crashes or regressions
+      run: ./kterm_fuzzer -max_total_time=30 -print_final_stats=1
