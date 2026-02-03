@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.10]
+
+### Shader-based Bold & Italic Simulation
+- **Visuals:** Implemented shader-based simulation for **Bold** (smear effect) and **Italic** (coordinate skew) text attributes in `shaders/terminal.comp`.
+- **Accuracy:** Added bounds checking to texture sampling to prevent atlas bleeding when distorting glyph coordinates.
+- **Completeness:** These attributes are now visually distinct even when using the standard bitmap font, improving readability and styling support.
+
 ## [v2.4.9]
 
 ### Session Routing, Queries, Macros, State Snapshot

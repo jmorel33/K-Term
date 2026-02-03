@@ -130,6 +130,18 @@ void main() {
         v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);
     }
 
+    // Italic (Bit 2)
+    if ((flags & (1 << 2)) != 0) {
+        float slant = 0.25; // Skew factor
+        float factor = (1.0 - v_pixel / float(pc.char_size.y));
+        u_pixel -= factor * float(pc.char_size.x) * slant;
+    }
+
+    // Glyph Bounds Check to prevent Atlas Bleeding
+    if (u_pixel < 0.0 || u_pixel >= float(pc.char_size.x) || v_pixel < 0.0 || v_pixel >= float(pc.char_size.y)) {
+         in_glyph_bounds = false;
+    }
+
     float font_val = 0.0;
     if (in_glyph_bounds) {
         ivec2 tex_size = textureSize(font_texture, 0);
@@ -137,6 +149,17 @@ void main() {
                        float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));
 
         font_val = texture(font_texture, uv).r;
+
+        // Bold (Bit 0) - Simulated Smear
+        if ((flags & (1 << 0)) != 0) {
+             float one_pixel_u = 1.0 / float(tex_size.x);
+             // Sample 1 pixel to the left to smear right
+             float font_val_right = 0.0;
+             if (u_pixel >= 1.0) { // Avoid bleeding from left neighbor in atlas
+                 font_val_right = texture(font_texture, uv - vec2(one_pixel_u, 0.0)).r;
+             }
+             font_val = max(font_val, font_val_right);
+        }
     }
 
     // Blink state unpacking
