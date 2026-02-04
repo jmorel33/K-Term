@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.4
+# kterm.h - Technical Reference Manual v2.4.11
 
 **(c) 2026 Jacques Morel**
 
@@ -599,7 +599,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 | `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`KTerm_UpdateKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** (Partially Implemented). Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
-| `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
+| `DCS $q... ST` | `DECRQSS` | **Request Status String.** Queries the status of a specific setting. The payload `...` is the setting to query:<br>- `m`: SGR (Select Graphic Rendition).<br>- `r`: DECSTBM (Scrolling Region).<br>- `s`: DECSLRM (Left/Right Margins).<br>- `t`: DECSLPP (Lines Per Page).<br>- `|`: DECSCPP (Columns Per Page).<br>- `q` or `state`: Gateway State Snapshot.<br>Response: `DCS 1 $ r <Response> ST`. |
 | `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
 | `DCS Pq... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. The parser correctly handles raster attributes, color selection, repeats, and positioning. Requires VT320+ mode. |
 | `DCS GATE... ST`| `GATEWAY` | **Gateway Protocol.** Allows the host to communicate with the embedding application. Format: `DCS GATE <Class>;<ID>;<Command>[;<Params>] ST`. |
