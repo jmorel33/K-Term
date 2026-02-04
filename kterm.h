@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 11
+#define KTERM_VERSION_PATCH 12
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.11 (Extended DECRQSS & Test Suite Modernization)"
+#define KTERM_VERSION_STRING "2.4.12 (XTerm Dynamic Colors Compliance)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -9408,32 +9408,45 @@ void ResetCursorKTermColor(KTerm* term) {
 }
 
 void ProcessKTermColorCommand(KTerm* term, KTermSession* session, const char* data) {
-    // Format: color_index;rgb:rr/gg/bb or color_index;?
+    // Format: color_index;rgb:rr/gg/bb or color_index;? (Supports multiple pairs)
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
-    int color_index;
-    if (!Stream_ReadInt(&scanner, &color_index)) return;
-    if (!Stream_Expect(&scanner, ';')) return;
+    while (scanner.pos < scanner.len) {
+        int color_index;
+        if (!Stream_ReadInt(&scanner, &color_index)) break;
+        if (!Stream_Expect(&scanner, ';')) break;
 
-    if (Stream_Peek(&scanner) == '?') {
-        // Query color
-        char response[128];
-        if (color_index >= 0 && color_index < 256) {
-            RGB_KTermColor c = term->color_palette[color_index];
-            snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
-                    color_index, c.r, c.g, c.b);
-            KTerm_QueueSessionResponse(term, session, response);
-        }
-    } else if (Stream_MatchToken(&scanner, "rgb")) {
-        // Set color: rgb:rr/gg/bb
-        if (!Stream_Expect(&scanner, ':')) return;
-        unsigned int r, g, b;
-        if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
-            Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
-            Stream_ReadHex(&scanner, &b)) {
+        if (Stream_Peek(&scanner) == '?') {
+            Stream_Consume(&scanner); // Consume '?'
+            // Query color
+            char response[128];
             if (color_index >= 0 && color_index < 256) {
-                term->color_palette[color_index] = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                RGB_KTermColor c = term->color_palette[color_index];
+                snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
+                        color_index, c.r, c.g, c.b);
+                KTerm_QueueSessionResponse(term, session, response);
             }
+        } else if (Stream_MatchToken(&scanner, "rgb")) {
+            // Set color: rgb:rr/gg/bb
+            if (!Stream_Expect(&scanner, ':')) break;
+            unsigned int r, g, b;
+            if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
+                Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
+                Stream_ReadHex(&scanner, &b)) {
+                if (color_index >= 0 && color_index < 256) {
+                    term->color_palette[color_index] = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                }
+            }
+        } else {
+            // Unknown spec format, skip to next semicolon or end
+            while (scanner.pos < scanner.len && Stream_Peek(&scanner) != ';') {
+                Stream_Consume(&scanner);
+            }
+        }
+
+        // Consume optional semicolon for next pair
+        if (Stream_Peek(&scanner) == ';') {
+            Stream_Consume(&scanner);
         }
     }
 }
