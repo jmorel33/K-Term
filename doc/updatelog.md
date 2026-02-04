@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.4.16]
+
+### Shader Config Refactor & Hot-Reload
+- **Refactoring:** Moved shader visual parameters (CRT curvature, scanline intensity, glow, noise, flags) from Push Constants to a dedicated `ConfigBuffer` (SSBO). This allows for runtime configuration without pipeline reconstruction.
+- **Hot-Reload:** Implemented `SET;SHADER` and `GET;SHADER` Gateway commands to dynamically configure visual effects.
+- **New Effects:** Added support for Glow (bloom approximation) and Noise effects in the compute shader.
+- **Safety:** Replaced `union` with `struct` in `KTermToken` (kt_parser.h) to prevent data corruption during float parsing (type punning fix).
+- **Compliance:** Reverted `strtod` to `strtof` in parser logic to maintain strict C11 compliance and portability.
+
 ## [v2.4.15]
 
 ### Compositor Modularization

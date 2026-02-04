@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 15
+#define KTERM_VERSION_PATCH 16
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.15 (Compositor Modularization)"
+#define KTERM_VERSION_STRING "2.4.16 (Shader Config Refactor)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -910,6 +910,7 @@ typedef struct {
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
     "    vec2 char_size;\n"
@@ -921,17 +922,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -945,6 +944,7 @@ typedef struct {
     "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
     "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
     "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -957,17 +957,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -984,6 +982,7 @@ typedef struct {
     "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
     "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
     "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -996,17 +995,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -1038,6 +1035,7 @@ typedef struct {
     "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -1050,17 +1048,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -1074,6 +1070,7 @@ typedef struct {
     "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
     "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
     "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -1086,17 +1083,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -1112,6 +1107,7 @@ typedef struct {
     "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
     "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
     "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -1124,17 +1120,15 @@ typedef struct {
     "    uint sel_start;\n"
     "    uint sel_end;\n"
     "    uint sel_active;\n"
-    "    float scanline_intensity;\n"
-    "    float crt_curvature;\n"
     "    uint mouse_cursor_index;\n"
     "    uint64_t terminal_buffer_addr;\n"
     "    uint64_t vector_buffer_addr;\n"
     "    uint64_t font_texture_handle;\n"
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr;\n"
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
-    "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
     "    uint conceal_char_code;\n"
@@ -1849,9 +1843,14 @@ typedef struct KTerm_T {
     KTermBuffer sixel_palette_buffer;
     KTermPipeline sixel_pipeline;
 
+    KTermBuffer shader_config_buffer;
+
     struct {
         float curvature;
         float scanline_intensity;
+        float glow_intensity;
+        float noise_intensity;
+        uint32_t flags;
     } visual_effects;
     bool vector_clear_request;
 
@@ -3094,6 +3093,9 @@ bool KTerm_Init(KTerm* term) {
     term->session_bottom = 1;
     term->visual_effects.curvature = 0.0f;
     term->visual_effects.scanline_intensity = 0.0f;
+    term->visual_effects.glow_intensity = 0.0f;
+    term->visual_effects.noise_intensity = 0.0f;
+    term->visual_effects.flags = SHADER_FLAG_CRT | SHADER_FLAG_SCANLINE | SHADER_FLAG_GLOW | SHADER_FLAG_NOISE; // Enable all by default logic, controlled by intensity
     term->last_resize_time = -1.0; // Allow immediate first resize
 
     // Init Multiplexer
@@ -13268,6 +13270,7 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->dummy_sixel_texture.generation != 0) KTerm_DestroyTexture(&term->dummy_sixel_texture);
     if (term->clear_texture.generation != 0) KTerm_DestroyTexture(&term->clear_texture);
     if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
+    if (term->shader_config_buffer.id != 0) KTerm_DestroyBuffer(&term->shader_config_buffer);
     if (term->compute_pipeline.id != 0) KTerm_DestroyPipeline(&term->compute_pipeline);
     if (term->texture_blit_pipeline.id != 0) KTerm_DestroyPipeline(&term->texture_blit_pipeline);
 

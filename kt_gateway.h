@@ -791,6 +791,39 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (v >= 0) target_session->conceal_char_code = (uint32_t)v;
             }
         }
+    } else if (strcmp(subcmd, "SHADER") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
+            KTermToken token = KTerm_LexerNext(&lexer);
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    char key[64];
+                    int klen = token.length < 63 ? token.length : 63;
+                    strncpy(key, token.start, klen);
+                    key[klen] = '\0';
+                    KTermToken next = KTerm_LexerNext(&lexer);
+                    if (next.type == KT_TOK_EQUALS) {
+                        KTermToken val = KTerm_LexerNext(&lexer);
+                        float v = 0.0f;
+                        if (val.type == KT_TOK_NUMBER) v = val.value.f;
+                        else v = strtof(val.start, NULL);
+
+                        if (strcmp(key, "CRT_CURVATURE") == 0) term->visual_effects.curvature = v;
+                        else if (strcmp(key, "SCANLINE_INTENSITY") == 0) term->visual_effects.scanline_intensity = v;
+                        else if (strcmp(key, "GLOW_INTENSITY") == 0) term->visual_effects.glow_intensity = v;
+                        else if (strcmp(key, "NOISE_INTENSITY") == 0) term->visual_effects.noise_intensity = v;
+                        else if (strcmp(key, "CRT_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_CRT; else term->visual_effects.flags &= ~SHADER_FLAG_CRT; }
+                        else if (strcmp(key, "SCANLINE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_SCANLINE; else term->visual_effects.flags &= ~SHADER_FLAG_SCANLINE; }
+                        else if (strcmp(key, "GLOW_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_GLOW; else term->visual_effects.flags &= ~SHADER_FLAG_GLOW; }
+                        else if (strcmp(key, "NOISE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_NOISE; else term->visual_effects.flags &= ~SHADER_FLAG_NOISE; }
+
+                        token = KTerm_LexerNext(&lexer);
+                    } else token = next;
+                } else token = KTerm_LexerNext(&lexer);
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+            }
+        }
     } else if (strcmp(subcmd, "BLINK") == 0) {
          if (Stream_Expect(scanner, ';')) {
              KTermLexer lexer;
@@ -1060,6 +1093,12 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
         } else {
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
         }
+        KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "SHADER") == 0) {
+        char response[512];
+        snprintf(response, sizeof(response),
+            "\x1BPGATE;KTERM;%s;REPORT;SHADER=CRT_CURVATURE:%f,SCANLINE_INTENSITY:%f,GLOW_INTENSITY:%f,NOISE_INTENSITY:%f,FLAGS:%u\x1B\\",
+            id, term->visual_effects.curvature, term->visual_effects.scanline_intensity, term->visual_effects.glow_intensity, term->visual_effects.noise_intensity, term->visual_effects.flags);
         KTerm_QueueResponse(term, response);
     } else if (strcmp(subcmd, "STATE") == 0) {
         char response[1024];
