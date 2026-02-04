@@ -12,17 +12,35 @@ void main() {
     uvec2 pixel_coords = gl_GlobalInvocationID.xy;
     if (pixel_coords.x >= uint(pc.screen_size.x) || pixel_coords.y >= uint(pc.screen_size.y)) return;
 
+    // Fetch Configuration
+    float crt_curvature = 0.0;
+    float scanline_intensity = 0.0;
+    float glow_intensity = 0.0;
+    float noise_intensity = 0.0;
+    float visual_bell_intensity = 0.0;
+    uint config_flags = 0;
+
+    if (pc.shader_config_addr != 0) {
+        ConfigBuffer config = ConfigBuffer(pc.shader_config_addr);
+        config_flags = config.flags;
+        if ((config_flags & 1) != 0) crt_curvature = config.crt_curvature; // Flag 1: CRT
+        if ((config_flags & 2) != 0) scanline_intensity = config.scanline_intensity; // Flag 2: Scanline
+        if ((config_flags & 4) != 0) glow_intensity = config.glow_intensity; // Flag 4: Glow
+        if ((config_flags & 8) != 0) noise_intensity = config.noise_intensity; // Flag 8: Noise
+        visual_bell_intensity = config.visual_bell_intensity;
+    }
+
     vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;
 
     // Load existing background (Z < 0 images)
     vec4 existing_color = imageLoad(output_image, ivec2(pixel_coords));
 
     // CRT Curvature Effect
-    if (pc.crt_curvature > 0.0) {
+    if (crt_curvature > 0.0) {
         vec2 d = abs(uv_screen - 0.5);
         d = pow(d, vec2(2.0));
         uv_screen -= 0.5;
-        uv_screen *= 1.0 + dot(d, d) * pc.crt_curvature;
+        uv_screen *= 1.0 + dot(d, d) * crt_curvature;
         uv_screen += 0.5;
         if (uv_screen.x < 0.0 || uv_screen.x > 1.0 || uv_screen.y < 0.0 || uv_screen.y > 1.0) {
             imageStore(output_image, ivec2(pixel_coords), vec4(0.0));
@@ -294,20 +312,35 @@ void main() {
     }
 
     // Scanlines & Vignette (Retro Effects)
-    if (pc.scanline_intensity > 0.0) {
+    if (scanline_intensity > 0.0) {
         float scanline = sin(uv_screen.y * pc.screen_size.y * 3.14159);
-        pixel_color.rgb *= (1.0 - pc.scanline_intensity) + pc.scanline_intensity * (0.5 + 0.5 * scanline);
+        pixel_color.rgb *= (1.0 - scanline_intensity) + scanline_intensity * (0.5 + 0.5 * scanline);
     }
-    if (pc.crt_curvature > 0.0) {
+    if (crt_curvature > 0.0) {
         vec2 d = abs(uv_screen - 0.5) * 2.0;
         d = pow(d, vec2(2.0));
         float vig = 1.0 - dot(d, d) * 0.1;
-                pixel_color.rgb *= vig;
+        pixel_color.rgb *= vig;
+    }
+
+    // Simple Glow (Bloom approximation) - Flag 4
+    if (glow_intensity > 0.0) {
+        // Very basic bloom: add a fraction of the color back to itself to saturate/brighten
+        // Real bloom needs multipass or neighbor sampling which is expensive here.
+        // We simulate "phosphor glow" by boosting brightness based on intensity
+        pixel_color.rgb += pixel_color.rgb * glow_intensity * 0.5;
+    }
+
+    // Noise - Flag 8
+    if (noise_intensity > 0.0) {
+        // Simple hash noise
+        float noise = fract(sin(dot(uv_screen * pc.time, vec2(12.9898, 78.233))) * 43758.5453);
+        pixel_color.rgb = mix(pixel_color.rgb, vec3(noise), noise_intensity * 0.1);
     }
 
     // Visual Bell Flash
-    if (pc.visual_bell_intensity > 0.0) {
-        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);
+    if (visual_bell_intensity > 0.0) {
+        pixel_color = mix(pixel_color, vec4(1.0), visual_bell_intensity);
     }
 
     // Debug Grid

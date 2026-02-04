@@ -24,7 +24,7 @@ typedef struct {
     KTermTokenType type;
     const char* start;  // Pointer into the source string (zero-copy)
     int length;
-    union {
+    struct {
         int i;
         float f;
     } value;            // Pre-parsed numeric value

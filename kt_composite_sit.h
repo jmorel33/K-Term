@@ -42,6 +42,16 @@ typedef struct {
 } GPUSixelStrip;
 
 typedef struct {
+    float crt_curvature;
+    float scanline_intensity;
+    float glow_intensity;
+    float noise_intensity;
+    float visual_bell_intensity;
+    uint32_t flags; // 1=CRT, 2=Scanline, 4=Glow, 8=Noise
+    float padding[2];
+} GPUShaderConfig;
+
+typedef struct {
     KTermVector2 screen_size;
     KTermVector2 char_size;
     KTermVector2 grid_size;
@@ -54,17 +64,24 @@ typedef struct {
     uint32_t sel_start;
     uint32_t sel_end;
     uint32_t sel_active;
-    float scanline_intensity;
-    float crt_curvature;
+
+    // Moved to GPUShaderConfig (via shader_config_addr)
+    // float scanline_intensity;
+    // float crt_curvature;
+
     uint32_t mouse_cursor_index;
     uint64_t terminal_buffer_addr;
     uint64_t vector_buffer_addr;
     uint64_t font_texture_handle;
     uint64_t sixel_texture_handle;
     uint64_t vector_texture_handle;
+
+    uint64_t shader_config_addr; // New: Address of GPUShaderConfig buffer
+
     uint32_t atlas_cols;
     uint32_t vector_count;
-    float visual_bell_intensity;
+
+    // float visual_bell_intensity; // Moved to GPUShaderConfig
     int sixel_y_offset;
     uint32_t grid_color;
     uint32_t conceal_char_code;
@@ -82,6 +99,12 @@ typedef struct {
 #define GPU_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
 #define GPU_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
 #define GPU_ATTR_CONCEAL            (1 << 10)
+
+// Shader Variant Flags
+#define SHADER_FLAG_CRT      (1 << 0)
+#define SHADER_FLAG_SCANLINE (1 << 1)
+#define SHADER_FLAG_GLOW     (1 << 2)
+#define SHADER_FLAG_NOISE    (1 << 3)
 
 typedef struct {
     int x, y, width, height;
@@ -672,12 +695,30 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
          if (start_idx > end_idx) { uint32_t t = start_idx; start_idx = end_idx; end_idx = t; }
          pc->sel_start = start_idx; pc->sel_end = end_idx; pc->sel_active = 1;
     }
-    pc->scanline_intensity = term->visual_effects.scanline_intensity;
-    pc->crt_curvature = term->visual_effects.curvature;
-    if (GET_SESSION(term)->visual_bell_timer > 0.0) {
-        float intensity = (float)(GET_SESSION(term)->visual_bell_timer / 0.2);
-        if (intensity > 1.0f) intensity = 1.0f; else if (intensity < 0.0f) intensity = 0.0f;
-        pc->visual_bell_intensity = intensity;
+
+    // Shader Config Buffer Update
+    // Allocate if needed (Fixed small size)
+    if (term->shader_config_buffer.id == 0) {
+        KTerm_CreateBuffer(sizeof(GPUShaderConfig), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->shader_config_buffer);
+    }
+    if (term->shader_config_buffer.id != 0) {
+        GPUShaderConfig config = {0};
+        config.scanline_intensity = term->visual_effects.scanline_intensity;
+        config.crt_curvature = term->visual_effects.curvature;
+        config.glow_intensity = term->visual_effects.glow_intensity;
+        config.noise_intensity = term->visual_effects.noise_intensity;
+        config.flags = term->visual_effects.flags;
+
+        if (GET_SESSION(term)->visual_bell_timer > 0.0) {
+            float intensity = (float)(GET_SESSION(term)->visual_bell_timer / 0.2);
+            if (intensity > 1.0f) intensity = 1.0f; else if (intensity < 0.0f) intensity = 0.0f;
+            config.visual_bell_intensity = intensity;
+        } else {
+            config.visual_bell_intensity = 0.0f;
+        }
+
+        KTerm_UpdateBuffer(term->shader_config_buffer, 0, sizeof(GPUShaderConfig), &config);
+        pc->shader_config_addr = KTerm_GetBufferAddress(term->shader_config_buffer);
     }
 
     if (focused_session) {
