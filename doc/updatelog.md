@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.14]
+
+### Refactoring & Magic Numbers
+- **Session Cleanup Refactor:** Extracted `KTerm_CleanupSession` helper function to consolidate and fix memory cleanup logic for session resources (screen buffers, graphics state, macros, etc.), addressing potential leaks in multi-session scenarios.
+- **Initialization Refactor:** Extracted `KTerm_ResetSessionDefaults` to separate default state initialization from memory allocation in `KTerm_InitSession`.
+- **Magic Numbers:** Replaced hardcoded blink rate oscillator slots with named constants `KTERM_OSC_SLOT_FAST_BLINK` (30) and `KTERM_OSC_SLOT_SLOW_BLINK` (35) for better maintainability.
+
 ## [v2.4.13]
 
 ### DECRQSS Extensions & Fixes
