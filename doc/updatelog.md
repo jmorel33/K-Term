@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.4.15]
+
+### Compositor Modularization
+- **Modularization:** Extracted the layout compositing logic into a new module `kt_composite_sit.h`, implementing `KTermCompositor`.
+- **Decoupling:** Decoupled `KTerm` core from direct render buffer management. The `KTerm` struct now holds a `KTermCompositor` instance.
+- **Refactoring:** Moved GPU structure definitions (`GPUCell`, `GPUVectorLine`, etc.) and `KTermRenderBuffer` to the new module.
+- **Implementation:** `KTerm_PrepareRenderBuffer`, `KTerm_Draw` logic, and `KTerm_Resize` logic now delegate to `KTermCompositor_*` functions.
+- **Fixes:** Addressed dependency issues with `GetScreenRow` and `KTerm_BuildRun` by careful ordering of includes and moving helper functions.
+
 ## [v2.4.14]
 
 ### Refactoring & Magic Numbers

@@ -10,8 +10,6 @@ void test_op_queue_integration(void) {
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
 
-    session->use_op_queue = true;
-
     // Write 'A'
     KTerm_WriteChar(term, 'A');
     KTerm_Update(term);
@@ -30,8 +28,6 @@ void test_scroll_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-
-    session->use_op_queue = true;
 
     // Fill screen with 'A'
     for(int i=0; i<term->height; i++) {
