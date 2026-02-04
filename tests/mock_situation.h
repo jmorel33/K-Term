@@ -38,6 +38,8 @@ typedef struct { unsigned char r, g, b, a; } Color;
 
 // Globals for tests
 static char last_clipboard_text[1024 * 1024]; // 1MB buffer for test
+static double mock_time = 0.0;
+static inline void MockSetTime(double t) { mock_time = t; }
 
 // Key definitions
 #define SIT_KEY_F1 290
@@ -103,7 +105,7 @@ static inline void SituationCmdPipelineBarrier(SituationCommandBuffer cmd, int s
 static inline int SituationCmdPresent(SituationCommandBuffer cmd, SituationTexture texture) { return SITUATION_SUCCESS; }
 
 static inline bool SituationTimerGetOscillatorState(int slot) { return true; }
-static inline double SituationTimerGetTime() { return 0.0; }
+static inline double SituationTimerGetTime() { return mock_time; }
 static inline float SituationGetFrameTime() { return 0.016f; }
 
 // Corrected signature: unsigned char** data
