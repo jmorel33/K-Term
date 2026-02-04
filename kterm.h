@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 16
+#define KTERM_VERSION_PATCH 17
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.16 (Shader Config Refactor)"
+#define KTERM_VERSION_STRING "2.4.17 (Input Pipeline Decoupling)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1224,6 +1224,7 @@ void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buf
 
 // Enhanced pipeline management (for host input)
 bool KTerm_WriteChar(KTerm* term, unsigned char ch);
+size_t KTerm_PushInput(KTerm* term, const void* data, size_t length);
 bool KTerm_WriteString(KTerm* term, const char* str);
 bool KTerm_WriteFormat(KTerm* term, const char* format, ...);
 // bool PipelineWriteUTF8(const char* utf8_str); // Requires UTF-8 decoding logic
@@ -1550,6 +1551,32 @@ typedef struct {
     bool pen_down;
 } KTermTektronix;
 
+// =============================================================================
+// INPUT PIPELINE QUEUE (SPSC)
+// =============================================================================
+typedef enum {
+    KTERM_BACKPRESSURE_DROP = 0, // Drop new events on overflow
+    KTERM_BACKPRESSURE_NOTIFY,   // Reserved: Send XOFF or similar (not fully implemented)
+} KTermBackpressureMode;
+
+typedef struct {
+    unsigned char* buffer;
+    size_t capacity;
+    atomic_size_t head; // Producer index
+    atomic_size_t tail; // Consumer index
+    atomic_bool overflow;
+    KTermBackpressureMode mode;
+    atomic_size_t dropped_count;
+} KTermInputQueue;
+
+// Queue API Declarations
+bool KTerm_InputQueue_Init(KTermInputQueue* queue, size_t capacity);
+void KTerm_InputQueue_Free(KTermInputQueue* queue);
+size_t KTerm_InputQueue_Push(KTermInputQueue* queue, const void* data, size_t len);
+size_t KTerm_InputQueue_Pop(KTermInputQueue* queue, void* buffer, size_t max_len);
+size_t KTerm_InputQueue_Pending(KTermInputQueue* queue);
+void KTerm_InputQueue_Clear(KTermInputQueue* queue);
+
 typedef struct KTermSession_T {
 
     // Operation Queue for Grid Mutations
@@ -1707,12 +1734,7 @@ typedef struct KTermSession_T {
 
     // Input pipeline specific to session?
     // Usually on KTerm, but if per-session...
-    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE];
-    int input_pipeline_length;
-    atomic_int pipeline_head;
-    atomic_int pipeline_tail;
-    int pipeline_count;
-    atomic_bool pipeline_overflow;
+    KTermInputQueue input_queue;
     bool xoff_sent;
 
     // Performance
@@ -1917,14 +1939,6 @@ typedef struct KTerm_T {
 
     KTermOutputSink output_sink;
     void* output_sink_ctx;
-
-    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE];
-    int input_pipeline_length;
-    atomic_int pipeline_head;
-    atomic_int pipeline_tail;
-    int pipeline_count;
-    atomic_bool pipeline_overflow;
-    bool xoff_sent;
 
     KTermInputConfig input;
 
@@ -6089,25 +6103,8 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
 // =============================================================================
 // Internal helper for writing to a specific session without changing global state
 static bool KTerm_WriteCharToSessionInternal(KTerm* term, KTermSession* session, unsigned char ch) {
-    (void)term; // Currently unused, but kept for signature consistency
-
-    // Load head relaxed (only this thread writes to it)
-    int current_head = atomic_load_explicit(&session->pipeline_head, memory_order_relaxed);
-    int next_head = (current_head + 1) % sizeof(session->input_pipeline);
-
-    // Load tail acquire (another thread writes to it)
-    int current_tail = atomic_load_explicit(&session->pipeline_tail, memory_order_acquire);
-
-    if (next_head == current_tail) {
-        atomic_store_explicit(&session->pipeline_overflow, true, memory_order_relaxed);
-        return false;
-    }
-
-    session->input_pipeline[current_head] = ch;
-
-    // Store head release (publishes the data write)
-    atomic_store_explicit(&session->pipeline_head, next_head, memory_order_release);
-    return true;
+    (void)term;
+    return KTerm_InputQueue_Push(&session->input_queue, &ch, 1) == 1;
 }
 
 // ENHANCED PIPELINE PROCESSING
@@ -6119,16 +6116,18 @@ bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
     return KTerm_WriteCharToSessionInternal(term, session, ch);
 }
 
+size_t KTerm_PushInput(KTerm* term, const void* data, size_t length) {
+    if (!term || !data) return 0;
+    KTermSession* session = &term->sessions[term->active_session];
+    return KTerm_InputQueue_Push(&session->input_queue, data, length);
+}
+
 bool KTerm_WriteString(KTerm* term, const char* str) {
     if (!str) return false;
-
-    while (*str) {
-        if (!KTerm_WriteChar(term, *str)) {
-            return false;
-        }
-        str++;
-    }
-    return true;
+    KTermSession* session = &term->sessions[term->active_session];
+    size_t len = strlen(str);
+    size_t written = KTerm_InputQueue_Push(&session->input_queue, str, len);
+    return written == len;
 }
 
 bool KTerm_WriteFormat(KTerm* term, const char* format, ...) {
@@ -6142,21 +6141,15 @@ bool KTerm_WriteFormat(KTerm* term, const char* format, ...) {
 }
 
 void KTerm_ClearEvents(KTerm* term) {
-    GET_SESSION(term)->pipeline_head = 0;
-    GET_SESSION(term)->pipeline_tail = 0;
-    GET_SESSION(term)->pipeline_count = 0;
-    GET_SESSION(term)->pipeline_overflow = false;
+    KTerm_InputQueue_Clear(&GET_SESSION(term)->input_queue);
 }
 
 int KTerm_GetPendingEventCount(KTerm* term) {
-    KTermSession* session = GET_SESSION(term);
-    int head = atomic_load_explicit(&session->pipeline_head, memory_order_relaxed);
-    int tail = atomic_load_explicit(&session->pipeline_tail, memory_order_relaxed);
-    return (head - tail + KTERM_INPUT_PIPELINE_SIZE) % KTERM_INPUT_PIPELINE_SIZE;
+    return (int)KTerm_InputQueue_Pending(&GET_SESSION(term)->input_queue);
 }
 
 bool KTerm_IsEventOverflow(KTerm* term) {
-    return atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
+    return atomic_load_explicit(&GET_SESSION(term)->input_queue.overflow, memory_order_relaxed);
 }
 
 // =============================================================================
@@ -6406,7 +6399,7 @@ void KTerm_SetPipelineTimeBudget(KTerm* term, double pct) {
 void KTerm_ShowDiagnostics(KTerm* term) {
     KTermStatus status = KTerm_GetStatus(term);
     KTerm_WriteFormat(term, "=== Buffer Diagnostics ===\n");
-    KTerm_WriteFormat(term, "Pipeline: %zu/%d bytes\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
+    KTerm_WriteFormat(term, "Pipeline: %zu/%zu bytes\n", status.pipeline_usage, GET_SESSION(term)->input_queue.capacity);
     KTerm_WriteFormat(term, "Keyboard: %zu events\n", status.key_usage);
     KTerm_WriteFormat(term, "Overflow: %s\n", status.overflow_detected ? "YES" : "No");
     KTerm_WriteFormat(term, "Avg Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
@@ -6464,64 +6457,58 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
 }
 
 static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
-    // Load tail relaxed (only this thread writes to it)
-    int current_tail = atomic_load_explicit(&session->pipeline_tail, memory_order_relaxed);
-    // Load head acquire (another thread writes to it)
-    int current_head = atomic_load_explicit(&session->pipeline_head, memory_order_acquire);
+    if (!term || !session) return;
 
-    if (current_head == current_tail) {
-        return;
-    }
-
-    // Capture the index of the session OWNING this buffer
-    // int processing_session_idx = term->active_session;
-
-    double start_time = KTerm_TimerGetTime();
-    int chars_processed = 0;
+    // Performance limiting
     int target_chars = session->VTperformance.chars_per_frame;
+    if (target_chars <= 0) target_chars = 1000;
 
-    int pipeline_usage = (current_head - current_tail + sizeof(session->input_pipeline)) % sizeof(session->input_pipeline);
+    size_t pending = KTerm_InputQueue_Pending(&session->input_queue);
+    if (pending == 0) return;
 
-    if (session->dec_modes & KTERM_MODE_DECXRLM) {
-        int usage_percent = (pipeline_usage * 100) / (int)sizeof(session->input_pipeline);
-        if (usage_percent > 75 && !session->xoff_sent) {
-            KTerm_QueueResponseBytes(term, "\x13", 1); // XOFF
-            session->xoff_sent = true;
-        } else if (usage_percent < 25 && session->xoff_sent) {
-            KTerm_QueueResponseBytes(term, "\x11", 1); // XON
-            session->xoff_sent = false;
-        }
-    }
-
-    if (pipeline_usage > session->VTperformance.burst_threshold) {
+    // Burst mode logic
+    if (pending > (size_t)session->VTperformance.burst_threshold) {
         target_chars *= 2;
         session->VTperformance.burst_mode = true;
-    } else if (pipeline_usage < target_chars) {
-        target_chars = pipeline_usage;
+    } else if (pending < (size_t)target_chars) {
+        target_chars = (int)pending;
         session->VTperformance.burst_mode = false;
     }
 
-    while (chars_processed < target_chars) {
-        // Re-check for empty (we are consuming)
-        // Note: current_head is a snapshot. If producer added more, we will process them next frame.
-        if (current_tail == current_head) break;
+    // DECXRLM Logic
+    if (session->dec_modes & KTERM_MODE_DECXRLM) {
+        size_t capacity = session->input_queue.capacity;
+        if (capacity > 0) {
+            int usage_percent = (int)((pending * 100) / capacity);
+            if (usage_percent > 75 && !session->xoff_sent) {
+                KTerm_QueueResponseBytes(term, "\x13", 1); // XOFF
+                session->xoff_sent = true;
+            } else if (usage_percent < 25 && session->xoff_sent) {
+                KTerm_QueueResponseBytes(term, "\x11", 1); // XON
+                session->xoff_sent = false;
+            }
+        }
+    }
 
+    double start_time = KTerm_TimerGetTime();
+    int chars_processed = 0;
+    unsigned char buffer[1024];
+
+    while (chars_processed < target_chars) {
         if (KTerm_TimerGetTime() - start_time > session->VTperformance.time_budget) {
             break;
         }
 
-        unsigned char ch = session->input_pipeline[current_tail];
-        int next_tail = (current_tail + 1) % sizeof(session->input_pipeline);
+        int limit = target_chars - chars_processed;
+        if (limit > (int)sizeof(buffer)) limit = sizeof(buffer);
 
-        // Process char.
-        // Pass 'session' explicitly to avoid context fragility if active_session changes.
-        KTerm_ProcessChar(term, session, ch);
+        size_t count = KTerm_InputQueue_Pop(&session->input_queue, buffer, limit);
+        if (count == 0) break;
 
-        current_tail = next_tail;
-        // Store tail release (publishes free space)
-        atomic_store_explicit(&session->pipeline_tail, current_tail, memory_order_release);
-
-        chars_processed++;
+        for (size_t i = 0; i < count; i++) {
+            KTerm_ProcessChar(term, session, buffer[i]);
+            chars_processed++;
+        }
     }
 
     // Update performance metrics
@@ -12471,7 +12458,7 @@ void KTerm_ShowInfo(KTerm* term) {
 
     KTerm_WriteString(term, "\nStatistics:\n");
     KTermStatus status = KTerm_GetStatus(term);
-    KTerm_WriteFormat(term, "- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
+    KTerm_WriteFormat(term, "Pipeline: %zu/%zu bytes\n", status.pipeline_usage, GET_SESSION(term)->input_queue.capacity);
     KTerm_WriteFormat(term, "- Key Buffer: %zu\n", status.key_usage);
     KTerm_WriteFormat(term, "- Unsupported Sequences: %d\n", session->conformance.compliance.unsupported_sequences);
 
@@ -13240,6 +13227,8 @@ static void KTerm_CleanupSession(KTermSession* session) {
         KTerm_Free(session->bracketed_paste.buffer);
         session->bracketed_paste.buffer = NULL;
     }
+
+    KTerm_InputQueue_Free(&session->input_queue);
 }
 
 /**
@@ -13504,6 +13493,128 @@ void KTerm_QueueResize(KTermSession* session, int cols, int rows, bool reflow) {
     op.u.resize.new_height = rows;
     op.u.resize.reflow_scrollback = reflow;
     KTerm_QueueOp(&session->op_queue, op);
+}
+
+// =============================================================================
+// INPUT QUEUE IMPLEMENTATION
+// =============================================================================
+
+bool KTerm_InputQueue_Init(KTermInputQueue* queue, size_t capacity) {
+    if (!queue) return false;
+    queue->buffer = (unsigned char*)KTerm_Malloc(capacity);
+    if (!queue->buffer) return false;
+    queue->capacity = capacity;
+    atomic_store(&queue->head, 0);
+    atomic_store(&queue->tail, 0);
+    atomic_store(&queue->overflow, false);
+    queue->mode = KTERM_BACKPRESSURE_DROP;
+    atomic_store(&queue->dropped_count, 0);
+    return true;
+}
+
+void KTerm_InputQueue_Free(KTermInputQueue* queue) {
+    if (!queue) return;
+    if (queue->buffer) {
+        KTerm_Free(queue->buffer);
+        queue->buffer = NULL;
+    }
+    queue->capacity = 0;
+}
+
+size_t KTerm_InputQueue_Pending(KTermInputQueue* queue) {
+    if (!queue) return 0;
+    size_t head = atomic_load_explicit(&queue->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&queue->tail, memory_order_relaxed);
+    if (head >= tail) return head - tail;
+    return queue->capacity - (tail - head);
+}
+
+void KTerm_InputQueue_Clear(KTermInputQueue* queue) {
+    if (!queue) return;
+    atomic_store_explicit(&queue->head, 0, memory_order_relaxed);
+    atomic_store_explicit(&queue->tail, 0, memory_order_relaxed);
+    atomic_store_explicit(&queue->overflow, false, memory_order_relaxed);
+}
+
+size_t KTerm_InputQueue_Push(KTermInputQueue* queue, const void* data, size_t len) {
+    if (!queue || !queue->buffer || len == 0) return 0;
+
+    const unsigned char* bytes = (const unsigned char*)data;
+
+    // Load head/tail
+    // Producer loads head (relaxed) and tail (acquire)
+    size_t head = atomic_load_explicit(&queue->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&queue->tail, memory_order_acquire);
+    size_t capacity = queue->capacity;
+
+    // Calculate free space (one slot reserved)
+    size_t free_space;
+    if (tail > head) {
+        free_space = tail - head - 1;
+    } else {
+        free_space = capacity - (head - tail) - 1;
+    }
+
+    if (len > free_space) {
+        atomic_store_explicit(&queue->overflow, true, memory_order_relaxed);
+        atomic_fetch_add_explicit(&queue->dropped_count, len - free_space, memory_order_relaxed);
+        len = free_space; // Clamp to available space
+    }
+
+    if (len == 0) return 0;
+
+    // Write data (handling wrap)
+    size_t first_chunk = capacity - head;
+    if (len <= first_chunk) {
+        memcpy(&queue->buffer[head], bytes, len);
+    } else {
+        memcpy(&queue->buffer[head], bytes, first_chunk);
+        memcpy(&queue->buffer[0], bytes + first_chunk, len - first_chunk);
+    }
+
+    // Update head
+    size_t new_head = (head + len) % capacity;
+    atomic_store_explicit(&queue->head, new_head, memory_order_release);
+
+    return len;
+}
+
+size_t KTerm_InputQueue_Pop(KTermInputQueue* queue, void* buffer, size_t max_len) {
+    if (!queue || !queue->buffer || max_len == 0) return 0;
+
+    // Consumer loads tail (relaxed) and head (acquire)
+    size_t tail = atomic_load_explicit(&queue->tail, memory_order_relaxed);
+    size_t head = atomic_load_explicit(&queue->head, memory_order_acquire);
+    size_t capacity = queue->capacity;
+
+    size_t available;
+    if (head >= tail) {
+        available = head - tail;
+    } else {
+        available = capacity - (tail - head);
+    }
+
+    if (available == 0) return 0;
+
+    size_t to_read = (max_len < available) ? max_len : available;
+    unsigned char* out = (unsigned char*)buffer;
+
+    // Read data (handling wrap)
+    size_t first_chunk = capacity - tail;
+    if (to_read <= first_chunk) {
+        if (out) memcpy(out, &queue->buffer[tail], to_read);
+    } else {
+        if (out) {
+            memcpy(out, &queue->buffer[tail], first_chunk);
+            memcpy(out + first_chunk, &queue->buffer[0], to_read - first_chunk);
+        }
+    }
+
+    // Update tail
+    size_t new_tail = (tail + to_read) % capacity;
+    atomic_store_explicit(&queue->tail, new_tail, memory_order_release);
+
+    return to_read;
 }
 
 static void KTerm_ApplyResizeOp(KTerm* term, KTermSession* session, KTermOp* op) {
@@ -14124,11 +14235,7 @@ static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
     snprintf(session->title.window_title, sizeof(session->title.window_title), "KTerm Session %d", (int)index + 1);
     snprintf(session->title.icon_title, sizeof(session->title.icon_title), "Term %d", (int)index + 1);
 
-    session->input_pipeline_length = 0; // Fix: was missing, implicitly 0
-    session->pipeline_head = 0;
-    session->pipeline_tail = 0;
-    session->pipeline_count = 0;
-    session->pipeline_overflow = false;
+    KTerm_InputQueue_Clear(&session->input_queue);
     session->xoff_sent = false;
 
     session->VTperformance.chars_per_frame = 200;
@@ -14194,6 +14301,12 @@ bool KTerm_InitSession(KTerm* term, int index) {
     KTerm_InitReGIS(term, session);
     KTerm_InitTektronix(term, session);
     KTerm_InitKitty(term, session);
+
+    // Initialize Input Queue
+    if (!KTerm_InputQueue_Init(&session->input_queue, KTERM_INPUT_PIPELINE_SIZE)) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to allocate input queue for session %d", index);
+        return false;
+    }
 
     // Initialize session defaults
     EnhancedTermChar default_char = {
@@ -14622,16 +14735,14 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 KTermStatus KTerm_GetStatus(KTerm* term) {
     KTermSession* session = GET_SESSION(term);
     KTermStatus status = {0};
-    int head = atomic_load_explicit(&GET_SESSION(term)->pipeline_head, memory_order_relaxed);
-    int tail = atomic_load_explicit(&GET_SESSION(term)->pipeline_tail, memory_order_relaxed);
-    status.pipeline_usage = (head - tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
+    status.pipeline_usage = KTerm_InputQueue_Pending(&session->input_queue);
 
     int kb_head = atomic_load_explicit(&session->input.buffer_head, memory_order_relaxed);
     int kb_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);
     status.key_usage = (kb_head - kb_tail + KEY_EVENT_BUFFER_SIZE) % KEY_EVENT_BUFFER_SIZE;
 
-    status.overflow_detected = atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
-    status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
+    status.overflow_detected = atomic_load_explicit(&session->input_queue.overflow, memory_order_relaxed);
+    status.avg_process_time = session->VTperformance.avg_process_time;
     return status;
 }
 
