@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.15
+# K-Term Emulation Library v2.4.17
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -248,7 +248,7 @@ graph TD
             UpdateLoop -->|"For Each Session"| InputProc
             UpdateLoop -->|"Process Keys"| EventProc
 
-            InputPipeline["Input Pipeline (Host Data)"] --> InputProc
+            InputPipeline["SPSC Input Queue (1MB)"] -->|"Batch Pop"| InputProc
             EventQueue["Event Queue (Keyboard/Mouse)"] --> EventProc
 
             InputProc -->|"Byte Stream"| Parser

@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.4.17]
+
+### Input Pipeline Decoupling
+- **Architecture:** Replaced the legacy fixed-size `input_pipeline` with a dynamic, lock-free Single-Producer Single-Consumer (SPSC) queue (`KTermInputQueue`) per session. This decouples the input source (host/PTY) from the processing loop, preventing stalls during high-throughput operations.
+- **Batch Processing:** Implemented `KTerm_PushInput` for efficient batch injection of input data. The consumer loop now processes events in batches (`burst_threshold`), significantly improving throughput for large pastes or AI streams.
+- **Backpressure:** The new queue architecture supports basic backpressure monitoring and overflow detection, laying the groundwork for advanced flow control (XOFF/XON).
+- **Diagnostics:** Updated `KTerm_ShowDiagnostics` and `KTerm_GetStatus` to report accurate queue usage metrics.
+
 ## [v2.4.16]
 
 ### Shader Config Refactor & Hot-Reload
