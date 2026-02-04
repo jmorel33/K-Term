@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 13
+#define KTERM_VERSION_PATCH 14
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.13 (DECRQSS Extensions & Fixes)"
+#define KTERM_VERSION_STRING "2.4.14 (Refactoring & Magic Numbers)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -125,6 +125,10 @@ void KTerm_Free(void* ptr);
 #define KTERM_OUTPUT_PIPELINE_SIZE 16384
 #define KTERM_INPUT_PIPELINE_SIZE (1024 * 1024) // 1MB buffer for high-throughput graphics
 #define MAX_SCROLLBACK_LINES 1000
+
+// Oscillator Slots for Blink Rates
+#define KTERM_OSC_SLOT_FAST_BLINK 30 // ~250ms
+#define KTERM_OSC_SLOT_SLOW_BLINK 35 // ~500ms
 
 // =============================================================================
 // GLOBAL VARIABLES DECLARATIONS
@@ -1674,9 +1678,9 @@ typedef struct KTermSession_T {
     uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
     uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
     double text_blink_timer;    // Timer for text blink interval
-    int fast_blink_rate;        // Oscillator Slot (Default 30, ~250ms)
-    int slow_blink_rate;        // Oscillator Slot (Default 35, ~500ms)
-    int bg_blink_rate;          // Oscillator Slot (Default 35, ~500ms)
+    int fast_blink_rate;        // Oscillator Slot (Default KTERM_OSC_SLOT_FAST_BLINK)
+    int slow_blink_rate;        // Oscillator Slot (Default KTERM_OSC_SLOT_SLOW_BLINK)
+    int bg_blink_rate;          // Oscillator Slot (Default KTERM_OSC_SLOT_SLOW_BLINK)
 
     // Debug Grid
     bool grid_enabled;
@@ -12966,7 +12970,7 @@ void KTerm_Update(KTerm* term) {
 
         // Update timers and bells for this session
         if (session->cursor.blink_enabled && (session->dec_modes & KTERM_MODE_DECTCEM)) {
-            session->cursor.blink_state = KTerm_TimerGetOscillator(30); // Slot 30 (~250ms)
+            session->cursor.blink_state = KTerm_TimerGetOscillator(KTERM_OSC_SLOT_FAST_BLINK);
         } else {
             session->cursor.blink_state = true;
         }
@@ -14054,6 +14058,99 @@ void KTerm_Draw(KTerm* term) {
 
 // --- Lifecycle Management ---
 
+static void KTerm_CleanupSession(KTermSession* session) {
+    if (session->screen_buffer) {
+        KTerm_Free(session->screen_buffer);
+        session->screen_buffer = NULL;
+    }
+    if (session->alt_buffer) {
+        KTerm_Free(session->alt_buffer);
+        session->alt_buffer = NULL;
+    }
+
+    if (session->tab_stops.stops) {
+        KTerm_Free(session->tab_stops.stops);
+        session->tab_stops.stops = NULL;
+    }
+
+    if (session->row_dirty) {
+        KTerm_Free(session->row_dirty);
+        session->row_dirty = NULL;
+    }
+
+    // Free Kitty Graphics resources per session
+    if (session->kitty.images) {
+        for (int k = 0; k < session->kitty.image_count; k++) {
+            if (session->kitty.images[k].frames) {
+                for (int f = 0; f < session->kitty.images[k].frame_count; f++) {
+                    if (session->kitty.images[k].frames[f].data) {
+                        KTerm_Free(session->kitty.images[k].frames[f].data);
+                    }
+                    if (session->kitty.images[k].frames[f].texture.id != 0) {
+                        KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
+                    }
+                }
+                KTerm_Free(session->kitty.images[k].frames);
+            }
+        }
+        KTerm_Free(session->kitty.images);
+        session->kitty.images = NULL;
+    }
+    session->kitty.current_memory_usage = 0;
+    session->kitty.active_upload = NULL;
+
+    // Free memory for programmable key sequences
+    for (size_t k = 0; k < session->programmable_keys.count; k++) {
+        if (session->programmable_keys.keys[k].sequence) {
+            KTerm_Free(session->programmable_keys.keys[k].sequence);
+            session->programmable_keys.keys[k].sequence = NULL;
+        }
+    }
+    if (session->programmable_keys.keys) {
+        KTerm_Free(session->programmable_keys.keys);
+        session->programmable_keys.keys = NULL;
+    }
+    session->programmable_keys.count = 0;
+    session->programmable_keys.capacity = 0;
+
+    // Free stored macros
+    if (session->stored_macros.macros) {
+        for (size_t m = 0; m < session->stored_macros.count; m++) {
+            if (session->stored_macros.macros[m].content) {
+                KTerm_Free(session->stored_macros.macros[m].content);
+            }
+        }
+        KTerm_Free(session->stored_macros.macros);
+        session->stored_macros.macros = NULL;
+    }
+    session->stored_macros.count = 0;
+    session->stored_macros.capacity = 0;
+
+    // Free ReGIS Macros
+    for (int i = 0; i < 26; i++) {
+        if (session->regis.macros[i]) {
+            KTerm_Free(session->regis.macros[i]);
+            session->regis.macros[i] = NULL;
+        }
+    }
+    if (session->regis.macro_buffer) {
+        KTerm_Free(session->regis.macro_buffer);
+        session->regis.macro_buffer = NULL;
+    }
+
+    // Free Sixel graphics data buffer
+    if (session->sixel.data) {
+        KTerm_Free(session->sixel.data);
+        session->sixel.data = NULL;
+    }
+
+    // Free bracketed paste buffer
+    if (session->bracketed_paste.buffer) {
+        KTerm_Free(session->bracketed_paste.buffer);
+        session->bracketed_paste.buffer = NULL;
+    }
+}
+
 /**
  * @brief Cleans up all resources allocated by the terminal library.
  * This function must be called when the application is shutting down, typically
@@ -14070,7 +14167,6 @@ void KTerm_Draw(KTerm* term) {
  * and releases GPU resources.
  */
 void KTerm_Cleanup(KTerm* term) {
-    KTermSession* session = GET_SESSION(term);
     // Free LRU Cache
     if (term->glyph_map) { KTerm_Free(term->glyph_map); term->glyph_map = NULL; }
     if (term->glyph_last_used) { KTerm_Free(term->glyph_last_used); term->glyph_last_used = NULL; }
@@ -14095,73 +14191,7 @@ void KTerm_Cleanup(KTerm* term) {
 
     // Free session buffers
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        KTermSession* session = &term->sessions[i];
-        if (session->screen_buffer) {
-            KTerm_Free(session->screen_buffer);
-            session->screen_buffer = NULL;
-        }
-        if (session->alt_buffer) {
-            KTerm_Free(session->alt_buffer);
-            session->alt_buffer = NULL;
-        }
-
-        if (session->tab_stops.stops) {
-            KTerm_Free(session->tab_stops.stops);
-            session->tab_stops.stops = NULL;
-        }
-
-        if (session->row_dirty) {
-            KTerm_Free(session->row_dirty);
-            session->row_dirty = NULL;
-        }
-
-        // Free Kitty Graphics resources per session
-        if (session->kitty.images) {
-            for (int k = 0; k < session->kitty.image_count; k++) {
-                if (session->kitty.images[k].frames) {
-                    for (int f = 0; f < session->kitty.images[k].frame_count; f++) {
-                        if (session->kitty.images[k].frames[f].data) {
-                            KTerm_Free(session->kitty.images[k].frames[f].data);
-                        }
-                        if (session->kitty.images[k].frames[f].texture.id != 0) {
-                            KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
-                        }
-                    }
-                    KTerm_Free(session->kitty.images[k].frames);
-                }
-            }
-            KTerm_Free(session->kitty.images);
-            session->kitty.images = NULL;
-        }
-        session->kitty.current_memory_usage = 0;
-        session->kitty.active_upload = NULL;
-
-        // Free memory for programmable key sequences
-        for (size_t k = 0; k < session->programmable_keys.count; k++) {
-            if (session->programmable_keys.keys[k].sequence) {
-                KTerm_Free(session->programmable_keys.keys[k].sequence);
-                session->programmable_keys.keys[k].sequence = NULL;
-            }
-        }
-        if (session->programmable_keys.keys) {
-            KTerm_Free(session->programmable_keys.keys);
-            session->programmable_keys.keys = NULL;
-        }
-        session->programmable_keys.count = 0;
-        session->programmable_keys.capacity = 0;
-
-        // Free stored macros
-        if (session->stored_macros.macros) {
-            for (size_t m = 0; m < session->stored_macros.count; m++) {
-                if (session->stored_macros.macros[m].content) {
-                    KTerm_Free(session->stored_macros.macros[m].content);
-                }
-            }
-            KTerm_Free(session->stored_macros.macros);
-            session->stored_macros.macros = NULL;
-        }
-        session->stored_macros.count = 0;
-        session->stored_macros.capacity = 0;
+        KTerm_CleanupSession(&term->sessions[i]);
     }
 
     // Free Vector Engine resources
@@ -14175,38 +14205,6 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->row_scratch_buffer) {
         KTerm_Free(term->row_scratch_buffer);
         term->row_scratch_buffer = NULL;
-    }
-
-    // Free Sixel graphics data buffer
-    if (session->sixel.data) {
-        KTerm_Free(session->sixel.data);
-        session->sixel.data = NULL;
-    }
-    // Note: active_upload points to one of the images or is NULL, so no separate free needed unless we support partials differently
-
-    // Free bracketed paste buffer
-    if (GET_SESSION(term)->bracketed_paste.buffer) {
-        KTerm_Free(GET_SESSION(term)->bracketed_paste.buffer);
-        GET_SESSION(term)->bracketed_paste.buffer = NULL;
-    }
-
-    // Free ReGIS Macros and Sixel Data (Per Session)
-    for (int s = 0; s < MAX_SESSIONS; s++) {
-        for (int i = 0; i < 26; i++) {
-            if (term->sessions[s].regis.macros[i]) {
-                KTerm_Free(term->sessions[s].regis.macros[i]);
-                term->sessions[s].regis.macros[i] = NULL;
-            }
-        }
-        if (term->sessions[s].regis.macro_buffer) {
-            KTerm_Free(term->sessions[s].regis.macro_buffer);
-            term->sessions[s].regis.macro_buffer = NULL;
-        }
-        // Free Sixel graphics data buffer
-        if (term->sessions[s].sixel.data) {
-            KTerm_Free(term->sessions[s].sixel.data);
-            term->sessions[s].sixel.data = NULL;
-        }
     }
 
     KTerm_ClearEvents(term); // Ensure input pipeline is empty and reset
@@ -14934,6 +14932,158 @@ void KTerm_FlushOps(KTerm* term, KTermSession* session) {
     }
 }
 
+static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
+    session->selection.active = false;
+    session->selection.dragging = false;
+    session->selection.start_x = -1;
+    session->selection.start_y = -1;
+    session->selection.end_x = -1;
+    session->selection.end_y = -1;
+
+    // Initialize mouse state
+    session->mouse.enabled = true;
+    session->mouse.mode = MOUSE_TRACKING_OFF;
+    session->mouse.buttons[0] = session->mouse.buttons[1] = session->mouse.buttons[2] = false;
+    session->mouse.last_x = session->mouse.last_y = 0;
+    session->mouse.last_pixel_x = session->mouse.last_pixel_y = 0;
+    session->mouse.focused = false;
+    session->mouse.focus_tracking = false;
+    session->mouse.sgr_mode = false;
+    session->mouse.cursor_x = -1;
+    session->mouse.cursor_y = -1;
+    session->input.auto_process = true;
+
+    session->cursor.visible = true;
+    session->cursor.blink_enabled = true;
+    session->cursor.blink_state = true;
+    session->cursor.blink_timer = 0.0f;
+    session->cursor.x = session->cursor.y = 0;
+    session->cursor.color.color_mode = 0;
+    session->cursor.color.value.index = 7; // White
+    session->cursor.shape = CURSOR_BLOCK;
+
+    session->text_blink_state = 1; // Default ON
+    session->text_blink_timer = 0.0f;
+    session->fast_blink_rate = KTERM_OSC_SLOT_FAST_BLINK;
+    session->slow_blink_rate = KTERM_OSC_SLOT_SLOW_BLINK;
+    session->bg_blink_rate = KTERM_OSC_SLOT_SLOW_BLINK;
+    session->auto_repeat_rate = 30; // Default slow (~2Hz) or Standard
+    session->auto_repeat_delay = 500; // Default 500ms
+    session->enable_wide_chars = false; // Default: Fixed width mode (all chars width 1)
+    session->visual_bell_timer = 0.0f;
+    session->response_length = 0;
+    session->response_enabled = true;
+    session->parse_state = VT_PARSE_NORMAL;
+    session->left_margin = 0;
+    session->right_margin = term->width - 1;
+    session->scroll_top = 0;
+    session->scroll_bottom = term->height - 1;
+
+    session->dec_modes &= ~KTERM_MODE_DECCKM;
+    session->dec_modes &= ~KTERM_MODE_DECOM;
+    session->dec_modes |= KTERM_MODE_DECAWM;
+    session->dec_modes |= KTERM_MODE_DECTCEM;
+    session->dec_modes &= ~KTERM_MODE_ALTSCREEN;
+    session->dec_modes &= ~KTERM_MODE_INSERT;
+    session->dec_modes &= ~KTERM_MODE_LNM;
+    session->dec_modes &= ~KTERM_MODE_DECCOLM;
+    session->dec_modes &= ~KTERM_MODE_LOCALECHO;
+    session->dec_modes &= ~KTERM_MODE_VT52;
+    session->dec_modes |= KTERM_MODE_DECBKM; // Default to BS (match input.backarrow_sends_bs)
+    session->dec_modes &= ~KTERM_MODE_DECSDM; // Default: Scrolling Enabled
+    session->dec_modes &= ~KTERM_MODE_DECEDM;
+    session->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
+    session->dec_modes |= KTERM_MODE_DECECR; // Default: Enabled
+    session->dec_modes &= ~KTERM_MODE_DECPFF;
+    session->dec_modes &= ~KTERM_MODE_DECPEX;
+    session->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
+    session->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
+
+    session->ansi_modes.insert_replace = false;
+    session->ansi_modes.line_feed_new_line = true;
+
+    session->soft_font.active = false;
+    session->soft_font.dirty = false;
+    session->soft_font.char_width = 8;
+    session->soft_font.char_height = 16;
+
+    // Grid defaults
+    session->grid_enabled = false;
+    session->grid_color = (RGB_KTermColor){255, 255, 255, 255}; // Default White
+    session->conceal_char_code = 0;
+
+    // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
+    session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;
+    session->current_bg.color_mode = 0; session->current_bg.value.index = COLOR_BLACK;
+    session->current_ul_color.color_mode = 2; // Default/Inherit
+    session->current_st_color.color_mode = 2; // Default/Inherit
+    session->current_attributes = 0;
+
+    session->bracketed_paste.enabled = false;
+    session->bracketed_paste.active = false;
+    session->bracketed_paste.buffer = NULL;
+
+    session->programmable_keys.keys = NULL;
+    session->programmable_keys.count = 0;
+    session->programmable_keys.capacity = 0;
+
+    ptrdiff_t index = session - term->sessions;
+    snprintf(session->title.terminal_name, sizeof(session->title.terminal_name), "Session %d", (int)index + 1);
+    snprintf(session->title.window_title, sizeof(session->title.window_title), "KTerm Session %d", (int)index + 1);
+    snprintf(session->title.icon_title, sizeof(session->title.icon_title), "Term %d", (int)index + 1);
+
+    session->input_pipeline_length = 0; // Fix: was missing, implicitly 0
+    session->pipeline_head = 0;
+    session->pipeline_tail = 0;
+    session->pipeline_count = 0;
+    session->pipeline_overflow = false;
+    session->xoff_sent = false;
+
+    session->VTperformance.chars_per_frame = 200;
+    session->VTperformance.target_frame_time = 1.0 / 60.0;
+    session->VTperformance.time_budget = session->VTperformance.target_frame_time * 0.5;
+    session->VTperformance.avg_process_time = 0.000001;
+    session->VTperformance.burst_mode = false;
+    session->VTperformance.burst_threshold = 8192; // Approx half of 16384
+    session->VTperformance.adaptive_processing = true;
+
+    session->parse_state = VT_PARSE_NORMAL;
+    session->escape_pos = 0;
+    session->param_count = 0;
+
+    session->options.conformance_checking = true;
+    session->options.vttest_mode = false;
+    session->options.debug_sequences = false;
+    session->options.log_unsupported = true;
+
+    session->synchronized_update = false;
+
+    session->session_open = true;
+    session->echo_enabled = true;
+    session->input_enabled = true;
+    session->password_mode = false;
+    session->raw_mode = false;
+    session->paused = false;
+
+    session->printer_available = false;
+    session->auto_print_enabled = false;
+    session->printer_controller_enabled = false;
+    session->locator_events.report_button_down = false;
+    session->locator_events.report_button_up = false;
+    session->locator_events.report_on_request_only = true;
+    session->locator_enabled = false;
+    session->programmable_keys.udk_locked = false;
+
+    session->macro_space.used = 0;
+    session->macro_space.total = 4096;
+
+    session->printer_buf_len = 0;
+    memset(session->printer_buffer, 0, sizeof(session->printer_buffer));
+
+    // Initial answerback (will be updated by SetLevel)
+    session->answerback_buffer[0] = '\0';
+}
+
 bool KTerm_InitSession(KTerm* term, int index) {
     KTermSession* session = &term->sessions[index];
 
@@ -15011,154 +15161,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
         session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 
-    session->selection.active = false;
-    session->selection.dragging = false;
-    session->selection.start_x = -1;
-    session->selection.start_y = -1;
-    session->selection.end_x = -1;
-    session->selection.end_y = -1;
-
-    // Initialize mouse state
-    session->mouse.enabled = true;
-    session->mouse.mode = MOUSE_TRACKING_OFF;
-    session->mouse.buttons[0] = session->mouse.buttons[1] = session->mouse.buttons[2] = false;
-    session->mouse.last_x = session->mouse.last_y = 0;
-    session->mouse.last_pixel_x = session->mouse.last_pixel_y = 0;
-    session->mouse.focused = false;
-    session->mouse.focus_tracking = false;
-    session->mouse.sgr_mode = false;
-    session->mouse.cursor_x = -1;
-    session->mouse.cursor_y = -1;
-    session->input.auto_process = true;
-
-    session->cursor.visible = true;
-    session->cursor.blink_enabled = true;
-    session->cursor.blink_state = true;
-    session->cursor.blink_timer = 0.0f;
-    session->cursor.x = session->cursor.y = 0;
-    session->cursor.color.color_mode = 0;
-    session->cursor.color.value.index = 7; // White
-    session->cursor.shape = CURSOR_BLOCK;
-
-    session->text_blink_state = 1; // Default ON
-    session->text_blink_timer = 0.0f;
-    session->fast_blink_rate = 30; // Slot 30 = 249.7ms (~4Hz)
-    session->slow_blink_rate = 35; // Slot 35 = 558.5ms (~1.8Hz)
-    session->bg_blink_rate = 35;   // Slot 35 = 558.5ms (~1.8Hz)
-    session->auto_repeat_rate = 30; // Default slow (~2Hz) or Standard
-    session->auto_repeat_delay = 500; // Default 500ms
-    session->enable_wide_chars = false; // Default: Fixed width mode (all chars width 1)
-    session->visual_bell_timer = 0.0f;
-    session->response_length = 0;
-    session->response_enabled = true;
-    session->parse_state = VT_PARSE_NORMAL;
-    session->left_margin = 0;
-    session->right_margin = term->width - 1;
-    session->scroll_top = 0;
-    session->scroll_bottom = term->height - 1;
-
-    session->dec_modes &= ~KTERM_MODE_DECCKM;
-    session->dec_modes &= ~KTERM_MODE_DECOM;
-    session->dec_modes |= KTERM_MODE_DECAWM;
-    session->dec_modes |= KTERM_MODE_DECTCEM;
-    session->dec_modes &= ~KTERM_MODE_ALTSCREEN;
-    session->dec_modes &= ~KTERM_MODE_INSERT;
-    session->dec_modes &= ~KTERM_MODE_LNM;
-    session->dec_modes &= ~KTERM_MODE_DECCOLM;
-    session->dec_modes &= ~KTERM_MODE_LOCALECHO;
-    session->dec_modes &= ~KTERM_MODE_VT52;
-    session->dec_modes |= KTERM_MODE_DECBKM; // Default to BS (match input.backarrow_sends_bs)
-    session->dec_modes &= ~KTERM_MODE_DECSDM; // Default: Scrolling Enabled
-    session->dec_modes &= ~KTERM_MODE_DECEDM;
-    session->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
-    session->dec_modes |= KTERM_MODE_DECECR; // Default: Enabled
-    session->dec_modes &= ~KTERM_MODE_DECPFF;
-    session->dec_modes &= ~KTERM_MODE_DECPEX;
-    session->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
-    session->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
-
-    session->ansi_modes.insert_replace = false;
-    session->ansi_modes.line_feed_new_line = true;
-
-    session->soft_font.active = false;
-    session->soft_font.dirty = false;
-    session->soft_font.char_width = 8;
-    session->soft_font.char_height = 16;
-
-    // Grid defaults
-    session->grid_enabled = false;
-    session->grid_color = (RGB_KTermColor){255, 255, 255, 255}; // Default White
-    session->conceal_char_code = 0;
-
-    // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
-    session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;
-    session->current_bg.color_mode = 0; session->current_bg.value.index = COLOR_BLACK;
-    session->current_ul_color.color_mode = 2; // Default/Inherit
-    session->current_st_color.color_mode = 2; // Default/Inherit
-    session->current_attributes = 0;
-
-    session->bracketed_paste.enabled = false;
-    session->bracketed_paste.active = false;
-    session->bracketed_paste.buffer = NULL;
-
-    session->programmable_keys.keys = NULL;
-    session->programmable_keys.count = 0;
-    session->programmable_keys.capacity = 0;
-
-    snprintf(session->title.terminal_name, sizeof(session->title.terminal_name), "Session %d", index + 1);
-    snprintf(session->title.window_title, sizeof(session->title.window_title), "KTerm Session %d", index + 1);
-    snprintf(session->title.icon_title, sizeof(session->title.icon_title), "Term %d", index + 1);
-
-    session->input_pipeline_length = 0; // Fix: was missing, implicitly 0
-    session->pipeline_head = 0;
-    session->pipeline_tail = 0;
-    session->pipeline_count = 0;
-    session->pipeline_overflow = false;
-    session->xoff_sent = false;
-
-    session->VTperformance.chars_per_frame = 200;
-    session->VTperformance.target_frame_time = 1.0 / 60.0;
-    session->VTperformance.time_budget = session->VTperformance.target_frame_time * 0.5;
-    session->VTperformance.avg_process_time = 0.000001;
-    session->VTperformance.burst_mode = false;
-    session->VTperformance.burst_threshold = 8192; // Approx half of 16384
-    session->VTperformance.adaptive_processing = true;
-
-    session->parse_state = VT_PARSE_NORMAL;
-    session->escape_pos = 0;
-    session->param_count = 0;
-
-    session->options.conformance_checking = true;
-    session->options.vttest_mode = false;
-    session->options.debug_sequences = false;
-    session->options.log_unsupported = true;
-
-    session->synchronized_update = false;
-
-    session->session_open = true;
-    session->echo_enabled = true;
-    session->input_enabled = true;
-    session->password_mode = false;
-    session->raw_mode = false;
-    session->paused = false;
-
-    session->printer_available = false;
-    session->auto_print_enabled = false;
-    session->printer_controller_enabled = false;
-    session->locator_events.report_button_down = false;
-    session->locator_events.report_button_up = false;
-    session->locator_events.report_on_request_only = true;
-    session->locator_enabled = false;
-    session->programmable_keys.udk_locked = false;
-
-    session->macro_space.used = 0;
-    session->macro_space.total = 4096;
-
-    session->printer_buf_len = 0;
-    memset(session->printer_buffer, 0, sizeof(session->printer_buffer));
-
-    // Initial answerback (will be updated by SetLevel)
-    session->answerback_buffer[0] = '\0';
+    KTerm_ResetSessionDefaults(term, session);
 
     // Init charsets, tabs, keyboard
     // We can reuse the helper functions if they operate on (*GET_SESSION(term)) and we switch context
