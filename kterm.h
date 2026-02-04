@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 10
+#define KTERM_VERSION_PATCH 11
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.10 (Shader-based Bold & Italic simulation)"
+#define KTERM_VERSION_STRING "2.4.11 (Extended DECRQSS & Test Suite Modernization)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -10083,6 +10083,19 @@ void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* reques
         // Request scrolling region
         snprintf(response, sizeof(response), "\x1BP1$r%d;%dr\x1B\\",
                 GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "s") == 0) {
+        // Request Left/Right Margins (DECSLRM)
+        snprintf(response, sizeof(response), "\x1BP1$r%d;%ds\x1B\\",
+                session->left_margin + 1, session->right_margin + 1);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "t") == 0) {
+        // Request Lines Per Page (DECSLPP)
+        snprintf(response, sizeof(response), "\x1BP1$r%dt\x1B\\", session->rows);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "|") == 0) {
+        // Request Columns Per Page (DECSCPP)
+        snprintf(response, sizeof(response), "\x1BP1$r%d|\x1B\\", session->cols);
         KTerm_QueueSessionResponse(term, session, response);
     } else if (strcmp(request, "q") == 0 || strcmp(request, "state") == 0) {
         // State Snapshot

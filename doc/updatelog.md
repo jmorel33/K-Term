@@ -1,5 +1,16 @@
 # Update Log
 
+## [v2.4.11]
+
+### Extended DECRQSS & Test Suite Modernization
+- **Extended Query Support:** Added support for `DECRQSS` (`DCS $ q`) queries:
+    - `s` (DECSLRM): Reports Left and Right Margins (`1;Ws`).
+    - `t` (DECSLPP): Reports Lines per Page (`Ht`).
+    - `|` (DECSCPP): Reports Columns per Page (`W|`).
+- **Test Modernization:** Refactored the test suite to use the modern `KTerm_Update` and callback API, eliminating deprecated direct buffer access.
+- **Consolidation:** Merged legacy unit tests (`test_ansi_sys`, `test_csi_coverage`, etc.) into a unified, clean verification suite (`tests/verify_*.c`).
+- **Fixes:** Resolved build issues in `tests/test_dec_features.c` by ensuring correct definitions for response buffers and key codes.
+
 ## [v2.4.10]
 
 ### Shader-based Bold & Italic Simulation
