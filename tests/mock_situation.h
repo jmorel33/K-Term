@@ -39,6 +39,20 @@ typedef struct { unsigned char r, g, b, a; } Color;
 // Globals for tests
 static char last_clipboard_text[1024 * 1024]; // 1MB buffer for test
 
+// Key definitions
+#define SIT_KEY_F1 290
+#define SIT_KEY_F2 291
+#define SIT_KEY_F3 292
+#define SIT_KEY_F4 293
+#define SIT_KEY_F5 294
+#define SIT_KEY_F6 295
+#define SIT_KEY_F7 296
+#define SIT_KEY_F8 297
+#define SIT_KEY_F9 298
+#define SIT_KEY_F10 299
+#define SIT_KEY_F11 300
+#define SIT_KEY_F12 301
+
 // Functions
 static inline int SituationCreateBuffer(size_t size, void* data, int usage, SituationBuffer* buffer) {
     buffer->id = 1;

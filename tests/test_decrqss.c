@@ -20,10 +20,8 @@ void MockResponseCallback(KTerm* term, const char* response, int length) {
 }
 
 void FlushResponse() {
-    if (GET_SESSION(term)->response_length > 0 && term->response_callback) {
-        term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
-        GET_SESSION(term)->response_length = 0;
-    }
+    // KTerm now buffers responses in a ring buffer, flushed by KTerm_Update
+    KTerm_Update(term);
 }
 
 int main() {

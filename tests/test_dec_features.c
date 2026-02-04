@@ -405,7 +405,7 @@ void test_decsera(void) {
 
 void test_vt420_fixes(void) {
     printf("Starting VT420 Fixes Tests...\n");
-    KTermConfig config = { .width = 80, .height = 25 };
+    KTermConfig config = { .width = 80, .height = 25, .response_callback = response_callback };
     KTerm* term = KTerm_Create(config);
     KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_420);
     KTermSession* session = GET_SESSION(term);
@@ -432,13 +432,14 @@ void test_vt420_fixes(void) {
     check_cell(term, 0, 0, 'X', "DECNCSM Retain Text");
 
     // DECRQCRA
-    session->response_length = 0;
+    reset_output_buffer();
     write_sequence(term, "\x1B[1;1;1;1;1;1*y");
-    if (session->response_length == 0) {
+    if (output_pos == 0) {
         printf("FAIL: No response to DECRQCRA\n"); exit(1);
     }
-    if (strncmp(session->answerback_buffer, "\x1BP1!~", 5) != 0) {
-        printf("FAIL: DECRQCRA Response format wrong: %s\n", session->answerback_buffer); exit(1);
+    // Expected format: DCS 1 ! ~ ... ST
+    if (strncmp(output_buffer, "\x1BP1!~", 5) != 0) {
+        printf("FAIL: DECRQCRA Response format wrong: %s\n", output_buffer); exit(1);
     }
 
     KTerm_Destroy(term);
@@ -464,7 +465,7 @@ void test_vt510_gems(void) {
     session->programmable_keys.capacity = 1;
     session->programmable_keys.count = 1;
     session->programmable_keys.keys = (ProgrammableKey*)calloc(1, sizeof(ProgrammableKey));
-    session->programmable_keys.keys[0].key_code = SIT_KEY_F6;
+    session->programmable_keys.keys[0].key_code = KTERM_KEY_F6;
     session->programmable_keys.keys[0].sequence = strdup("HELLO");
     session->programmable_keys.keys[0].active = true;
 

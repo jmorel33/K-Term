@@ -1,9 +1,36 @@
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
+#include "../tests/mock_situation.h"
 #include "../kterm.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+
+// Global Response Buffer
+static char output_buffer[4096];
+static int output_pos = 0;
+
+static void reset_output_buffer() {
+    output_pos = 0;
+    memset(output_buffer, 0, sizeof(output_buffer));
+}
+
+static void response_callback(KTerm* term, const char* response, int length) {
+    if (output_pos + length < (int)sizeof(output_buffer)) {
+        memcpy(output_buffer + output_pos, response, length);
+        output_pos += length;
+        output_buffer[output_pos] = '\0';
+    }
+}
+
+// Helper: Write sequence and process events
+static void write_sequence(KTerm* term, const char* seq) {
+    if (!seq) return;
+    KTerm_WriteString(term, seq);
+    KTerm_ProcessEvents(term);
+    KTerm_Update(term);
+}
 
 void test_cursor_save_restore(KTerm* term) {
     // Move cursor to 5,5
@@ -11,18 +38,14 @@ void test_cursor_save_restore(KTerm* term) {
     GET_SESSION(term)->cursor.y = 5;
 
     // Save Cursor (ANSI.SYS)
-    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
-    KTerm_ProcessChar(term, GET_SESSION(term), '[');
-    KTerm_ProcessChar(term, GET_SESSION(term), 's');
+    write_sequence(term, "\x1B[s");
 
     // Move cursor elsewhere
     GET_SESSION(term)->cursor.x = 10;
     GET_SESSION(term)->cursor.y = 10;
 
     // Restore Cursor (ANSI.SYS)
-    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
-    KTerm_ProcessChar(term, GET_SESSION(term), '[');
-    KTerm_ProcessChar(term, GET_SESSION(term), 'u');
+    write_sequence(term, "\x1B[u");
 
     if (GET_SESSION(term)->cursor.x != 5 || GET_SESSION(term)->cursor.y != 5) {
         fprintf(stderr, "FAIL: Cursor restore failed. Expected 5,5, Got %d,%d\n", GET_SESSION(term)->cursor.x, GET_SESSION(term)->cursor.y);
@@ -36,11 +59,7 @@ void test_private_modes_ignored(KTerm* term) {
     GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
 
     // Send CSI ? 1 h
-    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
-    KTerm_ProcessChar(term, GET_SESSION(term), '[');
-    KTerm_ProcessChar(term, GET_SESSION(term), '?');
-    KTerm_ProcessChar(term, GET_SESSION(term), '1');
-    KTerm_ProcessChar(term, GET_SESSION(term), 'h');
+    write_sequence(term, "\x1B[?1h");
 
     if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) {
         fprintf(stderr, "FAIL: DECCKM (Private Mode 1) should be ignored in ANSI.SYS mode\n");
@@ -54,10 +73,7 @@ void test_standard_line_wrap(KTerm* term) {
     GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
 
     // Send CSI 7 h (Standard Mode 7)
-    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
-    KTerm_ProcessChar(term, GET_SESSION(term), '[');
-    KTerm_ProcessChar(term, GET_SESSION(term), '7');
-    KTerm_ProcessChar(term, GET_SESSION(term), 'h');
+    write_sequence(term, "\x1B[7h");
 
     if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM)) {
         fprintf(stderr, "FAIL: Standard Mode 7 should enable Auto Wrap in ANSI.SYS mode\n");
@@ -65,10 +81,7 @@ void test_standard_line_wrap(KTerm* term) {
     }
 
     // Send CSI 7 l (Standard Mode 7)
-    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
-    KTerm_ProcessChar(term, GET_SESSION(term), '[');
-    KTerm_ProcessChar(term, GET_SESSION(term), '7');
-    KTerm_ProcessChar(term, GET_SESSION(term), 'l');
+    write_sequence(term, "\x1B[7l");
 
     if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) {
         fprintf(stderr, "FAIL: Standard Mode 7 (l) should disable Auto Wrap\n");
@@ -99,6 +112,7 @@ int main() {
     KTermConfig config = {0};
     config.width = 80;
     config.height = 25;
+    config.response_callback = response_callback;
 
     KTerm* term = KTerm_Create(config);
     if (!term) {
@@ -107,7 +121,7 @@ int main() {
     }
 
     // Set to IBM DOS ANSI Mode
-    KTerm_SetLevel(term, VT_LEVEL_ANSI_SYS);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_ANSI_SYS);
 
     // 1. Verify Font Auto-Switch
     if (term->char_width != 10 || term->char_height != 10) {
@@ -116,16 +130,53 @@ int main() {
     }
     printf("PASS: IBM Font loaded automatically\n");
 
-    // 2. Verify Answerback
-    if (strcmp(GET_SESSION(term)->answerback_buffer, "ANSI.SYS") != 0) {
-        fprintf(stderr, "FAIL: Answerback string wrong. Got '%s', expected 'ANSI.SYS'\n", GET_SESSION(term)->answerback_buffer);
-        return 1;
+    // 2. Verify Answerback via ENQ (CTRL-E)
+    // Note: KTerm responds to ENQ with answerback message
+    reset_output_buffer();
+    write_sequence(term, "\x05"); // ENQ
+
+    if (strcmp(output_buffer, "ANSI.SYS") != 0) {
+        // Fallback: If ENQ isn't handled or buffer empty, maybe check internal state if needed,
+        // but prefer public behavior.
+        // Actually, let's verify if KTerm_SetLevel sets answerback buffer.
+        // The test was checking buffer content directly.
+        // If we want to be strict public API:
+        // Trigger answerback via ENQ.
+        // If KTerm doesn't support ENQ, we might need another way or accept legacy buffer check if unavoidable.
+        // But KTerm usually supports ENQ.
+
+        // Debug
+        // printf("DEBUG: ENQ Output: '%s'\n", output_buffer);
+
+        // If empty, try checking if direct buffer access is the only way for now,
+        // but ideally we fix the test to use the proper mechanism.
+        // If the original test checked the buffer directly, it was verifying that KTerm_SetLevel *set* the buffer.
+        // Checking output_buffer verifies that ENQ *sends* it.
+        // If this fails, it might be ENQ not enabled or implemented?
+        // Let's rely on internal check for "state" verification if ENQ fails, but wrap it?
+        // No, let's stick to the callback if possible.
+
+        if (strcmp(output_buffer, "ANSI.SYS") != 0) {
+             printf("WARN: ENQ didn't return ANSI.SYS. Checking internal buffer directly as fallback.\n");
+             if (strcmp(GET_SESSION(term)->answerback_buffer, "ANSI.SYS") != 0) {
+                 fprintf(stderr, "FAIL: Answerback string wrong. Got '%s', expected 'ANSI.SYS'\n", GET_SESSION(term)->answerback_buffer);
+                 return 1;
+             }
+        }
     }
     printf("PASS: Answerback is ANSI.SYS\n");
 
     // 3. Verify DA suppression
+    // Check if DA response is empty
+    reset_output_buffer();
+    write_sequence(term, "\x1B[c"); // DA
+    if (output_pos > 0) {
+         fprintf(stderr, "FAIL: Device Attributes should be empty/suppressed for ANSI.SYS. Got '%s'\n", output_buffer);
+         return 1;
+    }
+    // Also verify internal buffer is empty string
     if (strlen(GET_SESSION(term)->device_attributes) > 0) {
-        fprintf(stderr, "FAIL: Device Attributes should be empty for ANSI.SYS. Got '%s'\n", GET_SESSION(term)->device_attributes);
+        fprintf(stderr, "FAIL: Device Attributes internal state should be empty. Got '%s'\n", GET_SESSION(term)->device_attributes);
         return 1;
     }
     printf("PASS: Device Attributes suppressed\n");
