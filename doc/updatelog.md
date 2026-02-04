@@ -1,5 +1,15 @@
 # Update Log
 
+## [v2.4.13]
+
+### DECRQSS Extensions & Fixes
+- **Extended DECRQSS Support:** Implemented `DECRQSS` (`DCS $ q`) handlers for:
+    - `"p` (DECSCL): Reports Conformance Level (e.g., `1;1"p`).
+    - ` q` (DECSCUSR): Reports Cursor Style (e.g., `1 q`).
+    - `*x` (DECSACE): Reports Attribute Change Extent (`2*x`).
+    - `*|` (DECSNLS): Reports Number of Lines per Screen.
+- **Parser Fix:** Resolved an issue where the 7-bit String Terminator (`ESC \`) triggered an "Unknown ESC" error when processed outside of a string context. It is now correctly handled as a NOP.
+
 ## [v2.4.12]
 
 ### Deep XTerm Dynamic Colors Compliance
