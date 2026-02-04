@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.12]
+
+### Deep XTerm Dynamic Colors Compliance
+- **Multi-Parameter Parsing:** Updated `ProcessKTermColorCommand` to correctly handle multiple color specifications in a single `OSC 4` sequence (e.g., `OSC 4;1;red;2;green ST`), addressing a compliance gap where only the first pair was processed.
+- **Enhanced Verification:** Added `tests/verify_osc_parsing.c` with a comprehensive suite for dynamic colors (OSC 4/10/11/12), covering sets, queries, specific resets (OSC 104), and high-load stress testing.
+- **Parser Robustness:** Updated `ProcessKTermColorCommand` to use explicit `Stream_Consume` for token advancement, improving parsing reliability for complex OSC strings.
+
 ## [v2.4.11]
 
 ### Extended DECRQSS & Test Suite Modernization
