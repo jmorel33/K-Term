@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 12
+#define KTERM_VERSION_PATCH 13
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.12 (XTerm Dynamic Colors Compliance)"
+#define KTERM_VERSION_STRING "2.4.13 (DECRQSS Extensions & Fixes)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -6143,6 +6143,11 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             session->parse_state = PARSE_PERCENT;
             break;
 
+        case '\\': // ST - String Terminator (7-bit)
+            // If received in ESC state, it terminates the sequence (NOP)
+            session->parse_state = VT_PARSE_NORMAL;
+            break;
+
         case ' ': // nF Escape Sequence (e.g., S7C1T/S8C1T)
             session->parse_state = PARSE_nF;
             break;
@@ -10109,6 +10114,43 @@ void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* reques
     } else if (strcmp(request, "|") == 0) {
         // Request Columns Per Page (DECSCPP)
         snprintf(response, sizeof(response), "\x1BP1$r%d|\x1B\\", session->cols);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "\"p") == 0) {
+        // Request Conformance Level (DECSCL)
+        // Response: DCS 1 $ r Pl ; Pc " p ST
+        // Pl: 61(VT100)..65(VT500)
+        // Pc: 0(8-bit), 1(7-bit) - We default to 1 (7-bit controls) for compatibility unless strict 8-bit mode
+        int pl = 61;
+        if (session->conformance.level >= VT_LEVEL_510) pl = 65;
+        else if (session->conformance.level >= VT_LEVEL_420) pl = 64;
+        else if (session->conformance.level >= VT_LEVEL_320) pl = 63;
+        else if (session->conformance.level >= VT_LEVEL_220) pl = 62;
+
+        int pc = session->input.use_8bit_controls ? 0 : 1;
+
+        snprintf(response, sizeof(response), "\x1BP1$r%d;%d\"p\x1B\\", pl, pc);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, " q") == 0) {
+        // Request Cursor Style (DECSCUSR)
+        // Response: DCS 1 $ r Pn SP q ST
+        int style = 1; // Default Blinking Block
+        switch(session->cursor.shape) {
+            case CURSOR_BLOCK: style = session->cursor.blink_enabled ? 1 : 2; break;
+            case CURSOR_UNDERLINE: style = session->cursor.blink_enabled ? 3 : 4; break;
+            case CURSOR_BAR: style = session->cursor.blink_enabled ? 5 : 6; break;
+            default: style = 1; break;
+        }
+        snprintf(response, sizeof(response), "\x1BP1$r%d q\x1B\\", style);
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "*x") == 0) {
+        // Request Attribute Change Extent (DECSACE)
+        // Response: DCS 1 $ r 2 * x ST (2 = Rectangular)
+        snprintf(response, sizeof(response), "\x1BP1$r2*x\x1B\\");
+        KTerm_QueueSessionResponse(term, session, response);
+    } else if (strcmp(request, "*|") == 0) {
+        // Request Number of Lines per Screen (DECSNLS)
+        // Response: DCS 1 $ r Pn * | ST
+        snprintf(response, sizeof(response), "\x1BP1$r%d*|\x1B\\", session->rows);
         KTerm_QueueSessionResponse(term, session, response);
     } else if (strcmp(request, "q") == 0 || strcmp(request, "state") == 0) {
         // State Snapshot
