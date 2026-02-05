@@ -2,10 +2,10 @@
 
 ## [v2.4.20]
 
-### Gateway Direct Input
-- **Gateway Extension:** Added `direct` Gateway extension (`EXT;direct;1` or `EXT;direct;0`) to toggle Direct Input mode (`KTERM_MODE_DIRECT_INPUT`) at runtime.
-- **Protocol:** Fully integrated with the Gateway Protocol, allowing per-session targeting and scripted control of local editing modes.
-- **ACK:** The extension acknowledges commands with "OK", enabling robust synchronization for host scripts.
+### Gateway RAWDUMP & Direct Input
+- **RAWDUMP:** Added `rawdump` Gateway extension (`EXT;rawdump;START;SESSION=n`) to mirror raw input bytes to a target session as literal characters. This bypasses the VT parser, enabling powerful debugging and visualization of escape sequences.
+- **Direct Input:** Added `direct` Gateway extension (`EXT;direct;1`) to toggle `KTERM_MODE_DIRECT_INPUT` at runtime via the Gateway Protocol, allowing per-session control of local editing modes.
+- **Protocol:** Fully integrated with the Gateway Protocol, supporting session targeting (`SESSION=ID`) and explicit acknowledgments ("OK", "ACTIVE", "STOPPED").
 
 ## [v2.4.19]
 
@@ -290,7 +290,7 @@ This completes the multi-version refactor arc (started v2.3.40) — grid is now 
 - **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).
 - **Memory Safety:** Removed legacy usage of `strdup` in clipboard (OSC 52) and key definition parsing, eliminating potential heap fragmentation and leaks.
 
-## [v2.3.30]
+## v2.3.30]
 
 ### Gateway Protocol Refactor
 - **Dispatcher:** Refactored `kt_gateway.h` to use a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`), replacing the legacy linear string comparison model. This improves maintainability and extensibility.
