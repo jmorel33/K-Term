@@ -227,7 +227,7 @@ graph TD
         TerminalInstance["KTerm Instance (Heap)"]
         EventDispatcher["Event Dispatcher"]
 
-        EventDispatcher -->|"BYTES"| InputPipeline["SPSC Input Queue (1MB)"]
+        EventDispatcher -->|"BYTES"| InputPipeline["SPSC Input Queue (1MB)<br/>(Overflow/Backpressure)"]
         EventDispatcher -->|"KEY"| EventQueue["Key Queue"]
         EventDispatcher -->|"MOUSE/RESIZE/FOCUS"| EventQueue
 
@@ -262,6 +262,11 @@ graph TD
 
             KeyTranslate -->|"Generate Sequence"| ResponseRing["Per-Session Response Ring"]
             Parser -->|"Queue Response"| ResponseRing
+
+            Parser -->|"DCS GATE"| GatewayRouter["Gateway Router"]
+            GatewayRouter -->|"Route"| GatewayExt["Extensions & Callbacks"]
+            GatewayExt -->|"Response"| ResponseRing
+            GatewayExt -->|"Config"| StateMod
 
             ResponseRing -->|"Drain"| Response["Response Callback (To Host)"]
             ResponseRing -->|"Drain (Zero-Copy)"| OutputSink["Output Sink (Optional)"]
