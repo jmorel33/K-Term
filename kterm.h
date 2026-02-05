@@ -1619,7 +1619,16 @@ size_t KTerm_InputQueue_Pop(KTermInputQueue* queue, void* buffer, size_t max_len
 size_t KTerm_InputQueue_Pending(KTermInputQueue* queue);
 void KTerm_InputQueue_Clear(KTermInputQueue* queue);
 
+typedef struct {
+    bool raw_dump_mirror_active;
+    int raw_dump_target_session_id;  // -1 = none
+    bool raw_dump_force_wob;         // default true
+    bool initialized;
+} KTermRawDumpState;
+
 typedef struct KTermSession_T {
+
+    KTermRawDumpState raw_dump;
 
     // Operation Queue for Grid Mutations
     KTermOpQueue op_queue;
@@ -6577,6 +6586,76 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
         if (count == 0) break;
 
         for (size_t i = 0; i < count; i++) {
+            // Raw Dump Mirroring
+            if (session->raw_dump.raw_dump_mirror_active) {
+                KTermSession* target_sess = NULL;
+                if (session->raw_dump.raw_dump_target_session_id >= 0 && session->raw_dump.raw_dump_target_session_id < MAX_SESSIONS) {
+                    target_sess = &term->sessions[session->raw_dump.raw_dump_target_session_id];
+                }
+
+                if (target_sess) {
+                    // Check if we need one-time init (Clear/Reset)
+                    if (!session->raw_dump.initialized) {
+                        if (session->raw_dump.raw_dump_force_wob) {
+                            EnhancedTermChar clear_char = {0};
+                            clear_char.ch = ' ';
+                            clear_char.fg_color.color_mode = 0; clear_char.fg_color.value.index = 15;
+                            clear_char.bg_color.color_mode = 0; clear_char.bg_color.value.index = 0;
+                            clear_char.flags = KTERM_FLAG_DIRTY;
+
+                            KTermRect fullscreen = {0, 0, target_sess->cols, target_sess->rows};
+                            KTerm_QueueFillRect(target_sess, fullscreen, clear_char);
+
+                            // Reset cursor
+                            target_sess->cursor.x = 0;
+                            target_sess->cursor.y = 0;
+                        }
+                        session->raw_dump.initialized = true;
+                    }
+
+                    int x = target_sess->cursor.x;
+                    int y = target_sess->cursor.y;
+
+                    EnhancedTermChar c = {0};
+                    c.ch = buffer[i];
+                    if (session->raw_dump.raw_dump_force_wob) {
+                        c.fg_color.color_mode = 0; c.fg_color.value.index = 15;
+                        c.bg_color.color_mode = 0; c.bg_color.value.index = 0;
+                    } else {
+                        c.fg_color = target_sess->current_fg;
+                        c.bg_color = target_sess->current_bg;
+                    }
+                    c.flags = KTERM_FLAG_DIRTY;
+
+                    KTermOp op;
+                    op.type = KTERM_OP_SET_CELL;
+                    op.u.set_cell.x = x;
+                    op.u.set_cell.y = y;
+                    op.u.set_cell.cell = c;
+                    KTerm_QueueOp(&target_sess->op_queue, op);
+
+                    // Advance cursor
+                    x++;
+                    if (x >= target_sess->cols) {
+                        x = 0;
+                        y++;
+                        if (y >= target_sess->rows) {
+                            y = target_sess->rows - 1;
+                            // Scroll
+                            KTermRect scroll_rect = {0, 0, target_sess->cols, target_sess->rows};
+                            KTerm_QueueScrollRegion(target_sess, scroll_rect, 1);
+                        }
+                    }
+                    target_sess->cursor.x = x;
+                    target_sess->cursor.y = y;
+
+                    // Mark dirty (conservative)
+                    if (target_sess->dirty_rect.w == 0) {
+                        target_sess->dirty_rect = (KTermRect){0, 0, target_sess->cols, target_sess->rows};
+                    }
+                }
+            }
+
             KTerm_ProcessChar(term, session, buffer[i]);
             chars_processed++;
         }
@@ -14359,6 +14438,11 @@ static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
 
     // Initial answerback (will be updated by SetLevel)
     session->answerback_buffer[0] = '\0';
+
+    session->raw_dump.raw_dump_mirror_active = false;
+    session->raw_dump.raw_dump_target_session_id = -1;
+    session->raw_dump.raw_dump_force_wob = true;
+    session->raw_dump.initialized = false;
 }
 
 bool KTerm_InitSession(KTerm* term, int index) {

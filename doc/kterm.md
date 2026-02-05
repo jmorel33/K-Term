@@ -56,15 +56,18 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.10. Retro Visual Effects](#410-retro-visual-effects)
     *   [4.11. ReGIS Graphics](#411-regis-graphics)
     *   [4.12. Gateway Protocol](#412-gateway-protocol)
-    *   [4.13. Kitty Protocols (Graphics & Keyboard)](#413-kitty-protocols-graphics--keyboard)
-    *   [4.14. IBM PC / DOS Compatibility Mode](#414-ibm-pc--dos-compatibility-mode)
-    *   [4.15. Dynamic Font Switching & Glyph Centering](#415-dynamic-font-switching--glyph-centering)
-    *   [4.16. Printer Controller Mode](#416-printer-controller-mode)
-    *   [4.17. Rich Text Attributes (Extended SGR)](#417-rich-text-attributes-extended-sgr)
-    *   [4.18. Tektronix 4010/4014 Emulation](#418-tektronix-40104014-emulation)
-    *   [4.19. BiDirectional Text Support (BiDi)](#419-bidirectional-text-support-bidi)
-    *   [4.20. DEC Locator Support](#420-dec-locator-support)
-    *   [4.21. VT Pipe (Gateway Protocol)](#421-vt-pipe-gateway-protocol)
+    *   [4.13. RAWDUMP (Raw Input Mirroring)](#413-rawdump-raw-input-mirroring)
+    *   [4.14. Kitty Protocols (Graphics & Keyboard)](#414-kitty-protocols-graphics--keyboard)
+        *   [4.14.1. Kitty Graphics Protocol](#4141-kitty-graphics-protocol)
+        *   [4.14.2. Kitty Keyboard Protocol](#4142-kitty-keyboard-protocol)
+    *   [4.15. IBM PC / DOS Compatibility Mode](#415-ibm-pc--dos-compatibility-mode)
+    *   [4.16. Dynamic Font Switching & Glyph Centering](#416-dynamic-font-switching--glyph-centering)
+    *   [4.17. Printer Controller Mode](#417-printer-controller-mode)
+    *   [4.18. Rich Text Attributes (Extended SGR)](#418-rich-text-attributes-extended-sgr)
+    *   [4.19. Tektronix 4010/4014 Emulation](#419-tektronix-40104014-emulation)
+    *   [4.20. BiDirectional Text Support (BiDi)](#420-bidirectional-text-support-bidi)
+    *   [4.21. DEC Locator Support](#421-dec-locator-support)
+    *   [4.22. VT Pipe (Gateway Protocol)](#422-vt-pipe-gateway-protocol)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -898,6 +901,7 @@ Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend th
     *   **`icat`**: Injects an image using the Kitty Graphics Protocol (basic wrapper). Usage: `EXT;icat;<Base64Data>`
     *   **`clipboard`**: A placeholder for clipboard integration.
     *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `EXT;direct;1` (On) or `EXT;direct;0` (Off).
+    *   **`rawdump`**: Mirrors raw input bytes to a target session. Usage: `EXT;rawdump;START;SESSION=n`.
 
 #### Oscillator Period Table (Slots 0-63)
 
@@ -971,11 +975,35 @@ Slots 64-255 are fixed at a period of 1.0 seconds.
 | 62 | 50.723424 | 50723.424 | 0.020 |
 | 63 | 60.000000 | 60000.000 | 0.017 |
 
-### 4.13. Kitty Protocols (Graphics & Keyboard)
+### 4.13. RAWDUMP (Raw Input Mirroring)
+
+Introduced in **v2.4.20**, the **RAWDUMP** Gateway extension allows the terminal to mirror incoming raw input bytes from the host (or PTY) to a specific target session's grid as literal single-byte characters. This bypasses the standard VT parser for the target session, allowing for the visualization of control codes and escape sequences exactly as they are received.
+
+*   **Command:** `DCS GATE KTERM ; <ID> ; RAWDUMP ; <Params> ST`
+*   **Parameters (Semicolon Separated):**
+    *   `START`: Enables mirroring.
+    *   `STOP`: Disables mirroring.
+    *   `TOGGLE`: Toggles the state.
+    *   `SESSION=<ID>`: Specifies the target session ID (0-3) to receive the raw bytes. If omitted, defaults to the active session.
+    *   `FORCE_WOB=<1|0>`: "Force White on Black". If set to 1 (default), the target session is cleared and set to white text on black background when mirroring starts.
+
+**Use Cases:**
+*   **Debugging:** Inspecting raw escape sequences sent by a remote host.
+*   **Education:** Visualizing the VT stream.
+*   **Telemetry:** Logging raw input to a secondary "monitor" session.
+
+**Example:**
+To dump the input of Session 0 to Session 1:
+```bash
+# Send to KTerm (via Session 0)
+printf "\033PGATE;KTERM;0;RAWDUMP;START;SESSION=1\033\\"
+```
+
+### 4.14. Kitty Protocols (Graphics & Keyboard)
 
 KTerm implements both the visual and input protocols defined by the Kitty terminal emulator, bringing modern capabilities to the emulation engine.
 
-#### 4.13.1. Kitty Graphics Protocol
+#### 4.14.1. Kitty Graphics Protocol
 
 v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for displaying high-performance raster graphics in the terminal.
 
@@ -992,7 +1020,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     -   **Memory Safety:** Enforces strict VRAM limits (default 64MB) per session to prevent denial-of-service attacks via graphics spam.
     -   **Delete/Clear:** Supports `a=d` (Delete) command with various actions (e.g., `d=a` for all, `d=i` by ID, `d=p` by placement).
 
-#### 4.13.2. Kitty Keyboard Protocol
+#### 4.14.2. Kitty Keyboard Protocol
 
 **v2.4.5** implements the Kitty Keyboard Protocol, a progressive enhancement to standard VT keyboard handling that solves longstanding ambiguity issues (e.g., distinguishing `Tab` from `Ctrl+I`, or `Enter` from `Ctrl+Enter`).
 
@@ -1010,7 +1038,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     -   **Modifiers:** Shift, Alt, Ctrl, and Super are reported reliably for all keys.
     -   **Release Events:** Can optionally report key release events (if requested via flags).
 
-### 4.14. IBM PC / DOS Compatibility Mode
+### 4.15. IBM PC / DOS Compatibility Mode
 
 **v2.2.2** introduces a dedicated emulation mode for running legacy DOS applications (e.g., via DOSEMU or remote connection). This mode is activated by setting the compliance level to `VT_LEVEL_ANSI_SYS` (1003).
 
@@ -1022,7 +1050,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     *   **CGA Palette:** Enforces the authentic 16-color IBM CGA palette (e.g., Brown `0xAA5500` instead of Yellow).
     *   **IBM Font:** Automatically switches the terminal font to the internal "IBM" raster font (Code Page 437) for correct box-drawing characters.
 
-### 4.15. Dynamic Font Switching & Glyph Centering
+### 4.16. Dynamic Font Switching & Glyph Centering
 
 **v2.2.1** introduces a dynamic font management system allowing runtime switching between internal fonts.
 
@@ -1033,7 +1061,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
 *   **Centering:** The renderer automatically calculates centering offsets. If a font's glyph data (e.g., 8x8) is smaller than the terminal cell size (e.g., 9x16), the glyph is perfectly centered within the cell.
 *   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and any TrueType font loaded via `KTerm_LoadFont`.
 
-### 4.16. Printer Controller Mode
+### 4.17. Printer Controller Mode
 
 The library supports the DEC Printer Controller Mode (or Media Copy), allowing the host to send data directly to an attached printer (or callback function) without displaying it on the screen.
 
@@ -1045,7 +1073,7 @@ The library supports the DEC Printer Controller Mode (or Media Copy), allowing t
     *   `DECPEX` Disabled (`CSI ? 19 l`): Prints only the scrolling region.
 *   **Callback:** Data is routed to the user-registered `PrinterCallback`.
 
-### 4.17. Rich Text Attributes (Extended SGR)
+### 4.18. Rich Text Attributes (Extended SGR)
 
 KTerm supports extended SGR attributes for advanced text styling, including multiple underline styles and colors.
 
@@ -1061,7 +1089,7 @@ KTerm supports extended SGR attributes for advanced text styling, including mult
     *   `59`: Reset Underline Color to Default (Foreground)
 *   **Strikethrough Color:** Accessible via the Gateway Protocol or API.
 
-### 4.18. Tektronix 4010/4014 Emulation
+### 4.19. Tektronix 4010/4014 Emulation
 
 KTerm includes full emulation of the Tektronix 4010 and 4014 vector graphics terminals.
 
@@ -1073,7 +1101,7 @@ KTerm includes full emulation of the Tektronix 4010 and 4014 vector graphics ter
     *   **GIN Mode:** Graphic Input (Crosshair cursor) reporting.
     *   **Vector Layer:** Renders to the same vector overlay used by ReGIS, ensuring consistent visual blending.
 
-### 4.19. BiDirectional Text Support (BiDi)
+### 4.20. BiDirectional Text Support (BiDi)
 
 KTerm implements basic BiDirectional text support via the `BDSM` (Bi-Directional Support Mode) private mode `8246`.
 
@@ -1084,7 +1112,7 @@ KTerm implements basic BiDirectional text support via the `BDSM` (Bi-Directional
     *   Mirrors characters like parenthesis `()` and brackets `[]` within reversed runs.
 *   **Limitation:** This is a simplified internal implementation (`BiDiReorderRow`) and does not currently use the full `fribidi` library for complex shaping or implicit paragraph direction handling.
 
-### 4.20. DEC Locator Support
+### 4.21. DEC Locator Support
 
 The DEC Locator (Mouse) input model provides an alternative to standard xterm mouse tracking, reporting rectangular coordinates and specific events.
 
@@ -1093,7 +1121,7 @@ The DEC Locator (Mouse) input model provides an alternative to standard xterm mo
 *   **Request:** `DECRQLP` (`CSI Ps |`) allows the host to query the current locator position instantly.
 *   **Status:** `CSI ? 53 n` reports locator availability.
 
-### 4.21. VT Pipe (Gateway Protocol)
+### 4.22. VT Pipe (Gateway Protocol)
 
 Added in **v2.3.2**, the **VT Pipe** feature allows a host application (or test harness) to inject arbitrary data directly into the terminal's input pipeline via the Gateway Protocol. This is particularly useful for automated testing, where sending raw escape sequences (containing control characters like `ESC`) via standard shell pipes can be brittle or unsafe.
 

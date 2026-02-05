@@ -553,6 +553,7 @@ static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const ch
 static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
@@ -561,6 +562,7 @@ static const GatewayCommand gateway_commands[] = {
     { "GET", KTerm_Gateway_HandleGet },
     { "INIT", KTerm_Gateway_HandleInit },
     { "PIPE", KTerm_Gateway_HandlePipeCmd },
+    { "RAWDUMP", KTerm_Gateway_HandleRawDump },
     { "RESET", KTerm_Gateway_HandleReset },
     { "SET", KTerm_Gateway_HandleSet }
 };
@@ -966,6 +968,76 @@ static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, cons
     }
 }
 
+static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    // Params: START, STOP, TOGGLE, SESSION=n, FORCE_WOB=bool
+    const char* args = scanner->ptr + scanner->pos;
+    if (!args) return;
+
+    char buffer[256];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    bool start = false;
+    bool stop = false;
+    bool toggle = false;
+    int target_id = -1;
+    int force_wob = -1; // -1=unset
+
+    char* token = strtok(buffer, ";");
+    while (token) {
+        if (strcmp(token, "START") == 0) start = true;
+        else if (strcmp(token, "STOP") == 0) stop = true;
+        else if (strcmp(token, "TOGGLE") == 0) toggle = true;
+        else if (strncmp(token, "SESSION=", 8) == 0) {
+            target_id = atoi(token + 8);
+        } else if (strncmp(token, "FORCE_WOB=", 10) == 0) {
+            const char* v = token + 10;
+            if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
+            else force_wob = 0;
+        }
+        token = strtok(NULL, ";");
+    }
+
+    if (target_id == -1) {
+        target_id = term->active_session;
+    }
+
+    // Determine Action
+    if (toggle) {
+        if (session->raw_dump.raw_dump_mirror_active) stop = true;
+        else start = true;
+    }
+
+    if (start && stop) start = false; // Stop wins
+
+    if (stop) {
+        session->raw_dump.raw_dump_mirror_active = false;
+
+        char response[128];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;RAWDUMP;STOPPED;SESSION=%d\x1B\\", id, target_id);
+        KTerm_QueueResponse(term, response);
+    } else if (start) {
+        session->raw_dump.raw_dump_mirror_active = true;
+        session->raw_dump.raw_dump_target_session_id = target_id;
+        if (force_wob != -1) session->raw_dump.raw_dump_force_wob = (force_wob == 1);
+        session->raw_dump.initialized = false; // Trigger clear
+
+        char response[128];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;RAWDUMP;ACTIVE;SESSION=%d\x1B\\", id, target_id);
+        KTerm_QueueResponse(term, response);
+    } else {
+        // Just update params if neither start nor stop/toggle?
+        // Or assume start if SESSION is provided but no verb?
+        // Let's assume explicit verb is required for state change, but we can update target on the fly.
+        if (target_id != -1 && session->raw_dump.raw_dump_mirror_active) session->raw_dump.raw_dump_target_session_id = target_id;
+        if (force_wob != -1) session->raw_dump.raw_dump_force_wob = (force_wob == 1);
+
+        char response[128];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;RAWDUMP;UPDATED\x1B\\", id);
+        KTerm_QueueResponse(term, response);
+    }
+}
+
 static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
     // INIT;...
     char subcmd[64];
@@ -1258,12 +1330,71 @@ static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char
     if (respond) respond(term, session, "OK");
 }
 
+static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    if (!args) return;
+
+    char buffer[256];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    bool start = false;
+    bool stop = false;
+    bool toggle = false;
+    int target_id = -1;
+    int force_wob = -1;
+
+    char* token = strtok(buffer, ";");
+    while (token) {
+        if (strcmp(token, "START") == 0) start = true;
+        else if (strcmp(token, "STOP") == 0) stop = true;
+        else if (strcmp(token, "TOGGLE") == 0) toggle = true;
+        else if (strncmp(token, "SESSION=", 8) == 0) {
+            target_id = atoi(token + 8);
+        } else if (strncmp(token, "FORCE_WOB=", 10) == 0) {
+            const char* v = token + 10;
+            if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
+            else force_wob = 0;
+        }
+        token = strtok(NULL, ";");
+    }
+
+    if (target_id == -1) {
+        target_id = term->active_session;
+    }
+
+    if (toggle) {
+        if (session->raw_dump.raw_dump_mirror_active) stop = true;
+        else start = true;
+    }
+
+    if (start && stop) start = false;
+
+    if (stop) {
+        session->raw_dump.raw_dump_mirror_active = false;
+        if (respond) respond(term, session, "STOPPED");
+    } else if (start) {
+        session->raw_dump.raw_dump_mirror_active = true;
+        session->raw_dump.raw_dump_target_session_id = target_id;
+        if (force_wob != -1) session->raw_dump.raw_dump_force_wob = (force_wob == 1);
+        session->raw_dump.initialized = false;
+
+        char msg[64];
+        snprintf(msg, sizeof(msg), "ACTIVE;SESSION=%d", target_id);
+        if (respond) respond(term, session, msg);
+    } else {
+        if (target_id != -1 && session->raw_dump.raw_dump_mirror_active) session->raw_dump.raw_dump_target_session_id = target_id;
+        if (force_wob != -1) session->raw_dump.raw_dump_force_wob = (force_wob == 1);
+        if (respond) respond(term, session, "UPDATED");
+    }
+}
+
 void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "broadcast", KTerm_Ext_Broadcast);
     KTerm_RegisterGatewayExtension(term, "themes", KTerm_Ext_Themes);
     KTerm_RegisterGatewayExtension(term, "clipboard", KTerm_Ext_Clipboard);
     KTerm_RegisterGatewayExtension(term, "icat", KTerm_Ext_Icat);
     KTerm_RegisterGatewayExtension(term, "direct", KTerm_Ext_DirectInput);
+    KTerm_RegisterGatewayExtension(term, "rawdump", KTerm_Ext_RawDump);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
