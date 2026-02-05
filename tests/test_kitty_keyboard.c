@@ -51,14 +51,14 @@ void test_key_translation(KTerm* term) {
     KTerm_Update(term);
 
     // Test 1: 'a' (Simple)
-    KTermEvent ev1 = {0};
+    KTermKeyEvent ev1 = {0};
     ev1.key_code = KTERM_KEY_A;
     KTerm_QueueInputEvent(term, ev1);
     KTerm_Update(term); KTerm_Update(term);
     assert(strcmp(last_response, "a") == 0);
 
     // Test 2: Ctrl+A
-    KTermEvent ev2 = {0};
+    KTermKeyEvent ev2 = {0};
     ev2.key_code = KTERM_KEY_A;
     ev2.ctrl = true;
     KTerm_QueueInputEvent(term, ev2);
@@ -66,14 +66,14 @@ void test_key_translation(KTerm* term) {
     assert(strcmp(last_response, "\x1B[97;5u") == 0);
 
     // Test 3: Left Arrow
-    KTermEvent ev3 = {0};
+    KTermKeyEvent ev3 = {0};
     ev3.key_code = KTERM_KEY_LEFT;
     KTerm_QueueInputEvent(term, ev3);
     KTerm_Update(term); KTerm_Update(term);
     assert(strcmp(last_response, "\x1B[57351;1u") == 0);
 
     // Test 4: Shift+Left Arrow
-    KTermEvent ev4 = {0};
+    KTermKeyEvent ev4 = {0};
     ev4.key_code = KTERM_KEY_LEFT;
     ev4.shift = true;
     KTerm_QueueInputEvent(term, ev4);
@@ -81,7 +81,7 @@ void test_key_translation(KTerm* term) {
     assert(strcmp(last_response, "\x1B[57351;2u") == 0);
 
     // Test 5: F1
-    KTermEvent ev5 = {0};
+    KTermKeyEvent ev5 = {0};
     ev5.key_code = KTERM_KEY_F1;
     KTerm_QueueInputEvent(term, ev5);
     KTerm_Update(term); KTerm_Update(term);

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.18
+# K-Term Emulation Library v2.4.19
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -221,11 +221,15 @@ The library operates around a central `Terminal` structure (`KTerm`) that manage
 graph TD
     UserApp["User Application"] -->|"KTerm_Create"| TerminalInstance
     UserApp -->|"KTerm_Update(term)"| UpdateLoop
-    UserApp -->|"KTerm_WriteChar"| InputPipeline
-    UserApp -->|"KTerm_QueueInputEvent"| EventQueue
+    UserApp -->|"KTerm_ProcessEvent"| EventDispatcher
 
     subgraph Terminal_Internals ["KTerm Library Internals"]
         TerminalInstance["KTerm Instance (Heap)"]
+        EventDispatcher["Event Dispatcher"]
+
+        EventDispatcher -->|"BYTES"| InputPipeline["SPSC Input Queue (1MB)"]
+        EventDispatcher -->|"KEY"| EventQueue["Key Queue"]
+        EventDispatcher -->|"MOUSE/RESIZE/FOCUS"| EventQueue
 
         subgraph Layout_System ["Multiplexer & Session Management"]
             LayoutTree["KTermPane Layout Tree"]
@@ -239,27 +243,32 @@ graph TD
 
         subgraph Update_Cycle ["Update Cycle"]
             UpdateLoop["KTerm_Update Loop"]
-            InputProc["KTerm_ProcessEvents"]
-            EventProc["Event Queue Processor"]
+            InputProc["Input Processor"]
+            KeyProc["Key Processor"]
             Parser["VT/ANSI/Gateway Parser"]
+            DirectInput["Direct Input Logic"]
             OpQueue["Op Queue Batching"]
             StateMod["State Modification"]
 
             UpdateLoop -->|"For Each Session"| InputProc
-            UpdateLoop -->|"Process Keys"| EventProc
+            UpdateLoop -->|"Process Keys"| KeyProc
 
-            InputPipeline["SPSC Input Queue (1MB)"] -->|"Batch Pop"| InputProc
-            EventQueue["Event Queue (Keyboard/Mouse)"] --> EventProc
+            InputPipeline -->|"Batch Pop"| InputProc
+            EventQueue --> KeyProc
 
             InputProc -->|"Byte Stream"| Parser
+            KeyProc -->|"Standard Mode"| KeyTranslate["KTerm_TranslateKey"]
+            KeyProc -->|"Direct Mode"| DirectInput
 
-            Parser -->|"Queue Response"| ResponseRing["Per-Session Response Ring"]
-            EventProc -->|"Generate Sequences"| ResponseRing
+            KeyTranslate -->|"Generate Sequence"| ResponseRing["Per-Session Response Ring"]
+            Parser -->|"Queue Response"| ResponseRing
 
             ResponseRing -->|"Drain"| Response["Response Callback (To Host)"]
             ResponseRing -->|"Drain (Zero-Copy)"| OutputSink["Output Sink (Optional)"]
 
             Parser -->|"Queue Ops"| OpQueue
+            DirectInput -->|"Queue Ops"| OpQueue
+
             OpQueue -->|"Flush & Apply"| StateMod
             StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
             StateMod -->|"Update"| Cursor["Cursor State"]

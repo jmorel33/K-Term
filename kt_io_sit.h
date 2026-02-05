@@ -33,127 +33,16 @@ void KTermSit_ProcessInput(KTerm* term);
 #endif
 
 // Use Core Key Event Structure
-typedef KTermEvent KTermSitKeyEvent;
+typedef KTermKeyEvent KTermSitKeyEvent;
 
 // Forward declarations of internal helpers
 static void KTermSit_UpdateKeyboard(KTerm* term);
 static void KTermSit_UpdateMouse(KTerm* term);
-static void KTermSit_GenerateVTSequence(KTerm* term, KTermSitKeyEvent* event);
-static void KTermSit_HandleControlKey(KTerm* term, KTermSitKeyEvent* event);
-static void KTermSit_HandleAltKey(KTerm* term, KTermSitKeyEvent* event);
 static int KTermSit_EncodeUTF8(int codepoint, char* buffer);
 
 void KTermSit_ProcessInput(KTerm* term) {
     KTermSit_UpdateKeyboard(term);
     KTermSit_UpdateMouse(term);
-}
-
-static void KTermSit_HandleControlKey(KTerm* term, KTermSitKeyEvent* event) {
-    // Handle Ctrl+key combinations
-    if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
-        int ctrl_char = event->key_code - SIT_KEY_A + 1;
-        event->sequence[0] = (char)ctrl_char;
-        event->sequence[1] = '\0';
-    } else {
-        switch (event->key_code) {
-            case SIT_KEY_SPACE:      event->sequence[0] = 0x00; break;
-            case SIT_KEY_LEFT_BRACKET:  event->sequence[0] = 0x1B; break;
-            case SIT_KEY_BACKSLASH:  event->sequence[0] = 0x1C; break;
-            case SIT_KEY_RIGHT_BRACKET: event->sequence[0] = 0x1D; break;
-            case SIT_KEY_GRAVE_ACCENT:      event->sequence[0] = 0x1E; break;
-            case SIT_KEY_MINUS:      event->sequence[0] = 0x1F; break;
-            default: event->sequence[0] = '\0'; break;
-        }
-        if (event->sequence[0] != '\0') event->sequence[1] = '\0';
-    }
-}
-
-static void KTermSit_HandleAltKey(KTerm* term, KTermSitKeyEvent* event) {
-    if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
-        char letter = 'a' + (event->key_code - SIT_KEY_A);
-        if (event->shift) letter = 'A' + (event->key_code - SIT_KEY_A);
-        snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", letter);
-    } else if (event->key_code >= SIT_KEY_0 && event->key_code <= SIT_KEY_9) {
-        char digit = '0' + (event->key_code - SIT_KEY_0);
-        snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", digit);
-    } else {
-        event->sequence[0] = '\0';
-    }
-}
-
-static void KTermSit_GenerateVTSequence(KTerm* term, KTermSitKeyEvent* event) {
-    memset(event->sequence, 0, sizeof(event->sequence));
-    KTermSession* session = GET_SESSION(term);
-
-    switch (event->key_code) {
-        case SIT_KEY_UP:
-            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A");
-            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5A");
-            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3A");
-            break;
-        case SIT_KEY_DOWN:
-            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
-            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5B");
-            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3B");
-            break;
-        case SIT_KEY_RIGHT:
-            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOC" : "\x1B[C");
-            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5C");
-            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3C");
-            break;
-        case SIT_KEY_LEFT:
-            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOD" : "\x1B[D");
-            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5D");
-            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3D");
-            break;
-
-        case SIT_KEY_HOME: strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOH" : "\x1B[H"); break;
-        case SIT_KEY_END:  strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOF" : "\x1B[F"); break;
-
-        case SIT_KEY_PAGE_UP:   strcpy(event->sequence, "\x1B[5~"); break;
-        case SIT_KEY_PAGE_DOWN: strcpy(event->sequence, "\x1B[6~"); break;
-        case SIT_KEY_INSERT:    strcpy(event->sequence, "\x1B[2~"); break;
-        case SIT_KEY_DELETE:    strcpy(event->sequence, "\x1B[3~"); break;
-
-        case SIT_KEY_F1:  strncpy(event->sequence, session->input.function_keys[0], 31); break;
-        case SIT_KEY_F2:  strncpy(event->sequence, session->input.function_keys[1], 31); break;
-        case SIT_KEY_F3:  strncpy(event->sequence, session->input.function_keys[2], 31); break;
-        case SIT_KEY_F4:  strncpy(event->sequence, session->input.function_keys[3], 31); break;
-        case SIT_KEY_F5:  strncpy(event->sequence, session->input.function_keys[4], 31); break;
-        case SIT_KEY_F6:  strncpy(event->sequence, session->input.function_keys[5], 31); break;
-        case SIT_KEY_F7:  strncpy(event->sequence, session->input.function_keys[6], 31); break;
-        case SIT_KEY_F8:  strncpy(event->sequence, session->input.function_keys[7], 31); break;
-        case SIT_KEY_F9:  strncpy(event->sequence, session->input.function_keys[8], 31); break;
-        case SIT_KEY_F10: strncpy(event->sequence, session->input.function_keys[9], 31); break;
-        case SIT_KEY_F11: strncpy(event->sequence, session->input.function_keys[10], 31); break;
-        case SIT_KEY_F12: strncpy(event->sequence, session->input.function_keys[11], 31); break;
-
-        case SIT_KEY_ENTER:     strcpy(event->sequence, session->ansi_modes.line_feed_new_line ? "\r" : "\n"); break;
-        case SIT_KEY_TAB:       strcpy(event->sequence, "\t"); break;
-        case SIT_KEY_BACKSPACE: strcpy(event->sequence, session->input.backarrow_sends_bs ? "\b" : "\x7F"); break;
-        case SIT_KEY_ESCAPE:    strcpy(event->sequence, "\x1B"); break;
-
-        // Keypad
-        case SIT_KEY_KP_0: case SIT_KEY_KP_1: case SIT_KEY_KP_2: case SIT_KEY_KP_3: case SIT_KEY_KP_4:
-        case SIT_KEY_KP_5: case SIT_KEY_KP_6: case SIT_KEY_KP_7: case SIT_KEY_KP_8: case SIT_KEY_KP_9:
-            if (session->input.keypad_application_mode) {
-                snprintf(event->sequence, sizeof(event->sequence), "\x1BO%c", 'p' + (event->key_code - SIT_KEY_KP_0));
-            } else {
-                snprintf(event->sequence, sizeof(event->sequence), "%c", '0' + (event->key_code - SIT_KEY_KP_0));
-            }
-            break;
-        case SIT_KEY_KP_DECIMAL:  strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOn" : "."); break;
-        case SIT_KEY_KP_ENTER:    strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOM" : "\r"); break;
-        case SIT_KEY_KP_ADD:      strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOk" : "+"); break;
-        case SIT_KEY_KP_SUBTRACT: strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOm" : "-"); break;
-        case SIT_KEY_KP_MULTIPLY: strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOj" : "*"); break;
-        case SIT_KEY_KP_DIVIDE:   strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOo" : "/"); break;
-
-        default:
-            if (event->ctrl) KTermSit_HandleControlKey(term, event);
-            else if (event->alt && session->input.meta_sends_escape) KTermSit_HandleAltKey(term, event);
-            break;
-    }
 }
 
 static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk) {
@@ -168,24 +57,27 @@ static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk
     }
 
     // 2. Standard Key Handling
-    KTermSitKeyEvent event = {0};
-    event.key_code = rk;
-    event.ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
-    event.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
-    event.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
+    KTermEvent event = {0};
+    event.type = KTERM_EVENT_KEY;
+    event.key.key_code = rk;
+    event.key.ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
+    event.key.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
+    event.key.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
 
     // Filter printable characters if not modified
-    // If it is printable and no modifiers, we inject it directly as a character event
+    // If it is printable and no modifiers, we inject it directly as a character event (via KEY event with sequence populated)
     // because we are suppressing OS repeats (CharPressed relies on OS repeats).
-    if (rk >= 32 && rk <= 126 && !event.ctrl && !event.alt) {
-        event.sequence[0] = (char)rk;
-        event.sequence[1] = '\0';
-        KTerm_QueueInputEvent(term, event);
+    if (rk >= 32 && rk <= 126 && !event.key.ctrl && !event.key.alt) {
+        event.key.sequence[0] = (char)rk;
+        event.key.sequence[1] = '\0';
+        KTerm_ProcessEvent(term, session, &event);
         return;
     }
 
     // Special Scrollback Handling (Shift + PageUp/Down)
-    if (event.shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
+    // TODO: This should probably be moved to KTerm_ProcessEvent or generic handler too?
+    // For now, keeping it here as it manipulates session state directly.
+    if (event.key.shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
         if (rk == SIT_KEY_PAGE_UP) session->view_offset += DEFAULT_TERM_HEIGHT / 2;
         else session->view_offset -= DEFAULT_TERM_HEIGHT / 2;
 
@@ -194,11 +86,8 @@ static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk
         if (session->view_offset > max_offset) session->view_offset = max_offset;
         for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) session->row_dirty[i] = true;
     } else {
-        KTermSit_GenerateVTSequence(term, &event);
-        if (event.sequence[0] != '\0') {
-            // Push to Input Queue instead of direct response
-            KTerm_QueueInputEvent(term, event);
-        }
+        // Delegate to Core Translation
+        KTerm_ProcessEvent(term, session, &event);
     }
 }
 
@@ -254,16 +143,17 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
     // Process Unicode Characters
     int ch_unicode;
     while ((ch_unicode = SituationGetCharPressed()) != 0) {
-        KTermSitKeyEvent event = {0};
-        event.key_code = ch_unicode;
+        KTermEvent event = {0};
+        event.type = KTERM_EVENT_KEY;
+        event.key.key_code = ch_unicode;
 
         // Populate sequence directly
         char sequence[8] = {0};
         bool ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
         bool alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
 
-        event.ctrl = ctrl;
-        event.alt = alt;
+        event.key.ctrl = ctrl;
+        event.key.alt = alt;
 
         if (ctrl && ch_unicode >= 'a' && ch_unicode <= 'z') sequence[0] = (char)(ch_unicode - 'a' + 1);
         else if (ctrl && ch_unicode >= 'A' && ch_unicode <= 'Z') sequence[0] = (char)(ch_unicode - 'A' + 1);
@@ -275,8 +165,8 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
         }
 
         if (sequence[0] != '\0') {
-            strncpy(event.sequence, sequence, sizeof(event.sequence));
-            KTerm_QueueInputEvent(term, event);
+            strncpy(event.key.sequence, sequence, sizeof(event.key.sequence));
+            KTerm_ProcessEvent(term, session, &event);
         }
     }
 }
@@ -311,8 +201,6 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     Vector2 mouse_pos = SituationGetMousePosition();
 
     // [FIX] Mouse Tracking Precision
-    // Use floating point math and actual font metrics instead of constants/integers
-    // to prevent drift on high-DPI screens or when scaling is active.
     float cell_w = (float)term->char_width * DEFAULT_WINDOW_SCALE;
     float cell_h = (float)term->char_height * DEFAULT_WINDOW_SCALE;
 
@@ -343,7 +231,7 @@ static void KTermSit_UpdateMouse(KTerm* term) {
         }
     }
 
-    // Temporarily switch to target session for correct context (QueueResponse, State Access)
+    // Temporarily switch to target session for correct context
     int saved_session_idx = term->active_session;
     term->active_session = target_session_idx;
     KTermSession* session = &term->sessions[target_session_idx];
@@ -355,53 +243,80 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     if (local_cell_y < 0) local_cell_y = 0;
     if (local_cell_y >= session->rows) local_cell_y = session->rows - 1;
 
-    float wheel = SituationGetMouseWheelMove();
-    if (wheel != 0) {
-        // Application Mouse Reporting for Wheel
-        if ((session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING) &&
-            session->mouse.enabled &&
-            session->mouse.mode != MOUSE_TRACKING_OFF) {
+    // Build Mouse Event
+    KTermEvent event = {0};
+    event.type = KTERM_EVENT_MOUSE;
+    event.mouse.x = global_cell_x;
+    event.mouse.y = local_cell_y;
+    event.mouse.ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
+    event.mouse.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
+    event.mouse.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
+    event.mouse.wheel_delta = SituationGetMouseWheelMove();
 
-            int btn = (wheel > 0) ? 64 : 65;
-            char report[64] = {0};
+    // Check buttons
+    bool current_buttons[3] = {
+        SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT),
+        SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE),
+        SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)
+    };
 
-            if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) btn += 4;
-            if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) btn += 8;
-            if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) btn += 16;
+    bool event_sent = false;
 
-            if (session->mouse.sgr_mode || session->mouse.mode == MOUSE_TRACKING_URXVT || session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                 int px = global_cell_x + 1;
-                 int py = local_cell_y + 1;
-                 if (session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                    px = (int)mouse_pos.x + 1;
-                    py = (int)mouse_pos.y + 1;
-                 }
-                 snprintf(report, sizeof(report), "\x1B[<%d;%d;%dM", btn, px, py);
-            } else if (session->mouse.mode >= MOUSE_TRACKING_VT200) {
-                int cb = 32 + btn; // 32 + 64/65
-                snprintf(report, sizeof(report), "\x1B[M%c%c%c", (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-            }
-            if (report[0]) KTerm_QueueResponse(term, report);
-        }
-        else {
-            // Normal Terminal Scrolling
-            if ((session->dec_modes & KTERM_MODE_ALTSCREEN)) {
-                int lines = 3;
-                const char* seq = (wheel > 0) ? ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A")
-                                              : ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
-                for(int i=0; i<lines; i++) KTerm_QueueResponse(term, seq);
-            } else {
-                int scroll_amount = (int)(wheel * 3.0f);
-                session->view_offset += scroll_amount;
-                if (session->view_offset < 0) session->view_offset = 0;
-                int max_offset = session->buffer_height - DEFAULT_TERM_HEIGHT;
-                if (session->view_offset > max_offset) session->view_offset = max_offset;
-                for(int i=0; i<DEFAULT_TERM_HEIGHT; i++) session->row_dirty[i] = true;
-            }
+    // Wheel events always fire
+    if (event.mouse.wheel_delta != 0) {
+        // Note: For wheel, button is irrelevant for core event but used in legacy report gen?
+        // We set button=0 but wheel_delta is set.
+        KTerm_ProcessEvent(term, session, &event);
+        event_sent = true;
+    }
+
+    // Button state changes
+    for (int i=0; i<3; i++) {
+        if (current_buttons[i] != session->mouse.buttons[i]) {
+            session->mouse.buttons[i] = current_buttons[i];
+            event.mouse.button = i;
+            event.mouse.is_release = !current_buttons[i];
+            event.mouse.is_drag = false; // Click/Release
+            // Reset wheel for button event
+            event.mouse.wheel_delta = 0;
+            KTerm_ProcessEvent(term, session, &event);
+            event_sent = true;
         }
     }
 
-    // Selection Logic
+    // Drag / Motion
+    if (!event_sent) {
+        // If button down and moved
+        bool any_button_down = current_buttons[0] || current_buttons[1] || current_buttons[2];
+        if (any_button_down && (global_cell_x != session->mouse.last_x || local_cell_y != session->mouse.last_y)) {
+             event.mouse.is_drag = true;
+             event.mouse.button = current_buttons[0] ? 0 : (current_buttons[1] ? 1 : 2); // Priority to Left
+             event.mouse.wheel_delta = 0;
+             KTerm_ProcessEvent(term, session, &event);
+        }
+        else if (global_cell_x != session->mouse.last_x || local_cell_y != session->mouse.last_y) {
+             // Just motion (no button)
+             // Only if tracking ANY
+             if (session->mouse.mode == MOUSE_TRACKING_ANY_EVENT) {
+                 event.mouse.is_drag = false;
+                 // Button?
+                 KTerm_ProcessEvent(term, session, &event);
+             }
+        }
+    }
+
+    session->mouse.last_x = global_cell_x;
+    session->mouse.last_y = local_cell_y;
+
+    // Selection Logic (Local) - Kept here or moved?
+    // Moving it to KTerm_ProcessEvent is cleaner but selection interacts with `Situation` inputs directly here?
+    // Actually selection state is in session.
+    // I can leave selection logic here or move it.
+    // Selection is "Client Side" feature, not VT emulation (usually).
+    // KTerm is a library.
+    // I'll keep selection logic here for now as it uses Situation mouse buttons directly.
+    // But wait, I updated `session->mouse.buttons` above.
+
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         session->selection.active = true;
         session->selection.dragging = true;
@@ -420,97 +335,10 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     // Focus Tracking
     bool current_focus = SituationHasWindowFocus();
     if (current_focus != session->mouse.focused) {
-        session->mouse.focused = current_focus;
-        if (session->mouse.focus_tracking) {
-            KTerm_QueueResponse(term, current_focus ? "\x1B[I" : "\x1B[O");
-        }
-    }
-
-    if ((session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING)) {
-        if (!session->mouse.enabled || session->mouse.mode == MOUSE_TRACKING_OFF) {
-            SituationShowCursor();
-            session->mouse.cursor_x = -1;
-            session->mouse.cursor_y = -1;
-        } else {
-            SituationHideCursor();
-
-            session->mouse.cursor_x = global_cell_x + 1;
-            session->mouse.cursor_y = local_cell_y + 1;
-
-            bool current_buttons[3] = {
-                SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT),
-                SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE),
-                SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)
-            };
-
-            for (int i=0; i<3; i++) {
-                if (current_buttons[i] != session->mouse.buttons[i]) {
-                    session->mouse.buttons[i] = current_buttons[i];
-                    bool pressed = current_buttons[i];
-                    int btn = i;
-                    char report[64] = {0};
-
-                    if (session->mouse.sgr_mode || session->mouse.mode == MOUSE_TRACKING_URXVT || session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) btn += 4;
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) btn += 8;
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) btn += 16;
-
-                        int px = global_cell_x + 1;
-                        int py = local_cell_y + 1;
-                        if (session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                            px = (int)mouse_pos.x + 1;
-                            py = (int)mouse_pos.y + 1;
-                        }
-                        snprintf(report, sizeof(report), "\x1B[<%d;%d;%d%c", btn, px, py, pressed ? 'M' : 'm');
-                    } else if (session->mouse.mode >= MOUSE_TRACKING_VT200) {
-                        int cb = 32 + (pressed ? i : 3);
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) cb += 4;
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) cb += 8;
-                        if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) cb += 16;
-                        snprintf(report, sizeof(report), "\x1B[M%c%c%c", (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-                    } else if (session->mouse.mode == MOUSE_TRACKING_X10 && pressed) {
-                        int cb = 32 + i;
-                        snprintf(report, sizeof(report), "\x1B[M%c%c%c", (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-                    }
-                    if (report[0]) KTerm_QueueResponse(term, report);
-                }
-            }
-
-            // Motion Reporting
-            if (session->mouse.mode == MOUSE_TRACKING_BTN_EVENT ||
-                session->mouse.mode == MOUSE_TRACKING_ANY_EVENT) {
-
-                bool any_button_down = current_buttons[0] || current_buttons[1] || current_buttons[2];
-                bool report_motion = (session->mouse.mode == MOUSE_TRACKING_ANY_EVENT) ||
-                                     (session->mouse.mode == MOUSE_TRACKING_BTN_EVENT && any_button_down);
-
-                // Check if position changed
-                if (report_motion && (global_cell_x != session->mouse.last_x || local_cell_y != session->mouse.last_y)) {
-                    session->mouse.last_x = global_cell_x;
-                    session->mouse.last_y = local_cell_y;
-
-                    char report[64] = {0};
-                    int btn_code = 32 + 35; // +32 for motion
-                    // Add modifier bits
-                    if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) btn_code += 4;
-                    if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) btn_code += 8;
-                    if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) btn_code += 16;
-
-                    if (session->mouse.sgr_mode || session->mouse.mode == MOUSE_TRACKING_URXVT || session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                         int px = global_cell_x + 1;
-                         int py = local_cell_y + 1;
-                         if (session->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                            px = (int)mouse_pos.x + 1;
-                            py = (int)mouse_pos.y + 1;
-                         }
-                         snprintf(report, sizeof(report), "\x1B[<%d;%d;%dM", btn_code - 32, px, py);
-                    } else {
-                         snprintf(report, sizeof(report), "\x1B[M%c%c%c", (char)btn_code, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-                    }
-                    if (report[0]) KTerm_QueueResponse(term, report);
-                }
-            }
-        }
+        KTermEvent fe = {0};
+        fe.type = KTERM_EVENT_FOCUS;
+        fe.focused = current_focus;
+        KTerm_ProcessEvent(term, session, &fe);
     }
 
     // Restore active session

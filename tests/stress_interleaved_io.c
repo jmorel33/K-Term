@@ -52,7 +52,7 @@ int main() {
 
         // 2. Simulate User Input (Typing / Mouse)
         if (i % 5 == 0) {
-            KTermEvent ev = {0};
+            KTermKeyEvent ev = {0};
             ev.key_code = KTERM_KEY_A + (my_rand() % 26);
             ev.ctrl = (my_rand() % 5) == 0;
             KTerm_QueueInputEvent(term, ev);
