@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.13
+# kterm.h - Technical Reference Manual v2.4.18
 
 **(c) 2026 Jacques Morel**
 
@@ -883,6 +883,18 @@ The class ID `KTERM` is reserved for internal configuration.
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
 | `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
 | `GET;STRIKE_COLOR` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
+
+#### Gateway Extensions (v2.4.18+)
+
+Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend the terminal's capabilities without modifying the core library. This system allows the host application to register custom handlers for `EXT` commands sent via the Gateway Protocol.
+
+*   **Command:** `DCS GATE KTERM ; <ID> ; EXT ; <Name> ; <Args> ST`
+*   **Registration API:** `KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler);`
+*   **Built-in Extensions:**
+    *   **`broadcast`**: Sends input characters to all active sessions. Usage: `EXT;broadcast;Hello`
+    *   **`themes`**: Sets terminal colors. Usage: `EXT;themes;set;bg=#RRGGBB`
+    *   **`icat`**: Injects an image using the Kitty Graphics Protocol (basic wrapper). Usage: `EXT;icat;<Base64Data>`
+    *   **`clipboard`**: A placeholder for clipboard integration.
 
 #### Oscillator Period Table (Slots 0-63)
 
