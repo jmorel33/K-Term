@@ -257,6 +257,9 @@ graph TD
             EventQueue --> KeyProc
 
             InputProc -->|"Byte Stream"| Parser
+            InputProc -->|"RAWDUMP"| DumpLogic["Raw Dump Mirror"]
+            DumpLogic -->|"Queue Ops"| OpQueue
+
             KeyProc -->|"Standard Mode"| KeyTranslate["KTerm_TranslateKey"]
             KeyProc -->|"Direct Mode"| DirectInput
 
