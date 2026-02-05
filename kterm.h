@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 18
+#define KTERM_VERSION_PATCH 19
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.18 (Gateway Extensions)"
+#define KTERM_VERSION_STRING "2.4.19 (Unified Event Pipeline)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -793,6 +793,36 @@ typedef struct {
     KeyPriority priority;
     double timestamp;
     char sequence[32];      // Generated escape sequence
+} KTermKeyEvent;
+
+typedef struct {
+    int x, y;
+    int button; // 0=Left, 1=Middle, 2=Right
+    bool ctrl, shift, alt, meta;
+    bool is_drag;
+    bool is_release;
+    float wheel_delta;
+} KTermMouseEvent;
+
+typedef enum {
+    KTERM_EVENT_BYTES,
+    KTERM_EVENT_KEY,
+    KTERM_EVENT_MOUSE,
+    KTERM_EVENT_RESIZE,
+    KTERM_EVENT_FOCUS,
+    KTERM_EVENT_PASTE
+} KTermEventType;
+
+typedef struct {
+    KTermEventType type;
+    union {
+        struct { const uint8_t* data; size_t len; } bytes;
+        KTermKeyEvent key;
+        KTermMouseEvent mouse;
+        struct { int w, h; } resize;
+        bool focused;
+        struct { const char* text; size_t len; } paste;
+    };
 } KTermEvent;
 
 typedef struct {
@@ -811,7 +841,7 @@ typedef struct {
     int kitty_keyboard_stack_depth;
 
     // Event Buffer
-    KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
+    KTermKeyEvent buffer[KEY_EVENT_BUFFER_SIZE];
     atomic_int buffer_head;
     atomic_int buffer_tail;
 
@@ -1217,8 +1247,8 @@ void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor 
 void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
 
 // VT compliance and identification
-bool KTerm_GetKey(KTerm* term, KTermEvent* event); // Retrieve buffered event
-void KTerm_QueueInputEvent(KTerm* term, KTermEvent event); // Push event to buffer
+bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event); // Retrieve buffered event
+void KTerm_QueueInputEvent(KTerm* term, KTermKeyEvent event); // Push event to buffer
 void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level);
 VTLevel KTerm_GetLevel(KTerm* term);
 // void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by KTerm_SetLevel
@@ -1226,6 +1256,7 @@ VTLevel KTerm_GetLevel(KTerm* term);
 void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buffer_size);
 
 // Enhanced pipeline management (for host input)
+bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* event);
 bool KTerm_WriteChar(KTerm* term, unsigned char ch);
 size_t KTerm_PushInput(KTerm* term, const void* data, size_t length);
 bool KTerm_WriteString(KTerm* term, const char* str);
@@ -1698,6 +1729,7 @@ typedef struct KTermSession_T {
     bool input_enabled;
     bool password_mode;
     bool raw_mode;
+    bool direct_input; // Direct Input Mode (Local Editor)
     bool paused;
 
     bool printer_available;
@@ -6129,10 +6161,11 @@ static bool KTerm_WriteCharToSessionInternal(KTerm* term, KTermSession* session,
 // ENHANCED PIPELINE PROCESSING
 // =============================================================================
 bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
-    // Wrapper around internal function using active session
-    // Reads active_session once atomically (in C sense)
-    KTermSession* session = &term->sessions[term->active_session];
-    return KTerm_WriteCharToSessionInternal(term, session, ch);
+    KTermEvent event;
+    event.type = KTERM_EVENT_BYTES;
+    event.bytes.data = &ch;
+    event.bytes.len = 1;
+    return KTerm_ProcessEvent(term, NULL, &event);
 }
 
 size_t KTerm_PushInput(KTerm* term, const void* data, size_t length) {
@@ -6143,10 +6176,11 @@ size_t KTerm_PushInput(KTerm* term, const void* data, size_t length) {
 
 bool KTerm_WriteString(KTerm* term, const char* str) {
     if (!str) return false;
-    KTermSession* session = &term->sessions[term->active_session];
-    size_t len = strlen(str);
-    size_t written = KTerm_InputQueue_Push(&session->input_queue, str, len);
-    return written == len;
+    KTermEvent event;
+    event.type = KTERM_EVENT_BYTES;
+    event.bytes.data = (const uint8_t*)str;
+    event.bytes.len = strlen(str);
+    return KTerm_ProcessEvent(term, NULL, &event);
 }
 
 bool KTerm_WriteFormat(KTerm* term, const char* format, ...) {
@@ -12921,7 +12955,7 @@ void KTerm_Update(KTerm* term) {
         int current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
 
         while (current_tail != current_head) {
-            KTermEvent* event = &session->input.buffer[current_tail];
+            KTermKeyEvent* event = &session->input.buffer[current_tail];
 
             // 1. Send Sequence to Host
             if (event->sequence[0] != '\0') {
@@ -14822,7 +14856,7 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
     }
 }
 
-static void KTerm_TranslateKey(KTermSession* session, KTermEvent* event) {
+static void KTerm_TranslateKey(KTermSession* session, KTermKeyEvent* event) {
     if (!session || !event) return;
 
     // Kitty Keyboard Protocol Handling
@@ -14881,9 +14915,108 @@ static void KTerm_TranslateKey(KTermSession* session, KTermEvent* event) {
             return; // Done
         }
     }
+
+    // Standard VT Translation (Legacy)
+    // Only proceed if sequence is not already populated (e.g. by text input)
+    if (event->sequence[0] != '\0') return;
+
+    if (event->ctrl) {
+        if (event->key_code >= KTERM_KEY_A && event->key_code <= KTERM_KEY_Z) {
+            event->sequence[0] = (char)(event->key_code - KTERM_KEY_A + 1);
+            event->sequence[1] = '\0';
+            return;
+        }
+        // Handle other Ctrl keys if needed
+        switch (event->key_code) {
+            case KTERM_KEY_SPACE:      strcpy(event->sequence, "\0"); return;
+            case KTERM_KEY_LEFT_BRACKET:  strcpy(event->sequence, "\x1B"); return;
+            case KTERM_KEY_BACKSLASH:  strcpy(event->sequence, "\x1C"); return;
+            case KTERM_KEY_RIGHT_BRACKET: strcpy(event->sequence, "\x1D"); return;
+            case KTERM_KEY_GRAVE_ACCENT:      strcpy(event->sequence, "\x1E"); return;
+            case KTERM_KEY_MINUS:      strcpy(event->sequence, "\x1F"); return;
+        }
+    }
+
+    if (event->alt && session->input.meta_sends_escape) {
+        if (event->key_code >= KTERM_KEY_A && event->key_code <= KTERM_KEY_Z) {
+            char letter = 'a' + (event->key_code - KTERM_KEY_A);
+            if (event->shift) letter = 'A' + (event->key_code - KTERM_KEY_A);
+            snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", letter);
+            return;
+        }
+        if (event->key_code >= KTERM_KEY_0 && event->key_code <= KTERM_KEY_9) {
+            snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", '0' + (event->key_code - KTERM_KEY_0));
+            return;
+        }
+    }
+
+    switch (event->key_code) {
+        case KTERM_KEY_UP:
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A");
+            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5A");
+            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3A");
+            break;
+        case KTERM_KEY_DOWN:
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
+            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5B");
+            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3B");
+            break;
+        case KTERM_KEY_RIGHT:
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOC" : "\x1B[C");
+            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5C");
+            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3C");
+            break;
+        case KTERM_KEY_LEFT:
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOD" : "\x1B[D");
+            if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5D");
+            else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3D");
+            break;
+
+        case KTERM_KEY_HOME: strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOH" : "\x1B[H"); break;
+        case KTERM_KEY_END:  strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOF" : "\x1B[F"); break;
+
+        case KTERM_KEY_PAGE_UP:   strcpy(event->sequence, "\x1B[5~"); break;
+        case KTERM_KEY_PAGE_DOWN: strcpy(event->sequence, "\x1B[6~"); break;
+        case KTERM_KEY_INSERT:    strcpy(event->sequence, "\x1B[2~"); break;
+        case KTERM_KEY_DELETE:    strcpy(event->sequence, "\x1B[3~"); break;
+
+        case KTERM_KEY_F1:  strncpy(event->sequence, session->input.function_keys[0], 31); break;
+        case KTERM_KEY_F2:  strncpy(event->sequence, session->input.function_keys[1], 31); break;
+        case KTERM_KEY_F3:  strncpy(event->sequence, session->input.function_keys[2], 31); break;
+        case KTERM_KEY_F4:  strncpy(event->sequence, session->input.function_keys[3], 31); break;
+        case KTERM_KEY_F5:  strncpy(event->sequence, session->input.function_keys[4], 31); break;
+        case KTERM_KEY_F6:  strncpy(event->sequence, session->input.function_keys[5], 31); break;
+        case KTERM_KEY_F7:  strncpy(event->sequence, session->input.function_keys[6], 31); break;
+        case KTERM_KEY_F8:  strncpy(event->sequence, session->input.function_keys[7], 31); break;
+        case KTERM_KEY_F9:  strncpy(event->sequence, session->input.function_keys[8], 31); break;
+        case KTERM_KEY_F10: strncpy(event->sequence, session->input.function_keys[9], 31); break;
+        case KTERM_KEY_F11: strncpy(event->sequence, session->input.function_keys[10], 31); break;
+        case KTERM_KEY_F12: strncpy(event->sequence, session->input.function_keys[11], 31); break;
+
+        case KTERM_KEY_ENTER:     strcpy(event->sequence, session->ansi_modes.line_feed_new_line ? "\r" : "\n"); break;
+        case KTERM_KEY_TAB:       strcpy(event->sequence, "\t"); break;
+        case KTERM_KEY_BACKSPACE: strcpy(event->sequence, session->input.backarrow_sends_bs ? "\b" : "\x7F"); break;
+        case KTERM_KEY_ESCAPE:    strcpy(event->sequence, "\x1B"); break;
+
+        // Keypad
+        case KTERM_KEY_KP_0: case KTERM_KEY_KP_1: case KTERM_KEY_KP_2: case KTERM_KEY_KP_3: case KTERM_KEY_KP_4:
+        case KTERM_KEY_KP_5: case KTERM_KEY_KP_6: case KTERM_KEY_KP_7: case KTERM_KEY_KP_8: case KTERM_KEY_KP_9:
+            if (session->input.keypad_application_mode) {
+                snprintf(event->sequence, sizeof(event->sequence), "\x1BO%c", 'p' + (event->key_code - KTERM_KEY_KP_0));
+            } else {
+                snprintf(event->sequence, sizeof(event->sequence), "%c", '0' + (event->key_code - KTERM_KEY_KP_0));
+            }
+            break;
+        case KTERM_KEY_KP_DECIMAL:  strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOn" : "."); break;
+        case KTERM_KEY_KP_ENTER:    strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOM" : "\r"); break;
+        case KTERM_KEY_KP_ADD:      strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOk" : "+"); break;
+        case KTERM_KEY_KP_SUBTRACT: strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOm" : "-"); break;
+        case KTERM_KEY_KP_MULTIPLY: strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOj" : "*"); break;
+        case KTERM_KEY_KP_DIVIDE:   strcpy(event->sequence, session->input.keypad_application_mode ? "\x1BOo" : "/"); break;
+    }
 }
 
-void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
+void KTerm_QueueInputEvent(KTerm* term, KTermKeyEvent event) {
     KTermSession* session = GET_SESSION(term);
 
     // Apply Key Translation (Kitty or Legacy)
@@ -15004,7 +15137,220 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
     }
 }
 
-bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
+static void KTerm_ProcessKeyDirect(KTerm* term, KTermSession* session, const KTermKeyEvent* key) {
+    if (!session || !key) return;
+
+    // Printable Characters (and not special controls like Ctrl/Alt shortcuts, unless we want to support them)
+    if (key->key_code >= 32 && key->key_code <= 126 && !key->ctrl && !key->alt) {
+        KTermOp op;
+        op.type = KTERM_OP_SET_CELL;
+        op.u.set_cell.x = session->cursor.x;
+        op.u.set_cell.y = session->cursor.y;
+
+        EnhancedTermChar c = {0};
+        c.ch = (unsigned int)key->key_code;
+        c.fg_color = session->current_fg;
+        c.bg_color = session->current_bg;
+        c.flags = session->current_attributes | KTERM_FLAG_DIRTY;
+
+        op.u.set_cell.cell = c;
+        KTerm_QueueOp(&session->op_queue, op);
+
+        // Advance cursor
+        session->cursor.x++;
+        if (session->cursor.x >= session->cols) {
+            session->cursor.x = 0;
+            session->cursor.y++;
+            if (session->cursor.y >= session->rows) {
+                 // Scroll? For simple direct mode, maybe just clamp or scroll.
+                 // Let's implement basic scrolling if needed, but for now just wrap to top?
+                 // Or better: Scroll.
+                 // Reuse Scroll Logic? KTerm_QueueScrollRegion
+                 session->cursor.y = session->rows - 1;
+                 KTermRect rect = {0, 0, session->cols, session->rows};
+                 KTerm_QueueScrollRegion(session, rect, 1);
+            }
+        }
+    } else {
+        // Control Keys
+        switch (key->key_code) {
+            case KTERM_KEY_ENTER:
+                session->cursor.x = 0;
+                session->cursor.y++;
+                if (session->cursor.y >= session->rows) {
+                     session->cursor.y = session->rows - 1;
+                     KTermRect rect = {0, 0, session->cols, session->rows};
+                     KTerm_QueueScrollRegion(session, rect, 1);
+                }
+                break;
+            case KTERM_KEY_BACKSPACE:
+                if (session->cursor.x > 0) {
+                    session->cursor.x--;
+                } else if (session->cursor.y > 0) {
+                    session->cursor.y--;
+                    session->cursor.x = session->cols - 1;
+                }
+                // Clear cell
+                {
+                    KTermOp op;
+                    op.type = KTERM_OP_SET_CELL;
+                    op.u.set_cell.x = session->cursor.x;
+                    op.u.set_cell.y = session->cursor.y;
+                    EnhancedTermChar c = {0};
+                    c.ch = ' '; // Space
+                    c.fg_color = session->current_fg;
+                    c.bg_color = session->current_bg;
+                    c.flags = session->current_attributes | KTERM_FLAG_DIRTY;
+                    op.u.set_cell.cell = c;
+                    KTerm_QueueOp(&session->op_queue, op);
+                }
+                break;
+            case KTERM_KEY_LEFT:
+                if (session->cursor.x > 0) session->cursor.x--;
+                break;
+            case KTERM_KEY_RIGHT:
+                if (session->cursor.x < session->cols - 1) session->cursor.x++;
+                break;
+            case KTERM_KEY_UP:
+                if (session->cursor.y > 0) session->cursor.y--;
+                break;
+            case KTERM_KEY_DOWN:
+                if (session->cursor.y < session->rows - 1) session->cursor.y++;
+                break;
+        }
+    }
+    // Update cursor blink state to active
+    session->cursor.blink_state = true;
+}
+
+bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* event) {
+    if (!term || !event) return false;
+    if (!session) session = GET_SESSION(term);
+
+    switch (event->type) {
+        case KTERM_EVENT_BYTES:
+            if (event->bytes.data && event->bytes.len > 0) {
+                size_t pushed = KTerm_PushInput(term, event->bytes.data, event->bytes.len);
+                return pushed == event->bytes.len;
+            }
+            return true;
+
+        case KTERM_EVENT_KEY:
+            if (session->direct_input) {
+                KTerm_ProcessKeyDirect(term, session, &event->key);
+            } else {
+                KTerm_QueueInputEvent(term, event->key);
+            }
+            return true;
+
+        case KTERM_EVENT_MOUSE:
+             // Mouse Logic moved from kt_io_sit.h (simplified/integrated)
+             // We can check flags and queue response if needed.
+             // But for now, since KTerm_QueueResponse is internal/public, we can just defer to caller?
+             // No, the requirement is "KTERM_EVENT_MOUSE: Update state + generate reports".
+             // So we should implement generation here.
+
+             // TODO: Implement full mouse report generation here to decouple from Sit.
+             // For now, if KTermSit is still generating, this might double report if we implement it.
+             // I will implement it here and remove it from KTermSit in the next step.
+
+             {
+                KTermMouseEvent m = event->mouse;
+                // Update internal state
+                // Note: session->mouse state is already updated by callers usually?
+                // Or should we update it here?
+                // "KTERM_EVENT_MOUSE: Update state + generate reports"
+
+                // Let's assume passed coords are 0-based cell coords
+                session->mouse.cursor_x = m.x + 1;
+                session->mouse.cursor_y = m.y + 1;
+                // Buttons etc.
+
+                bool handled = false;
+                if (session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING) {
+                    if (session->mouse.mode != MOUSE_TRACKING_OFF && session->mouse.enabled) {
+                        // Generate Report
+                        char report[64] = {0};
+                        int btn_code = 32 + m.button;
+
+                        // Encode modifiers
+                        if (m.shift) btn_code += 4;
+                        if (m.alt) btn_code += 8;
+                        if (m.ctrl) btn_code += 16;
+
+                        // Handle SGR/URXVT/Pixel
+                        if (session->mouse.sgr_mode || session->mouse.mode == MOUSE_TRACKING_PIXEL) {
+                            int px = m.x + 1;
+                            int py = m.y + 1;
+                            char action = m.is_release ? 'm' : 'M';
+                            if (m.is_drag) btn_code += 32;
+                            if (m.wheel_delta != 0) {
+                                btn_code = (m.wheel_delta > 0) ? 64 : 65;
+                                if (m.shift) btn_code += 4;
+                                if (m.alt) btn_code += 8;
+                                if (m.ctrl) btn_code += 16;
+                            }
+
+                            snprintf(report, sizeof(report), "\x1B[<%d;%d;%d%c", btn_code - 32, px, py, action);
+                        } else {
+                             // Normal X10/VT200
+                             if (m.is_release) btn_code = 32 + 3; // Release
+                             if (m.wheel_delta != 0) btn_code = (m.wheel_delta > 0) ? 32+64 : 32+65;
+
+                             snprintf(report, sizeof(report), "\x1B[M%c%c%c", (char)btn_code, (char)(32 + m.x + 1), (char)(32 + m.y + 1));
+                        }
+
+                        if (report[0]) {
+                            KTerm_QueueResponse(term, report);
+                            handled = true;
+                        }
+                    }
+                }
+
+                if (!handled && m.wheel_delta != 0) {
+                    // Normal Terminal Scrolling
+                    if ((session->dec_modes & KTERM_MODE_ALTSCREEN)) {
+                        int lines = 3;
+                        const char* seq = (m.wheel_delta > 0) ? ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A")
+                                                      : ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
+                        for(int i=0; i<lines; i++) KTerm_QueueSessionResponse(term, session, seq);
+                    } else {
+                        int scroll_amount = (int)(m.wheel_delta * 3.0f);
+                        session->view_offset += scroll_amount;
+                        if (session->view_offset < 0) session->view_offset = 0;
+                        int max_offset = session->buffer_height - session->rows;
+                        if (max_offset < 0) max_offset = 0;
+
+                        if (session->view_offset > max_offset) session->view_offset = max_offset;
+                        // Mark dirty
+                        for(int i=0; i<session->rows; i++) session->row_dirty[i] = KTERM_DIRTY_FRAMES;
+                    }
+                }
+             }
+             break;
+
+        case KTERM_EVENT_RESIZE:
+            KTerm_ResizeSession(term, (int)(session - term->sessions), event->resize.w, event->resize.h);
+            return true;
+
+        case KTERM_EVENT_FOCUS:
+            KTerm_SetFocus(term, event->focused);
+            return true;
+
+        case KTERM_EVENT_PASTE:
+             if (session->bracketed_paste.enabled) {
+                 KTerm_QueueSessionResponse(term, session, "\x1B[200~");
+                 if (event->paste.text) KTerm_QueueSessionResponseBytes(term, session, event->paste.text, event->paste.len);
+                 KTerm_QueueSessionResponse(term, session, "\x1B[201~");
+             } else {
+                 if (event->paste.text) KTerm_QueueSessionResponseBytes(term, session, event->paste.text, event->paste.len);
+             }
+             return true;
+    }
+    return false;
+}
+
+bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event) {
     if (!event) return false;
     // Just peek? Or remove? Traditionally GetKey removes.
     // But KTerm_Update is already consuming the buffer for processing sequences.

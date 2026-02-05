@@ -1,5 +1,15 @@
 # Update Log
 
+## [v2.4.19]
+
+### Unified Event Pipeline & Direct Input
+- **Unified Processing:** Introduced `KTerm_ProcessEvent` as the single, centralized entry point for all input types (Bytes, Keys, Mouse, Resize, Focus, Paste), simplifying the integration surface.
+- **KTermEvent Union:** Replaced fragmented input structs with a unified `KTermEvent` tagged union, renaming the legacy `KTermEvent` to `KTermKeyEvent` for clarity.
+- **Direct Input Mode:** Implemented `KTERM_MODE_DIRECT_INPUT` (Direct Mode). When enabled, printable keys are inserted directly into the grid (Local Editing) without generating VT escape sequences, perfect for local line editing or chat input fields.
+- **Centralized Translation:** Moved VT key sequence generation logic from the IO adapter (`kt_io_sit.h`) into the core `KTerm_TranslateKey` function, ensuring consistent behavior across all input sources.
+- **API Unification:** `KTerm_WriteChar`, `KTerm_WriteString`, and `KTerm_WriteFormat` now wrap `KTerm_ProcessEvent`, ensuring consistent behavior and overflow handling across all input methods.
+- **Mouse Fallback:** `KTerm_ProcessEvent` now gracefully handles mouse wheel events by falling back to standard scrolling (or Alt-Screen arrows) if Mouse Tracking is disabled, preventing "dead scroll" issues.
+
 ## [v2.4.18]
 
 ### Gateway Extensions
