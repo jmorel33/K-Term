@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 17
+#define KTERM_VERSION_PATCH 18
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.17 (Input Pipeline Decoupling)"
+#define KTERM_VERSION_STRING "2.4.18 (Gateway Extensions)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -163,6 +163,9 @@ typedef void (*NotificationCallback)(KTerm* term, const char* message);         
 typedef void (*KTermOutputSink)(void* user_data, const char* data, size_t len); // Direct Output Sink
 #ifdef KTERM_ENABLE_GATEWAY
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
+// Gateway Extensions
+typedef void (*GatewayResponseCallback)(KTerm* term, KTermSession* session, const char* msg);
+typedef void (*GatewayExtHandler)(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond);
 #endif
 typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows); // Notification of session resize
 
@@ -1302,6 +1305,7 @@ void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
 void KTerm_SetErrorCallback(KTerm* term, KTermErrorCallback callback, void* user_data);
 #ifdef KTERM_ENABLE_GATEWAY
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
+void KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler);
 #endif
 void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
 
@@ -1431,6 +1435,13 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 #undef FONT_DATA_IMPLEMENTATION
 
 // KTermPushConstants and GPU_ATTR macros moved to kt_composite_sit.h
+
+#ifdef KTERM_ENABLE_GATEWAY
+typedef struct {
+    char name[32];
+    GatewayExtHandler handler;
+} KTermGatewayExtension;
+#endif
 
 // =============================================================================
 // MAIN ENHANCED TERMINAL STRUCTURE
@@ -1913,6 +1924,9 @@ typedef struct KTerm_T {
     PrinterCallback printer_callback;
 #ifdef KTERM_ENABLE_GATEWAY
     GatewayCallback gateway_callback;
+    KTermGatewayExtension* gateway_extensions;
+    int gateway_extension_count;
+    int gateway_extension_capacity;
 #endif
     TitleCallback title_callback;
     BellCallback bell_callback;
@@ -3182,6 +3196,11 @@ bool KTerm_Init(KTerm* term) {
     // Initialize KTerm Lock (Phase 3)
     KTERM_MUTEX_INIT(term->lock);
     term->main_thread_id = KTERM_THREAD_CURRENT();
+
+#ifdef KTERM_ENABLE_GATEWAY
+    // Register built-in extensions
+    KTerm_RegisterBuiltinExtensions(term);
+#endif
 
     return true;
 }
@@ -6219,6 +6238,24 @@ void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback) {
 #ifdef KTERM_ENABLE_GATEWAY
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback) {
     term->gateway_callback = callback;
+}
+
+void KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler) {
+    if (!term || !name || !handler) return;
+
+    // Ensure capacity
+    if (term->gateway_extension_count >= term->gateway_extension_capacity) {
+        int new_cap = (term->gateway_extension_capacity == 0) ? 8 : term->gateway_extension_capacity * 2;
+        KTermGatewayExtension* new_exts = (KTermGatewayExtension*)KTerm_Realloc(term->gateway_extensions, new_cap * sizeof(KTermGatewayExtension));
+        if (!new_exts) return; // OOM
+        term->gateway_extensions = new_exts;
+        term->gateway_extension_capacity = new_cap;
+    }
+
+    KTermGatewayExtension* ext = &term->gateway_extensions[term->gateway_extension_count++];
+    strncpy(ext->name, name, 31);
+    ext->name[31] = '\0';
+    ext->handler = handler;
 }
 #endif
 
@@ -13300,6 +13337,13 @@ void KTerm_Cleanup(KTerm* term) {
         KTermLayout_Destroy(term->layout);
         term->layout = NULL;
     }
+
+#ifdef KTERM_ENABLE_GATEWAY
+    if (term->gateway_extensions) {
+        KTerm_Free(term->gateway_extensions);
+        term->gateway_extensions = NULL;
+    }
+#endif
 }
 
 bool KTerm_InitDisplay(KTerm* term) {

@@ -1,5 +1,16 @@
 # Update Log
 
+## [v2.4.18]
+
+### Gateway Extensions
+- **Modular Extension System:** Introduced `KTerm_RegisterGatewayExtension` to allow host applications to register custom Gateway commands under the `EXT` namespace (`DCS GATE ... EXT;name;args ST`).
+- **Built-in Kittens:** Added built-in extensions for common tasks:
+    - **broadcast:** Sends input to all open sessions (`broadcast;text`).
+    - **themes:** Sets background color via OSC 11 (`themes;set;bg=#RRGGBB`).
+    - **icat:** Basic image injection using the Kitty Graphics Protocol (`icat;base64_data`).
+    - **clipboard:** Placeholder for clipboard operations (`clipboard;set;text`, `clipboard;get`).
+- **API:** Added `GatewayResponseCallback` and `GatewayExtHandler` typedefs for extension implementation.
+
 ## [v2.4.17]
 
 ### Input Pipeline Decoupling

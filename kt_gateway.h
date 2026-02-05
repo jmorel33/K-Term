@@ -20,6 +20,9 @@ extern "C" {
 // This function replaces the internal handling in the main parser.
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params);
 
+// Registers built-in extensions (called by KTerm_Init)
+void KTerm_RegisterBuiltinExtensions(KTerm* term);
+
 #ifdef __cplusplus
 }
 #endif
@@ -538,7 +541,15 @@ static KTermSession* KTerm_GetTargetSession(KTerm* term, KTermSession* session) 
     return session;
 }
 
+static int KTerm_GetSessionIndex(KTerm* term, KTermSession* session) {
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (&term->sessions[i] == session) return i;
+    }
+    return -1;
+}
+
 // Handler Definitions
+static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
@@ -546,6 +557,7 @@ static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const 
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
 static const GatewayCommand gateway_commands[] = {
+    { "EXT", KTerm_Gateway_HandleExt },
     { "GET", KTerm_Gateway_HandleGet },
     { "INIT", KTerm_Gateway_HandleInit },
     { "PIPE", KTerm_Gateway_HandlePipeCmd },
@@ -1123,6 +1135,121 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
     }
 }
 
+static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    char ext_name[32];
+    if (!Stream_ReadIdentifier(scanner, ext_name, sizeof(ext_name))) return;
+
+    // Skip separator if present
+    if (Stream_Expect(scanner, ';')) {
+        // Args follow
+    }
+    const char* args = scanner->ptr + scanner->pos;
+
+    // Find extension
+    for (int i = 0; i < term->gateway_extension_count; i++) {
+        if (strcmp(term->gateway_extensions[i].name, ext_name) == 0) {
+            term->gateway_extensions[i].handler(term, session, args, KTerm_QueueSessionResponse);
+            return;
+        }
+    }
+
+    // Not found
+    char err[128];
+    snprintf(err, sizeof(err), "\x1BPGATE;KTERM;%s;ERR;UNKNOWN_EXTENSION=%s\x1B\\", id, ext_name);
+    KTerm_QueueSessionResponse(term, session, err);
+}
+
+// Built-in Extension Handlers
+
+static void KTerm_Ext_Broadcast(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    (void)session;
+    (void)respond;
+    // Broadcast text to all sessions
+    // args: text to broadcast
+    if (!args) return;
+
+    // Simple broadcast: write chars to all sessions
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (term->sessions[i].session_open) {
+            for (const char* p = args; *p; p++) {
+                KTerm_WriteCharToSession(term, i, (unsigned char)*p);
+            }
+        }
+    }
+}
+
+static void KTerm_Ext_Themes(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    // args: "set;bg=#123456" or "load;theme_name"
+    if (!args) return;
+
+    if (strncmp(args, "set;", 4) == 0) {
+        const char* p = args + 4;
+        if (strncmp(p, "bg=", 3) == 0) {
+            RGB_KTermColor c;
+            if (KTerm_ParseColor(p + 3, &c)) {
+                // Set default BG via OSC 11
+                char buf[64];
+                snprintf(buf, sizeof(buf), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
+                int idx = KTerm_GetSessionIndex(term, session);
+                if (idx != -1) {
+                    for (int i=0; buf[i]; i++) KTerm_WriteCharToSession(term, idx, (unsigned char)buf[i]);
+                }
+                if (respond) respond(term, session, "OK");
+            }
+        }
+    } else {
+        if (respond) respond(term, session, "ERR;UNSUPPORTED_ACTION");
+    }
+}
+
+static void KTerm_Ext_Clipboard(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    (void)term; (void)session;
+    // args: "set;text" or "get"
+    if (!args) return;
+    if (strncmp(args, "set;", 4) == 0) {
+        // Mock clipboard set
+        // In real app, this calls platform clipboard API
+        if (respond) respond(term, session, "OK");
+    } else if (strcmp(args, "get") == 0) {
+        // Mock clipboard get
+        if (respond) respond(term, session, "MOCK_CLIPBOARD_DATA");
+    }
+}
+
+static void KTerm_Ext_Icat(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    (void)term; (void)session;
+    // args: "base64_data" or "file=path"
+    if (!args) return;
+
+    // Very basic pass-through for inline base64 image (Kitty format)
+    // Assumes args is RAW base64 of the image file (e.g. PNG)
+    // We wrap it in Kitty escape code: ESC _ G f=100, a=T, m=0; <data> ESC \
+
+    // Inject header
+    const char* header = "\x1B_Gf=100,a=T,m=0;"; // f=100 (PNG), a=T (Transmit), m=0 (Last chunk)
+
+    int idx = KTerm_GetSessionIndex(term, session);
+    if (idx != -1) {
+        // header
+        for (int i=0; header[i]; i++) KTerm_WriteCharToSession(term, idx, (unsigned char)header[i]);
+
+        // data
+        for (const char* p = args; *p; p++) KTerm_WriteCharToSession(term, idx, (unsigned char)*p);
+
+        // footer (ST)
+        KTerm_WriteCharToSession(term, idx, '\x1B');
+        KTerm_WriteCharToSession(term, idx, '\\');
+    }
+
+    if (respond) respond(term, session, "OK");
+}
+
+void KTerm_RegisterBuiltinExtensions(KTerm* term) {
+    KTerm_RegisterGatewayExtension(term, "broadcast", KTerm_Ext_Broadcast);
+    KTerm_RegisterGatewayExtension(term, "themes", KTerm_Ext_Themes);
+    KTerm_RegisterGatewayExtension(term, "clipboard", KTerm_Ext_Clipboard);
+    KTerm_RegisterGatewayExtension(term, "icat", KTerm_Ext_Icat);
+}
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
     // Input Hardening
