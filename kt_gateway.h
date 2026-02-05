@@ -1244,11 +1244,26 @@ static void KTerm_Ext_Icat(KTerm* term, KTermSession* session, const char* args,
     if (respond) respond(term, session, "OK");
 }
 
+static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    if (!args) return;
+
+    KTermSession* target = KTerm_GetTargetSession(term, session);
+
+    bool enable = false;
+    if (strcmp(args, "1") == 0 || KTerm_Strcasecmp(args, "ON") == 0 || KTerm_Strcasecmp(args, "TRUE") == 0) {
+        enable = true;
+    }
+
+    target->direct_input = enable;
+    if (respond) respond(term, session, "OK");
+}
+
 void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "broadcast", KTerm_Ext_Broadcast);
     KTerm_RegisterGatewayExtension(term, "themes", KTerm_Ext_Themes);
     KTerm_RegisterGatewayExtension(term, "clipboard", KTerm_Ext_Clipboard);
     KTerm_RegisterGatewayExtension(term, "icat", KTerm_Ext_Icat);
+    KTerm_RegisterGatewayExtension(term, "direct", KTerm_Ext_DirectInput);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {

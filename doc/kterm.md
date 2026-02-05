@@ -897,6 +897,7 @@ Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend th
     *   **`themes`**: Sets terminal colors. Usage: `EXT;themes;set;bg=#RRGGBB`
     *   **`icat`**: Injects an image using the Kitty Graphics Protocol (basic wrapper). Usage: `EXT;icat;<Base64Data>`
     *   **`clipboard`**: A placeholder for clipboard integration.
+    *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `EXT;direct;1` (On) or `EXT;direct;0` (Off).
 
 #### Oscillator Period Table (Slots 0-63)
 
