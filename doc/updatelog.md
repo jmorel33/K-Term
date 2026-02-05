@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.20]
+
+### Gateway Direct Input
+- **Gateway Extension:** Added `direct` Gateway extension (`EXT;direct;1` or `EXT;direct;0`) to toggle Direct Input mode (`KTERM_MODE_DIRECT_INPUT`) at runtime.
+- **Protocol:** Fully integrated with the Gateway Protocol, allowing per-session targeting and scripted control of local editing modes.
+- **ACK:** The extension acknowledges commands with "OK", enabling robust synchronization for host scripts.
+
 ## [v2.4.19]
 
 ### Unified Event Pipeline & Direct Input
