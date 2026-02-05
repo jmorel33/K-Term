@@ -883,6 +883,8 @@ The class ID `KTERM` is reserved for internal configuration.
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
 | `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
 | `GET;STRIKE_COLOR` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
+| `SET;SHADER` | `KEY=VAL;...` | Sets visual effect parameters. Keys: `CRT_CURVATURE`, `SCANLINE_INTENSITY`, `GLOW_INTENSITY`, `NOISE_INTENSITY` (float 0.0-1.0), and flags `CRT_ENABLE`, `SCANLINE_ENABLE`, `GLOW_ENABLE`, `NOISE_ENABLE` (1/0). |
+| `GET;SHADER` | - | Responds with `...;REPORT;SHADER=CRT_CURVATURE:...,FLAGS:... ST` containing current settings. |
 
 #### Gateway Extensions (v2.4.18+)
 
