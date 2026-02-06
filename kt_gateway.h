@@ -1421,10 +1421,121 @@ static bool KTerm_ParseGridColor(const char* str, ExtendedKTermColor* out) {
     return false;
 }
 
+// Helper for Grid Extension
+typedef struct {
+    uint32_t mask;
+    unsigned int ch;
+    ExtendedKTermColor fg;
+    ExtendedKTermColor bg;
+    ExtendedKTermColor ul;
+    ExtendedKTermColor st;
+    uint32_t flags;
+} GridStyle;
+
+static void KTerm_QueueGridOp(KTermSession* s, int x, int y, int w, int h, const GridStyle* style) {
+    if (w <= 0 || h <= 0) return;
+
+    // Clip against session bounds
+    if (x >= s->cols || y >= s->rows) return;
+    if (x + w <= 0 || y + h <= 0) return;
+
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > s->cols) w = s->cols - x;
+    if (y + h > s->rows) h = s->rows - y;
+
+    if (w <= 0 || h <= 0) return;
+
+    KTermOp op;
+    op.type = KTERM_OP_FILL_RECT_MASKED;
+    op.u.fill_masked.rect.x = x;
+    op.u.fill_masked.rect.y = y;
+    op.u.fill_masked.rect.w = w;
+    op.u.fill_masked.rect.h = h;
+    op.u.fill_masked.mask = style->mask;
+    op.u.fill_masked.fill_char.ch = style->ch;
+    op.u.fill_masked.fill_char.fg_color = style->fg;
+    op.u.fill_masked.fill_char.bg_color = style->bg;
+    op.u.fill_masked.fill_char.ul_color = style->ul;
+    op.u.fill_masked.fill_char.st_color = style->st;
+    op.u.fill_masked.fill_char.flags = style->flags;
+
+    KTerm_QueueOp(&s->op_queue, op);
+}
+
+static void KTerm_Grid_FillCircle(KTermSession* s, int cx, int cy, int radius, const GridStyle* style) {
+    if (radius < 0) return;
+    int x = radius;
+    int y = 0;
+    int err = 0;
+
+    while (x >= y) {
+        // Draw horizontal spans
+        KTerm_QueueGridOp(s, cx - x, cy + y, 2 * x + 1, 1, style);
+        if (y != 0) {
+            KTerm_QueueGridOp(s, cx - x, cy - y, 2 * x + 1, 1, style);
+        }
+
+        KTerm_QueueGridOp(s, cx - y, cy + x, 2 * y + 1, 1, style);
+        if (x != 0) {
+             KTerm_QueueGridOp(s, cx - y, cy - x, 2 * y + 1, 1, style);
+        }
+
+        if (err <= 0) {
+            y += 1;
+            err += 2 * y + 1;
+        }
+        if (err > 0) {
+            x -= 1;
+            err -= 2 * x + 1;
+        }
+    }
+}
+
+static void KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int len, bool wrap, const GridStyle* style) {
+    if (len <= 0) return;
+
+    if (dir == 'h' || dir == '0') {
+        int x = sx;
+        int y = sy;
+        int remaining = len;
+
+        while (remaining > 0) {
+            if (y >= s->rows || y < 0) break;
+
+            int w = remaining;
+            if (wrap) {
+                if (x + w > s->cols) {
+                    w = s->cols - x;
+                }
+            }
+
+            if (w < 0) w = 0; // Fix logic bug: x can be > cols
+
+            KTerm_QueueGridOp(s, x, y, w, 1, style);
+
+            remaining -= w;
+            if (remaining > 0) {
+                if (wrap) {
+                    x = 0;
+                    y++;
+                } else {
+                    break;
+                }
+            }
+        }
+    } else if (dir == 'v' || dir == '1') {
+        KTerm_QueueGridOp(s, sx, sy, 1, len, style);
+    } else if (dir == 'l' || dir == '2') {
+        KTerm_QueueGridOp(s, sx - len + 1, sy, len, 1, style);
+    } else if (dir == 'u' || dir == '3') {
+        KTerm_QueueGridOp(s, sx, sy - len + 1, 1, len, style);
+    }
+}
+
 static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
     
-    printf("Grid Args: %s\n", args);
     char buffer[1024];
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
@@ -1438,72 +1549,85 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
     }
     
     if (count == 0) return;
+
+    GridStyle style = {0};
+    int style_idx = -1;
+    KTermSession* target = session;
     
     if (strcmp(tokens[0], "fill") == 0) {
+        if (count < 13) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
+        }
+        style_idx = 6;
+    } else if (strcmp(tokens[0], "fill_circle") == 0) {
         if (count < 12) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
-        
-        // 1. Session ID (use active if -1 or invalid, but spec says <session_id>)
-        int s_id = atoi(tokens[1]);
-        KTermSession* target = session;
-        if (s_id >= 0 && s_id < MAX_SESSIONS) target = &term->sessions[s_id];
-        else if (term->gateway_target_session >= 0) target = &term->sessions[term->gateway_target_session];
-        
-        // 2. Rect
-        KTermRect r;
-        r.x = atoi(tokens[2]);
-        r.y = atoi(tokens[3]);
-        r.w = atoi(tokens[4]);
-        r.h = atoi(tokens[5]);
-        
-        // Validation
-        if (r.x < 0) r.x = 0;
-        if (r.y < 0) r.y = 0;
-        if (r.w <= 0) r.w = 1;
-        if (r.h <= 0) r.h = 1;
-        if (r.x + r.w > target->cols) r.w = target->cols - r.x;
-        if (r.y + r.h > target->rows) r.h = target->rows - r.y;
-        
-        // 3. Mask
-        uint32_t mask = (uint32_t)strtoul(tokens[6], NULL, 0);
-        
-        // 4. Char
-        unsigned int ch = (unsigned int)strtoul(tokens[7], NULL, 0);
-        
-        // 5. Colors
-        ExtendedKTermColor fg={0}, bg={0}, ul={0}, st={0};
-        KTerm_ParseGridColor(tokens[8], &fg);
-        KTerm_ParseGridColor(tokens[9], &bg);
-        KTerm_ParseGridColor(tokens[10], &ul);
-        KTerm_ParseGridColor(tokens[11], &st);
-        
-        // 6. Flags
-        uint32_t flags = (uint32_t)strtoul(tokens[12], NULL, 0);
-        
-        // Construct Op
-        KTermOp op;
-        op.type = KTERM_OP_FILL_RECT_MASKED;
-        op.u.fill_masked.rect = r;
-        op.u.fill_masked.mask = mask;
-        
-        op.u.fill_masked.fill_char.ch = ch;
-        op.u.fill_masked.fill_char.fg_color = fg;
-        op.u.fill_masked.fill_char.bg_color = bg;
-        op.u.fill_masked.fill_char.ul_color = ul;
-        op.u.fill_masked.fill_char.st_color = st;
-        op.u.fill_masked.fill_char.flags = flags;
-        
-        KTerm_QueueOp(&target->op_queue, op);
-        
-        if (respond) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "OK;QUEUED;%d", 1);
-            respond(term, session, msg);
+        style_idx = 5;
+    } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
+        // Note: 'fill_span' contains 'p' which may trigger legacy parser issues in some versions.
+        // 'fill_line' is provided as a safe alternative.
+        if (count < 13) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
         }
+        style_idx = 6;
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_SUBCOMMAND");
+        return;
+    }
+
+    // 1. Session ID (Index 1)
+    int s_id = atoi(tokens[1]);
+    if (s_id >= 0 && s_id < MAX_SESSIONS) target = &term->sessions[s_id];
+    else if (term->gateway_target_session >= 0) target = &term->sessions[term->gateway_target_session];
+
+    // Parse Style
+    style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
+    style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
+    KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
+    KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
+    KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
+    KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
+    style.flags = (uint32_t)strtoul(tokens[style_idx+6], NULL, 0);
+
+    // Dispatch
+    int cells_applied = 0;
+
+    if (strcmp(tokens[0], "fill") == 0) {
+        int x = atoi(tokens[2]);
+        int y = atoi(tokens[3]);
+        int w = atoi(tokens[4]);
+        int h = atoi(tokens[5]);
+        if (w <= 0) w = 1; // Legacy behavior
+        if (h <= 0) h = 1; // Legacy behavior
+        KTerm_QueueGridOp(target, x, y, w, h, &style);
+        cells_applied = w * h;
+    } else if (strcmp(tokens[0], "fill_circle") == 0) {
+        int cx = atoi(tokens[2]);
+        int cy = atoi(tokens[3]);
+        int r = atoi(tokens[4]);
+        KTerm_Grid_FillCircle(target, cx, cy, r, &style);
+        cells_applied = (int)(3.14159 * r * r);
+    } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
+        int sx = atoi(tokens[2]);
+        int sy = atoi(tokens[3]);
+        char dir = tokens[4][0];
+        int len = atoi(tokens[5]);
+        bool wrap = false;
+        if (count > 13) {
+            wrap = (atoi(tokens[13]) != 0);
+        }
+        KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
+        cells_applied = len;
+    }
+
+    if (respond) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "OK;QUEUED;%d", cells_applied);
+        respond(term, session, msg);
     }
 }
 
