@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.4.22] - Gateway Grid Shapes
+- **Gateway Extensions**: Expanded `grid` extension with `fill_circle` and `fill_line` subcommands.
+    - `fill_circle`: Draws filled circles using the midpoint algorithm.
+    - `fill_line`: Draws linear spans in cardinal directions (h, v) with optional wrapping for horizontal lines.
+- **Fixes**: Fixed `fill` subcommand to correctly handle 0-width/height arguments (defaulting to 1).
+- **Architecture**: Refactored `KTerm_Ext_Grid` to use a shared `GridStyle` helper.
+
 ## [v2.4.21] - Gateway Grid Extension
 - **Gateway Extensions**: Added `grid` extension for bulk screen manipulation.
 - **Commands**: Implemented `EXT;grid;fill` subcommand to efficienty fill rectangular regions with specific characters and attributes.

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.18
+# kterm.h - Technical Reference Manual v2.4.22
 
 **(c) 2026 Jacques Morel**
 
@@ -902,6 +902,58 @@ Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend th
     *   **`clipboard`**: A placeholder for clipboard integration.
     *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `EXT;direct;1` (On) or `EXT;direct;0` (Off).
     *   **`rawdump`**: Mirrors raw input bytes to a target session. Usage: `EXT;rawdump;START;SESSION=n`.
+    *   **`grid`**: (v2.4.21+) Bulk screen manipulation extension. See section 4.12.1 for details.
+
+#### 4.12.1. Gateway Grid Extension (v2.4.21+)
+
+The **grid** extension provides high-performance primitives for bulk manipulation of the terminal screen buffer. It allows host applications to paint regions with specific characters, colors, and attributes without sending large volumes of text.
+
+**Base Command:** `DCS GATE KTERM ; <ID> ; EXT ; grid ; <Subcommand> ; <SessionID> ; <Params...> ST`
+
+*   **SessionID:** The target session index (0-3). Use active session if set to `-1` or if omitted in some contexts (though explicit ID is recommended).
+
+**Subcommands:**
+
+1.  **`fill` (Rectangular Fill)**
+    *   **Syntax:** `fill ; <sid> ; <x> ; <y> ; <w> ; <h> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags>`
+    *   **Description:** Fills a rectangular region defined by `x,y,w,h` with the specified character and attributes.
+    *   **Parameters:**
+        *   `x, y`: Top-left coordinate (0-based).
+        *   `w, h`: Width and Height.
+        *   `mask`: Bitmask indicating which properties to update (see below).
+        *   `ch`: Unicode codepoint (decimal).
+        *   `fg, bg, ul, st`: Colors for Foreground, Background, Underline, Strikethrough. Format: `rgb:R/G/B`, `pal:Index`, `def` (default).
+        *   `flags`: Integer bitmask of internal attribute flags (e.g. Bold, Italic).
+
+2.  **`fill_circle` (Circular Fill) - v2.4.22**
+    *   **Syntax:** `fill_circle ; <sid> ; <cx> ; <cy> ; <radius> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags>`
+    *   **Description:** Fills a circle centered at `cx,cy` with `radius` using the integer midpoint algorithm.
+    *   **Parameters:**
+        *   `cx, cy`: Center coordinate (0-based).
+        *   `radius`: Radius in cells.
+
+3.  **`fill_line` (Linear Span) - v2.4.22**
+    *   **Syntax:** `fill_line ; <sid> ; <sx> ; <sy> ; <dir> ; <len> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags> [; <wrap>]`
+    *   **Description:** Fills a linear span of `len` cells starting at `sx,sy` in direction `dir`.
+    *   **Parameters:**
+        *   `sx, sy`: Start coordinate.
+        *   `dir`: Direction char: `h` (Horizontal Right), `v` (Vertical Down), `l` (Left), `u` (Up). Numeric aliases: `0`=h, `1`=v, `2`=l, `3`=u.
+        *   `len`: Length in cells.
+        *   `wrap`: (Optional) `1` to wrap to the next line (for horizontal fills), `0` to clip at edge.
+
+**Mask Bits (Decimal/Hex):**
+The `mask` parameter determines which fields are actually applied to the grid.
+*   `1` (0x01): Character (`ch`)
+*   `2` (0x02): Foreground Color (`fg`)
+*   `4` (0x04): Background Color (`bg`)
+*   `8` (0x08): Underline Color (`ul`)
+*   `16` (0x10): Strikethrough Color (`st`)
+*   `32` (0x20): Attribute Flags (`flags`)
+
+**Example:**
+To fill a 10x10 red square with 'X' at (5,5) on Session 0:
+`DCS GATE KTERM;0;EXT;grid;fill;0;5;5;10;10;7;88;pal:1;pal:0;0;0;0 ST`
+(Mask 7 = 1+2+4 -> Char + FG + BG).
 
 #### Oscillator Period Table (Slots 0-63)
 
