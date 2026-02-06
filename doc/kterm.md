@@ -966,6 +966,17 @@ The `mask` parameter determines which fields are actually applied to the grid.
 *   `16` (0x10): Strikethrough Color (`st`)
 *   `32` (0x20): Attribute Flags (`flags`)
 
+**Optional Parameters & Defaults:**
+All style parameters (`ch`, `fg`, `bg`, `ul`, `st`, `flags`) are optional in the syntax.
+*   If a parameter is omitted (e.g., `;;` empty field) but its bit is set in the `mask`, the current session's default value for that attribute is used.
+*   If a parameter is omitted and its bit is *not* set in the `mask`, it is ignored (grid cell value preserved).
+*   If `mask` is `0` (or omitted), the command is treated as a no-op to prevent accidental overwrites.
+
+**Stencil Mode (Overlay):**
+If the `mask` excludes the Character bit (`1` / `0x01`), the command acts as a stencil overlay.
+*   **Banner:** Applies the specified colors/attributes only to the cells where the text pattern is solid, preserving the existing characters on the grid.
+*   **Fill/Shapes:** Updates the colors/attributes of the region without changing the text content.
+
 **Example:**
 To fill a 10x10 red square with 'X' at (5,5) on Session 0:
 `DCS GATE KTERM;0;EXT;grid;fill;0;5;5;10;10;7;88;pal:1;pal:0;0;0;0 ST`
