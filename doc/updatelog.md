@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.4.25] - Forms & Parser Enhancements
+- **Cursor Skip Protect**: Implemented "forms mode" cursor navigation. When enabled (`SET;CURSOR;SKIP_PROTECT=1`), cursor movement commands (`CUF`, `CUB`, `CUD`, `CUU`, etc.) automatically skip over protected cells (`DECSCA 1`), wrapping to the next line if necessary.
+- **Signed Numeric Params**: Hardened CSI/OSC/DCS parser to support signed integer parameters (e.g., `CSI -5 ; ...`). Negative values are preserved unless `strict_mode` is enabled, in which case they are clamped to 0.
+- **Safe Grid Ops**: Enhanced Gateway Grid operations (`fill`, `fill_circle`, `banner`, `fill_line`) to be out-of-bound safe. They now silently ignore off-screen plots instead of clipping harshly or erroring, and return the count of actually applied (in-bound) cells.
+- **Gateway**: Added `SET;CURSOR;SKIP_PROTECT=1` to toggle the new cursor behavior.
+
 ## [v2.4.24] - Gateway Grid Flexible Params
 - **Flexible Syntax**: Gateway Grid extension (`EXT;grid`) now supports optional/empty parameters (`switch;;;;value`). Omitted parameters default to the current session attributes (if masked in) or are ignored (if masked out).
 - **Stencil Mode**: Excluding the `CH` (Character) bit from the mask in `fill` or `banner` commands now acts as a stencil, applying colors and attributes to the shape without modifying the underlying text characters.

@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 24
+#define KTERM_VERSION_PATCH 25
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.24 (Gateway Grid Flexible Params)"
+#define KTERM_VERSION_STRING "2.4.25 (Forms & Parser Enhancements)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1747,6 +1747,7 @@ typedef struct KTermSession_T {
     bool password_mode;
     bool raw_mode;
     bool direct_input; // Direct Input Mode (Local Editor)
+    bool skip_protect; // Cursor skips protected fields (Forms Mode)
     bool paused;
 
     bool printer_available;
@@ -6781,7 +6782,8 @@ static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* para
     while (scanner.pos < scanner.len && session->param_count < max_params) {
         int value = 0;
         if (Stream_ReadInt(&scanner, &value)) {
-            session->escape_params[session->param_count] = (value >= 0) ? value : 0;
+            if (session->conformance.strict_mode && value < 0) value = 0;
+            session->escape_params[session->param_count] = value;
         } else {
             // Default 0 if missing or invalid (e.g. empty between semicolons)
             session->escape_params[session->param_count] = 0;
@@ -6896,6 +6898,72 @@ int KTerm_GetCSIParam(KTerm* term, KTermSession* session, int index, int default
 // CURSOR MOVEMENT IMPLEMENTATIONS
 // =============================================================================
 
+static inline bool KTerm_IsCellProtected(KTermSession* s, int x, int y) {
+    EnhancedTermChar* cell = GetActiveScreenCell(s, y, x);
+    if (!cell) return false;
+    return (cell->flags & KTERM_ATTR_PROTECTED) != 0;
+}
+
+static void KTerm_AdvanceCursorSkipProtect(KTermSession* s) {
+    // Advance logic with wrap (Forward / Line-Major)
+    s->cursor.x++;
+    if (s->cursor.x >= s->cols) {
+        s->cursor.x = 0;
+        s->cursor.y++;
+        if (s->cursor.y >= s->rows) s->cursor.y = 0; // Wrap to top-left
+    }
+}
+
+static void KTerm_RetreatCursorSkipProtect(KTermSession* s) {
+    // Retreat logic with wrap (Backward / Line-Major)
+    s->cursor.x--;
+    if (s->cursor.x < 0) {
+        s->cursor.x = s->cols - 1;
+        s->cursor.y--;
+        if (s->cursor.y < 0) s->cursor.y = s->rows - 1;
+    }
+}
+
+static void KTerm_ResolveProtectionForward(KTermSession* s) {
+    if (!s->skip_protect) return;
+    int start_x = s->cursor.x;
+    int start_y = s->cursor.y;
+    int looped = 0;
+
+    while (KTerm_IsCellProtected(s, s->cursor.x, s->cursor.y)) {
+        KTerm_AdvanceCursorSkipProtect(s);
+
+        // Safety break
+        if (s->cursor.x == start_x && s->cursor.y == start_y) {
+             looped++;
+             if (looped > 1) {
+                 s->cursor.x = 0; s->cursor.y = 0;
+                 return;
+             }
+        }
+    }
+}
+
+static void KTerm_ResolveProtectionBackward(KTermSession* s) {
+    if (!s->skip_protect) return;
+    int start_x = s->cursor.x;
+    int start_y = s->cursor.y;
+    int looped = 0;
+
+    while (KTerm_IsCellProtected(s, s->cursor.x, s->cursor.y)) {
+        KTerm_RetreatCursorSkipProtect(s);
+
+        // Safety break
+        if (s->cursor.x == start_x && s->cursor.y == start_y) {
+             looped++;
+             if (looped > 1) {
+                 s->cursor.x = 0; s->cursor.y = 0;
+                 return;
+             }
+        }
+    }
+}
+
 static void ExecuteCUU_Internal(KTermSession* session) { // Cursor Up
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     int new_y = session->cursor.y - n;
@@ -6905,6 +6973,7 @@ static void ExecuteCUU_Internal(KTermSession* session) { // Cursor Up
     } else {
         session->cursor.y = (new_y < 0) ? 0 : new_y;
     }
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCUU(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCUU_Internal(session); }
@@ -6918,20 +6987,35 @@ static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
     } else {
         session->cursor.y = (new_y >= session->rows) ? session->rows - 1 : new_y;
     }
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCUD(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCUD_Internal(session); }
 
 static void ExecuteCUF_Internal(KTermSession* session) { // Cursor Forward
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    session->cursor.x = (session->cursor.x + n >= session->cols) ? session->cols - 1 : session->cursor.x + n;
+    if (session->skip_protect) {
+        for (int i = 0; i < n; i++) {
+            KTerm_AdvanceCursorSkipProtect(session);
+            KTerm_ResolveProtectionForward(session);
+        }
+    } else {
+        session->cursor.x = (session->cursor.x + n >= session->cols) ? session->cols - 1 : session->cursor.x + n;
+    }
 }
 void ExecuteCUF(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCUF_Internal(session); }
 
 static void ExecuteCUB_Internal(KTermSession* session) { // Cursor Back
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    session->cursor.x = (session->cursor.x - n < 0) ? 0 : session->cursor.x - n;
+    if (session->skip_protect) {
+        for (int i = 0; i < n; i++) {
+            KTerm_RetreatCursorSkipProtect(session);
+            KTerm_ResolveProtectionBackward(session);
+        }
+    } else {
+        session->cursor.x = (session->cursor.x - n < 0) ? 0 : session->cursor.x - n;
+    }
 }
 void ExecuteCUB(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCUB_Internal(session); }
@@ -6940,6 +7024,7 @@ static void ExecuteCNL_Internal(KTermSession* session) { // Cursor Next Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.y = (session->cursor.y + n >= session->rows) ? session->rows - 1 : session->cursor.y + n;
     session->cursor.x = session->left_margin;
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCNL(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCNL_Internal(session); }
@@ -6948,6 +7033,7 @@ static void ExecuteCPL_Internal(KTermSession* session) { // Cursor Previous Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.y = (session->cursor.y - n < 0) ? 0 : session->cursor.y - n;
     session->cursor.x = session->left_margin;
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCPL(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCPL_Internal(session); }
@@ -6955,6 +7041,7 @@ void ExecuteCPL(KTerm* term, KTermSession* session) {
 static void ExecuteCHA_Internal(KTermSession* session) { // Cursor Horizontal Absolute
     int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
     session->cursor.x = (n < 0) ? 0 : (n >= session->cols) ? session->cols - 1 : n;
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCHA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCHA_Internal(session); }
@@ -6978,6 +7065,7 @@ static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
         if (session->cursor.x < session->left_margin) session->cursor.x = session->left_margin;
         if (session->cursor.x > session->right_margin) session->cursor.x = session->right_margin;
     }
+    KTerm_ResolveProtectionForward(session);
 }
 void ExecuteCUP(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteCUP_Internal(session); }
@@ -14382,6 +14470,7 @@ static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
     session->mouse.cursor_x = -1;
     session->mouse.cursor_y = -1;
     session->input.auto_process = true;
+    session->skip_protect = false;
 
     session->cursor.visible = true;
     session->cursor.blink_enabled = true;
