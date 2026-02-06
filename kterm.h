@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 23
+#define KTERM_VERSION_PATCH 24
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.23 (Gateway Grid Banner)"
+#define KTERM_VERSION_STRING "2.4.24 (Gateway Grid Flexible)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY

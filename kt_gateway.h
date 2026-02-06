@@ -1654,38 +1654,70 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
     
     char* tokens[32]; // Increased token limit
     int count = 0;
-    char* tok = strtok(buffer, ";");
-    while(tok && count < 32) {
-        tokens[count++] = tok;
-        tok = strtok(NULL, ";");
+    char* ptr = buffer;
+    char* token_start = buffer;
+
+    // Custom Tokenizer to handle empty fields (;;)
+    while (*ptr && count < 32) {
+        if (*ptr == ';') {
+            *ptr = '\0';
+            tokens[count++] = token_start;
+            token_start = ptr + 1;
+        }
+        ptr++;
     }
+    // Last token
+    if (count < 32) tokens[count++] = token_start;
     
     if (count == 0) return;
 
-    GridStyle style = {0};
-    int style_idx = -1;
+    // Resolve Target Session First
     KTermSession* target = session;
+    if (count > 1 && tokens[1][0] != '\0') {
+        int s_id = atoi(tokens[1]);
+        if (s_id >= 0 && s_id < MAX_SESSIONS) target = &term->sessions[s_id];
+    } else if (term->gateway_target_session >= 0) {
+        target = &term->sessions[term->gateway_target_session];
+    }
+
+    // Initialize Style with Session Defaults (for optional params)
+    GridStyle style;
+    style.mask = 0;
+    style.ch = 0;
+    style.fg = target->current_fg;
+    style.bg = target->current_bg;
+    style.ul = target->current_ul_color;
+    style.st = target->current_st_color;
+    style.flags = target->current_attributes;
+
+    int style_idx = -1;
     
     if (strcmp(tokens[0], "fill") == 0) {
-        if (count < 13) {
+        // Minimal args check reduced to allow optional trailing args if needed,
+        // but style_idx is fixed offset.
+        // fill;sid;x;y;w;h;mask... (index 6)
+        if (count < 7) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 6;
     } else if (strcmp(tokens[0], "fill_circle") == 0) {
-        if (count < 12) {
+        // fill_circle;sid;cx;cy;r;mask... (index 5)
+        if (count < 6) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 5;
     } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
-        if (count < 13) {
+        // fill_line;sid;sx;sy;dir;len;mask... (index 6)
+        if (count < 7) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 6;
     } else if (strcmp(tokens[0], "banner") == 0) {
-        if (count < 13) { // banner;sid;x;y;text;scale;mask...
+        // banner;sid;x;y;text;scale;mask... (index 6)
+        if (count < 7) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
@@ -1695,20 +1727,34 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         return;
     }
 
-    // 1. Session ID (Index 1)
-    int s_id = atoi(tokens[1]);
-    if (s_id >= 0 && s_id < MAX_SESSIONS) target = &term->sessions[s_id];
-    else if (term->gateway_target_session >= 0) target = &term->sessions[term->gateway_target_session];
+    // Parse Style (Optional Params)
+    if (count > style_idx && tokens[style_idx][0] != '\0')
+        style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
 
-    // Parse Style
-    style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
-    style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
-    KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
+    // If mask is 0 (or omitted), it's a no-op (safe fail)
+    if (style.mask == 0) {
+        if (respond) respond(term, session, "OK;NOOP;MASK_ZERO");
+        return;
+    }
 
-    KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
-    KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
-    KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
-    style.flags = (uint32_t)strtoul(tokens[style_idx+6], NULL, 0);
+    if (count > style_idx+1 && tokens[style_idx+1][0] != '\0')
+        style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
+
+    if (count > style_idx+2 && tokens[style_idx+2][0] != '\0')
+        KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
+
+    if (count > style_idx+3 && tokens[style_idx+3][0] != '\0')
+        KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
+
+    if (count > style_idx+4 && tokens[style_idx+4][0] != '\0')
+        KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
+
+    if (count > style_idx+5 && tokens[style_idx+5][0] != '\0')
+        KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
+
+    if (count > style_idx+6 && tokens[style_idx+6][0] != '\0')
+        style.flags = (uint32_t)strtoul(tokens[style_idx+6], NULL, 0);
+
 
     // Dispatch
     int cells_applied = 0;

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.23
+# K-Term Emulation Library v2.4.24
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.24: Gateway Grid Flexible Params**
+*   **Flexible Syntax**: Gateway Grid extension (`EXT;grid`) now supports optional/empty parameters (`switch;;;;value`). Omitted parameters default to the current session attributes (if masked in) or are ignored (if masked out).
+*   **Stencil Mode**: Excluding the `CH` (Character) bit from the mask in `fill` or `banner` commands now acts as a stencil, applying colors and attributes to the shape without modifying the underlying text characters.
+*   **Robustness**: Replaced `strtok` with a custom tokenizer in `KTerm_Ext_Grid` to correctly handle empty fields in semicolon-separated lists.
 
 **New in v2.4.23: Gateway Grid Banner**
 *   **Gateway Extensions**: Added `banner` subcommand to the `grid` extension (`EXT;grid;banner;...`).
