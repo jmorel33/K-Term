@@ -659,6 +659,30 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                  if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->sixel_target_session = s_idx;
              }
         }
+    } else if (strcmp(subcmd, "CURSOR") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
+            KTermToken token = KTerm_LexerNext(&lexer);
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    char key[64];
+                    int klen = token.length < 63 ? token.length : 63;
+                    strncpy(key, token.start, klen);
+                    key[klen] = '\0';
+                    KTermToken next = KTerm_LexerNext(&lexer);
+                    if (next.type == KT_TOK_EQUALS) {
+                        KTermToken val = KTerm_LexerNext(&lexer);
+                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                        if (strcmp(key, "SKIP_PROTECT") == 0) {
+                            target_session->skip_protect = (v != 0);
+                        }
+                        token = KTerm_LexerNext(&lexer);
+                    } else token = next;
+                } else token = KTerm_LexerNext(&lexer);
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+            }
+        }
     } else if (strcmp(subcmd, "ATTR") == 0) {
         if (Stream_Expect(scanner, ';')) {
             // Revert to lexer for complex ATTR parsing
@@ -1474,19 +1498,19 @@ typedef struct {
     uint32_t flags;
 } GridStyle;
 
-static void KTerm_QueueGridOp(KTermSession* s, int x, int y, int w, int h, const GridStyle* style) {
-    if (w <= 0 || h <= 0) return;
+static int KTerm_QueueGridOp(KTermSession* s, int x, int y, int w, int h, const GridStyle* style) {
+    if (w <= 0 || h <= 0) return 0;
 
     // Clip against session bounds
-    if (x >= s->cols || y >= s->rows) return;
-    if (x + w <= 0 || y + h <= 0) return;
+    if (x >= s->cols || y >= s->rows) return 0;
+    if (x + w <= 0 || y + h <= 0) return 0;
 
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > s->cols) w = s->cols - x;
     if (y + h > s->rows) h = s->rows - y;
 
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) return 0;
 
     KTermOp op;
     op.type = KTERM_OP_FILL_RECT_MASKED;
@@ -1503,24 +1527,26 @@ static void KTerm_QueueGridOp(KTermSession* s, int x, int y, int w, int h, const
     op.u.fill_masked.fill_char.flags = style->flags;
 
     KTerm_QueueOp(&s->op_queue, op);
+    return w * h;
 }
 
-static void KTerm_Grid_FillCircle(KTermSession* s, int cx, int cy, int radius, const GridStyle* style) {
-    if (radius < 0) return;
+static int KTerm_Grid_FillCircle(KTermSession* s, int cx, int cy, int radius, const GridStyle* style) {
+    if (radius < 0) return 0;
     int x = radius;
     int y = 0;
     int err = 0;
+    int count = 0;
 
     while (x >= y) {
         // Draw horizontal spans
-        KTerm_QueueGridOp(s, cx - x, cy + y, 2 * x + 1, 1, style);
+        count += KTerm_QueueGridOp(s, cx - x, cy + y, 2 * x + 1, 1, style);
         if (y != 0) {
-            KTerm_QueueGridOp(s, cx - x, cy - y, 2 * x + 1, 1, style);
+            count += KTerm_QueueGridOp(s, cx - x, cy - y, 2 * x + 1, 1, style);
         }
 
-        KTerm_QueueGridOp(s, cx - y, cy + x, 2 * y + 1, 1, style);
+        count += KTerm_QueueGridOp(s, cx - y, cy + x, 2 * y + 1, 1, style);
         if (x != 0) {
-             KTerm_QueueGridOp(s, cx - y, cy - x, 2 * y + 1, 1, style);
+             count += KTerm_QueueGridOp(s, cx - y, cy - x, 2 * y + 1, 1, style);
         }
 
         if (err <= 0) {
@@ -1532,10 +1558,12 @@ static void KTerm_Grid_FillCircle(KTermSession* s, int cx, int cy, int radius, c
             err -= 2 * x + 1;
         }
     }
+    return count;
 }
 
-static void KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int len, bool wrap, const GridStyle* style) {
-    if (len <= 0) return;
+static int KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int len, bool wrap, const GridStyle* style) {
+    if (len <= 0) return 0;
+    int count = 0;
 
     if (dir == 'h' || dir == '0') {
         int x = sx;
@@ -1554,7 +1582,7 @@ static void KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int l
 
             if (w < 0) w = 0; // Fix logic bug: x can be > cols
 
-            KTerm_QueueGridOp(s, x, y, w, 1, style);
+            count += KTerm_QueueGridOp(s, x, y, w, 1, style);
 
             remaining -= w;
             if (remaining > 0) {
@@ -1564,19 +1592,23 @@ static void KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int l
                 } else {
                     break;
                 }
+            } else {
+                if (w == 0) break; // Avoid infinite loop
             }
         }
     } else if (dir == 'v' || dir == '1') {
-        KTerm_QueueGridOp(s, sx, sy, 1, len, style);
+        count += KTerm_QueueGridOp(s, sx, sy, 1, len, style);
     } else if (dir == 'l' || dir == '2') {
-        KTerm_QueueGridOp(s, sx - len + 1, sy, len, 1, style);
+        count += KTerm_QueueGridOp(s, sx - len + 1, sy, len, 1, style);
     } else if (dir == 'u' || dir == '3') {
-        KTerm_QueueGridOp(s, sx, sy - len + 1, 1, len, style);
+        count += KTerm_QueueGridOp(s, sx, sy - len + 1, 1, len, style);
     }
+    return count;
 }
 
-static void KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, int scale, const GridStyle* style, char** opts, int opt_count) {
-    if (!text || scale <= 0) return;
+static int KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, int scale, const GridStyle* style, char** opts, int opt_count) {
+    if (!text || scale <= 0) return 0;
+    int count = 0;
 
     int align = 0; // 0=Left, 1=Center, 2=Right
     bool use_kerning = false;
@@ -1668,7 +1700,7 @@ static void KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, i
                 uint8_t bits = font[c * font_h + row];
                 for (int col = 0; col < font_w; col++) {
                     if (bits & (1 << (7 - col))) {
-                        KTerm_QueueGridOp(s, cur_x + col * scale, cur_y + row * scale, scale, scale, style);
+                        count += KTerm_QueueGridOp(s, cur_x + col * scale, cur_y + row * scale, scale, scale, style);
                     }
                 }
             }
@@ -1682,6 +1714,7 @@ static void KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, i
         if (*p == '\n') p++;
         else if (*p == '\\' && *(p+1) == 'n') p += 2;
     }
+    return count;
 }
 
 static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
@@ -1805,14 +1838,12 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         int h = atoi(tokens[5]);
         if (w <= 0) w = 1; // Legacy behavior
         if (h <= 0) h = 1; // Legacy behavior
-        KTerm_QueueGridOp(target, x, y, w, h, &style);
-        cells_applied = w * h;
+        cells_applied = KTerm_QueueGridOp(target, x, y, w, h, &style);
     } else if (strcmp(tokens[0], "fill_circle") == 0) {
         int cx = atoi(tokens[2]);
         int cy = atoi(tokens[3]);
         int r = atoi(tokens[4]);
-        KTerm_Grid_FillCircle(target, cx, cy, r, &style);
-        cells_applied = (int)(3.14159 * r * r);
+        cells_applied = KTerm_Grid_FillCircle(target, cx, cy, r, &style);
     } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
         int sx = atoi(tokens[2]);
         int sy = atoi(tokens[3]);
@@ -1822,8 +1853,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         if (count > 13) {
             wrap = (atoi(tokens[13]) != 0);
         }
-        KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
-        cells_applied = len;
+        cells_applied = KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
     } else if (strcmp(tokens[0], "banner") == 0) {
         int x = atoi(tokens[2]);
         int y = atoi(tokens[3]);
@@ -1837,9 +1867,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
             opts = &tokens[13];
             opt_count = count - 13;
         }
-        KTerm_Grid_Banner(target, x, y, text, scale, &style, opts, opt_count);
-        // Estimate cells?
-        cells_applied = strlen(text) * 8 * 8 * scale * scale / 2; // rough
+        cells_applied = KTerm_Grid_Banner(target, x, y, text, scale, &style, opts, opt_count);
     }
 
     if (respond) {

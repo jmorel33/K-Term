@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.24
+# K-Term Emulation Library v2.4.25
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.25: Forms & Parser Enhancements**
+*   **Cursor Skip Protect**: "Forms Mode" cursor navigation (`SET;CURSOR;SKIP_PROTECT=1`) makes standard cursor movements (CUF, CUB, etc.) skip over protected cells, enabling intuitive navigation in block-mode interfaces.
+*   **Signed Numeric Params**: The escape sequence parser now supports signed integers, preserving negative values in permissive mode (clamped to 0 in strict mode).
+*   **Safe Grid Ops**: Gateway Grid operations (`fill`, `banner`, etc.) are now out-of-bound safe, silently ignoring off-screen plots and returning the count of successfully applied cells.
 
 **New in v2.4.24: Gateway Grid Flexible Params**
 *   **Flexible Syntax**: Gateway Grid extension (`EXT;grid`) now supports optional/empty parameters (`switch;;;;value`). Omitted parameters default to the current session attributes (if masked in) or are ignored (if masked out).

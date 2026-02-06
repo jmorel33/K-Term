@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.24
+# kterm.h - Technical Reference Manual v2.4.25
 
 **(c) 2026 Jacques Morel**
 
@@ -852,6 +852,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
 | `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
 | `SET;KEYBOARD`| `REPEAT_RATE=<0-31>;DELAY=<ms>;REPEAT=<SOFTWARE\|HOST>` | Configures keyboard repeat behavior. `REPEAT_RATE`: 0 (Fast, 30Hz) to 30 (Slow, 2Hz), 31=Off. `DELAY`: Initial delay in milliseconds (default 500). `REPEAT`: Selects repeat engine (`SOFTWARE` for authentic VT timing, `HOST` for low-latency OS repeats). |
+| `SET;CURSOR`  | `SKIP_PROTECT=<1\|0>` | "Forms Mode" control. If `1`, standard cursor movement keys/sequences (CUF, CUB, etc.) will automatically skip over protected cells (`DECSCA`), wrapping lines if necessary. If `0` (default), cursor lands on protected cells. |
 | `RESET;TABS` | `DEFAULT8` | Resets tab stops to every 8 columns (DECST8C behavior). |
 | `SET;OUTPUT` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
 | `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
@@ -973,6 +974,12 @@ All style parameters (`ch`, `fg`, `bg`, `ul`, `st`, `flags`) are optional in the
 *   If a parameter is omitted (e.g., `;;` empty field) but its bit is set in the `mask`, the current session's default value for that attribute is used.
 *   If a parameter is omitted and its bit is *not* set in the `mask`, it is ignored (grid cell value preserved).
 *   If `mask` is `0` (or omitted), the command is treated as a no-op to prevent accidental overwrites.
+
+**Safe Plotting (Out-of-Bounds):**
+All grid operations are safe against out-of-bounds coordinates.
+*   **Ignore:** Plots that fall completely outside the terminal grid (negative coordinates or beyond width/height) are silently ignored. No error is generated.
+*   **Clipping:** Shapes (rectangles, circles, lines) that partially intersect the visible area are automatically clipped. Only the visible portion is drawn.
+*   **Response:** The Gateway `OK;QUEUED;<Count>` response reports the number of *actual* cells modified (in-bounds), allowing the host to detect if a shape was clipped or fully off-screen.
 
 **Stencil Mode (Overlay):**
 If the `mask` excludes the Character bit (`1` / `0x01`), the command acts as a stencil overlay.
