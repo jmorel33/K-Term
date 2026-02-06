@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.4.21] - Gateway Grid Extension
+- **Gateway Extensions**: Added `grid` extension for bulk screen manipulation.
+- **Commands**: Implemented `EXT;grid;fill` subcommand to efficienty fill rectangular regions with specific characters and attributes.
+- **Operations**: Added `KTERM_OP_FILL_RECT_MASKED` to the operation queue to support masked attribute updates (Char, FG, BG, Underline, Strike, Flags).
+- **Testing**: Added `tests/test_gateway_grid.c` to verify grid manipulation capabilities.
+
 ## [v2.4.20]
 
 ### Gateway RAWDUMP & Direct Input
