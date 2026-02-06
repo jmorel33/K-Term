@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.4.23] - Gateway Grid Banner
+- **Gateway Extensions**: Added `banner` subcommand to the `grid` extension (`EXT;grid;banner;...`).
+    - Plots large text directly onto the grid using a built-in bitmap font (IBM 8x8).
+    - Supports scaling, alignment (left/center/right), and masked styling (color, attributes).
+    - Bypasses escape sequence parsing for high-performance dashboard/overlay construction.
+
 ## [v2.4.22] - Gateway Grid Shapes
 - **Gateway Extensions**: Expanded `grid` extension with `fill_circle` and `fill_line` subcommands.
     - `fill_circle`: Draws filled circles using the midpoint algorithm.

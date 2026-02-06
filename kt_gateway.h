@@ -31,6 +31,9 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term);
 
 #ifdef KTERM_GATEWAY_IMPLEMENTATION
 
+// Extern Font Data (Usually provided by kterm.h/font_data.h)
+extern const uint8_t ibm_font_8x8[256 * 8];
+
 // Internal Structures
 typedef struct {
     char text[256];
@@ -1533,17 +1536,126 @@ static void KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int l
     }
 }
 
+static void KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, int scale, const GridStyle* style, char** opts, int opt_count) {
+    if (!text || scale <= 0) return;
+
+    int align = 0; // 0=Left, 1=Center, 2=Right
+    bool use_kerning = false;
+    // Simple options parsing
+    for (int i = 0; i < opt_count; i++) {
+        if (opts[i]) {
+            if (strncmp(opts[i], "align=", 6) == 0) {
+                if (strcmp(opts[i]+6, "center") == 0) align = 1;
+                else if (strcmp(opts[i]+6, "right") == 0) align = 2;
+            } else if (strncmp(opts[i], "kern=", 5) == 0) {
+                if (opts[i][5] == '1') use_kerning = true;
+            }
+        }
+    }
+
+    // Font selection: fallback to ibm_font_8x8
+    const uint8_t* font = ibm_font_8x8;
+    int font_w = 8;
+    int font_h = 8;
+
+    int cur_y = y;
+    const char* p = text;
+
+    // Iterate line by line for proper alignment
+    while (*p) {
+        // Find line end
+        const char* end = p;
+        int line_width = 0;
+
+        while (*end) {
+            if (*end == '\n') break;
+            if (*end == '\\' && *(end+1) == 'n') break;
+
+            if (use_kerning) {
+                int char_w = 0;
+                unsigned char c = (unsigned char)*end;
+                if (c == ' ') {
+                    char_w = 4; // Kerned space width
+                } else {
+                    int max_col = -1;
+                    for (int r = 0; r < font_h; r++) {
+                        uint8_t bits = font[c * font_h + r];
+                        for (int col = 0; col < 8; col++) {
+                            if (bits & (1 << (7 - col))) {
+                                if (col > max_col) max_col = col;
+                            }
+                        }
+                    }
+                    char_w = (max_col + 1) + 1; // +1 padding
+                    if (char_w < 4) char_w = 4; // Min width
+                }
+                line_width += char_w * scale;
+            } else {
+                line_width += font_w * scale;
+            }
+            end++;
+        }
+
+        // Calculate X for this line based on alignment
+        int cur_x = x;
+        if (align == 1) cur_x = x - line_width / 2;
+        else if (align == 2) cur_x = x - line_width;
+
+        // Draw Characters in Line
+        const char* q = p;
+        while (q < end) {
+            unsigned char c = (unsigned char)*q;
+            int advance = font_w;
+
+            if (use_kerning) {
+                if (c == ' ') {
+                    advance = 4;
+                } else {
+                    int max_col = -1;
+                    for (int r = 0; r < font_h; r++) {
+                        uint8_t bits = font[c * font_h + r];
+                        for (int col = 0; col < 8; col++) {
+                            if (bits & (1 << (7 - col))) {
+                                if (col > max_col) max_col = col;
+                            }
+                        }
+                    }
+                    advance = (max_col + 1) + 1;
+                    if (advance < 4) advance = 4;
+                }
+            }
+
+            for (int row = 0; row < font_h; row++) {
+                uint8_t bits = font[c * font_h + row];
+                for (int col = 0; col < font_w; col++) {
+                    if (bits & (1 << (7 - col))) {
+                        KTerm_QueueGridOp(s, cur_x + col * scale, cur_y + row * scale, scale, scale, style);
+                    }
+                }
+            }
+            cur_x += advance * scale;
+            q++;
+        }
+
+        // Advance to next line
+        cur_y += font_h * scale;
+        p = end;
+        if (*p == '\n') p++;
+        else if (*p == '\\' && *(p+1) == 'n') p += 2;
+    }
+}
+
 static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
     
-    char buffer[1024];
+    char buffer[2048]; // Increased buffer size for banners
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
     
-    char* tokens[16];
+    char* tokens[32]; // Increased token limit
     int count = 0;
     char* tok = strtok(buffer, ";");
-    while(tok && count < 16) {
+    while(tok && count < 32) {
         tokens[count++] = tok;
         tok = strtok(NULL, ";");
     }
@@ -1567,9 +1679,13 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         }
         style_idx = 5;
     } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
-        // Note: 'fill_span' contains 'p' which may trigger legacy parser issues in some versions.
-        // 'fill_line' is provided as a safe alternative.
         if (count < 13) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
+        }
+        style_idx = 6;
+    } else if (strcmp(tokens[0], "banner") == 0) {
+        if (count < 13) { // banner;sid;x;y;text;scale;mask...
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
@@ -1588,6 +1704,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
     style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
     style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
     KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
+
     KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
     KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
     KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
@@ -1622,6 +1739,22 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         }
         KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
         cells_applied = len;
+    } else if (strcmp(tokens[0], "banner") == 0) {
+        int x = atoi(tokens[2]);
+        int y = atoi(tokens[3]);
+        const char* text = tokens[4];
+        int scale = atoi(tokens[5]);
+
+        // Opts start at 13 (index 13, 14...)
+        char** opts = NULL;
+        int opt_count = 0;
+        if (count > 13) {
+            opts = &tokens[13];
+            opt_count = count - 13;
+        }
+        KTerm_Grid_Banner(target, x, y, text, scale, &style, opts, opt_count);
+        // Estimate cells?
+        cells_applied = strlen(text) * 8 * 8 * scale * scale / 2; // rough
     }
 
     if (respond) {
