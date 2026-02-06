@@ -439,6 +439,14 @@ typedef struct {
 
 #include "kt_ops.h"
 
+// Grid Mask Constants
+#define GRID_MASK_CH    (1 << 0)
+#define GRID_MASK_FG    (1 << 1)
+#define GRID_MASK_BG    (1 << 2)
+#define GRID_MASK_UL    (1 << 3)
+#define GRID_MASK_ST    (1 << 4)
+#define GRID_MASK_FLAGS (1 << 5)
+
 // =============================================================================
 // TEXT RUN (JIT SHAPING)
 // =============================================================================
@@ -3264,6 +3272,7 @@ void KTerm_DispatchSequence(KTerm* term, KTermSession* session, VTParseState typ
     } else {
         session->escape_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
     }
+    printf("DCS Command: %s\n", session->escape_buffer);
 
     switch (type) {
         case PARSE_OSC: KTerm_ExecuteOSCCommand(term, session); break;
@@ -13996,6 +14005,52 @@ static void KTerm_ApplyFillRectOp(KTermSession* session, KTermOp* op) {
     }
 }
 
+static void KTerm_ApplyFillRectMaskedOp(KTermSession* session, KTermOp* op) {
+    int top = op->u.fill_masked.rect.y;
+    int left = op->u.fill_masked.rect.x;
+    int width = op->u.fill_masked.rect.w;
+    int height = op->u.fill_masked.rect.h;
+    int bottom = top + height - 1;
+    int right = left + width - 1;
+    uint32_t mask = op->u.fill_masked.mask;
+    EnhancedTermChar fill = op->u.fill_masked.fill_char;
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
+            if (cell) {
+                if (cell->flags & KTERM_ATTR_PROTECTED) continue;
+
+                if (mask & GRID_MASK_CH) cell->ch = fill.ch;
+                if (mask & GRID_MASK_FG) cell->fg_color = fill.fg_color;
+                if (mask & GRID_MASK_BG) cell->bg_color = fill.bg_color;
+                if (mask & GRID_MASK_UL) cell->ul_color = fill.ul_color;
+                if (mask & GRID_MASK_ST) cell->st_color = fill.st_color;
+                if (mask & GRID_MASK_FLAGS) {
+                    // Overwrite attributes part of flags, preserve internal if needed?
+                    // User supplied flags are assumed to be attribute flags.
+                    // We just overwrite and ensure DIRTY is set later.
+                    cell->flags = fill.flags;
+                }
+                
+                cell->flags |= KTERM_FLAG_DIRTY;
+            }
+        }
+        if (y >= 0 && y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+    }
+    
+    // Update Dirty Rect
+    if (session->dirty_rect.w == 0) {
+        session->dirty_rect = op->u.fill_masked.rect;
+    } else {
+         int x1 = (left < session->dirty_rect.x) ? left : session->dirty_rect.x;
+         int y1 = (top < session->dirty_rect.y) ? top : session->dirty_rect.y;
+         int x2 = (right + 1 > session->dirty_rect.x + session->dirty_rect.w) ? right + 1 : session->dirty_rect.x + session->dirty_rect.w;
+         int y2 = (bottom + 1 > session->dirty_rect.y + session->dirty_rect.h) ? bottom + 1 : session->dirty_rect.y + session->dirty_rect.h;
+         session->dirty_rect = (KTermRect){x1, y1, x2 - x1, y2 - y1};
+    }
+}
+
 static void KTerm_ApplyCopyRectOp(KTermSession* session, KTermOp* op) {
     KTermRect src = op->u.copy.src;
     int dest_x = op->u.copy.dst_x;
@@ -14269,6 +14324,9 @@ void KTerm_FlushOps(KTerm* term, KTermSession* session) {
                 break;
             case KTERM_OP_FILL_RECT:
                 KTerm_ApplyFillRectOp(session, op);
+                break;
+            case KTERM_OP_FILL_RECT_MASKED:
+                KTerm_ApplyFillRectMaskedOp(session, op);
                 break;
             case KTERM_OP_COPY_RECT:
                 KTerm_ApplyCopyRectOp(session, op);

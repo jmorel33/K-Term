@@ -19,6 +19,7 @@ typedef enum {
     KTERM_OP_INSERT_LINES,
     KTERM_OP_DELETE_LINES,
     KTERM_OP_RESIZE_GRID,
+    KTERM_OP_FILL_RECT_MASKED,
     KTERM_OP_INVALID
 } KTermOpType;
 
@@ -51,6 +52,11 @@ typedef struct {
             KTermRect rect;
             EnhancedTermChar fill_char;
         } fill;
+        struct {
+            KTermRect rect;
+            EnhancedTermChar fill_char;
+            uint32_t mask;
+        } fill_masked;
         struct {
             KTermRect rect;
             uint32_t attr_mask;      // Bits to modify (0=Ignore, 1=Set/Clear based on values)

@@ -1388,6 +1388,125 @@ static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* ar
     }
 }
 
+static bool KTerm_ParseGridColor(const char* str, ExtendedKTermColor* out) {
+    if (!str || !out) return false;
+    
+    if (strncmp(str, "rgb:", 4) == 0) {
+        RGB_KTermColor rgb;
+        char buf[32];
+        // Ensure # prefix for KTerm_ParseColor
+        snprintf(buf, sizeof(buf), "#%s", str + 4);
+        if (KTerm_ParseColor(buf, &rgb)) {
+             out->color_mode = 1;
+             out->value.rgb = rgb;
+             return true;
+        }
+        // Try without # if it's already comma separated
+        if (KTerm_ParseColor(str + 4, &rgb)) {
+             out->color_mode = 1;
+             out->value.rgb = rgb;
+             return true;
+        }
+    } else if (strncmp(str, "pal:", 4) == 0) {
+        int idx = atoi(str + 4);
+        if (idx >= 0 && idx <= 255) {
+            out->color_mode = 0;
+            out->value.index = idx;
+            return true;
+        }
+    } else if (strcmp(str, "def") == 0 || strcmp(str, "default") == 0) {
+        out->color_mode = 2; // Default
+        return true;
+    }
+    return false;
+}
+
+static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    if (!args) return;
+    
+    printf("Grid Args: %s\n", args);
+    char buffer[1024];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+    
+    char* tokens[16];
+    int count = 0;
+    char* tok = strtok(buffer, ";");
+    while(tok && count < 16) {
+        tokens[count++] = tok;
+        tok = strtok(NULL, ";");
+    }
+    
+    if (count == 0) return;
+    
+    if (strcmp(tokens[0], "fill") == 0) {
+        if (count < 12) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
+        }
+        
+        // 1. Session ID (use active if -1 or invalid, but spec says <session_id>)
+        int s_id = atoi(tokens[1]);
+        KTermSession* target = session;
+        if (s_id >= 0 && s_id < MAX_SESSIONS) target = &term->sessions[s_id];
+        else if (term->gateway_target_session >= 0) target = &term->sessions[term->gateway_target_session];
+        
+        // 2. Rect
+        KTermRect r;
+        r.x = atoi(tokens[2]);
+        r.y = atoi(tokens[3]);
+        r.w = atoi(tokens[4]);
+        r.h = atoi(tokens[5]);
+        
+        // Validation
+        if (r.x < 0) r.x = 0;
+        if (r.y < 0) r.y = 0;
+        if (r.w <= 0) r.w = 1;
+        if (r.h <= 0) r.h = 1;
+        if (r.x + r.w > target->cols) r.w = target->cols - r.x;
+        if (r.y + r.h > target->rows) r.h = target->rows - r.y;
+        
+        // 3. Mask
+        uint32_t mask = (uint32_t)strtoul(tokens[6], NULL, 0);
+        
+        // 4. Char
+        unsigned int ch = (unsigned int)strtoul(tokens[7], NULL, 0);
+        
+        // 5. Colors
+        ExtendedKTermColor fg={0}, bg={0}, ul={0}, st={0};
+        KTerm_ParseGridColor(tokens[8], &fg);
+        KTerm_ParseGridColor(tokens[9], &bg);
+        KTerm_ParseGridColor(tokens[10], &ul);
+        KTerm_ParseGridColor(tokens[11], &st);
+        
+        // 6. Flags
+        uint32_t flags = (uint32_t)strtoul(tokens[12], NULL, 0);
+        
+        // Construct Op
+        KTermOp op;
+        op.type = KTERM_OP_FILL_RECT_MASKED;
+        op.u.fill_masked.rect = r;
+        op.u.fill_masked.mask = mask;
+        
+        op.u.fill_masked.fill_char.ch = ch;
+        op.u.fill_masked.fill_char.fg_color = fg;
+        op.u.fill_masked.fill_char.bg_color = bg;
+        op.u.fill_masked.fill_char.ul_color = ul;
+        op.u.fill_masked.fill_char.st_color = st;
+        op.u.fill_masked.fill_char.flags = flags;
+        
+        KTerm_QueueOp(&target->op_queue, op);
+        
+        if (respond) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "OK;QUEUED;%d", 1);
+            respond(term, session, msg);
+        }
+    } else {
+        if (respond) respond(term, session, "ERR;UNKNOWN_SUBCOMMAND");
+    }
+}
+
 void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "broadcast", KTerm_Ext_Broadcast);
     KTerm_RegisterGatewayExtension(term, "themes", KTerm_Ext_Themes);
@@ -1395,9 +1514,11 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "icat", KTerm_Ext_Icat);
     KTerm_RegisterGatewayExtension(term, "direct", KTerm_Ext_DirectInput);
     KTerm_RegisterGatewayExtension(term, "rawdump", KTerm_Ext_RawDump);
+    KTerm_RegisterGatewayExtension(term, "grid", KTerm_Ext_Grid);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
+    printf("GatewayProcess: %s %s %s\n", class_id, id, command);
     // Input Hardening
     if (!term || !session || !class_id || !id || !command) return;
     if (!params) params = "";
