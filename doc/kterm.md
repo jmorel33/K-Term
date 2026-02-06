@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.22
+# kterm.h - Technical Reference Manual v2.4.24
 
 **(c) 2026 Jacques Morel**
 
@@ -939,7 +939,9 @@ The **grid** extension provides high-performance primitives for bulk manipulatio
         *   `mask`: Bitmask indicating which properties to update (see below).
         *   `ch`: Unicode codepoint (decimal).
         *   `fg, bg, ul, st`: Colors for Foreground, Background, Underline, Strikethrough. Format: `rgb:R/G/B`, `pal:Index`, `def` (default).
-        *   `flags`: Integer bitmask of internal attribute flags (e.g. Bold, Italic).
+        *   `flags`: Integer bitmask OR string of pipe-separated attribute names (e.g., `BOLD|PROTECTED`).
+            *   Supported names: `BOLD`, `DIM` (or `FAINT`), `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE` (or `INVERSE`), `HIDDEN` (or `CONCEAL`), `STRIKE`, `PROTECTED`.
+            *   Passing `0` or an empty string clears the flags if masking bit 32 is set.
 
 2.  **`fill_circle` (Circular Fill) - v2.4.22**
     *   **Syntax:** `fill_circle ; <sid> ; <cx> ; <cy> ; <radius> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags>`
@@ -977,10 +979,21 @@ If the `mask` excludes the Character bit (`1` / `0x01`), the command acts as a s
 *   **Banner:** Applies the specified colors/attributes only to the cells where the text pattern is solid, preserving the existing characters on the grid.
 *   **Fill/Shapes:** Updates the colors/attributes of the region without changing the text content.
 
+**Protection Override:**
+Gateway Grid commands bypass the `PROTECTED` attribute (DECSCA). This enables powerful "Form Design" workflows:
+1.  **Fill Background:** Fill the entire screen with `PROTECTED` attribute and a background color.
+2.  **Carve Fields:** Use stencil mode (masking out `PROTECTED`) to clear specific regions for user input.
+
 **Example:**
 To fill a 10x10 red square with 'X' at (5,5) on Session 0:
 `DCS GATE KTERM;0;EXT;grid;fill;0;5;5;10;10;7;88;pal:1;pal:0;0;0;0 ST`
 (Mask 7 = 1+2+4 -> Char + FG + BG).
+
+**Example: Form Design:**
+1. Fill screen with Blue Protected background:
+   `fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED` (Mask 36 = BG+Flags)
+2. Carve out White Unprotected input field:
+   `fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0` (Flags=0 clears protected)
 
 #### Oscillator Period Table (Slots 0-63)
 

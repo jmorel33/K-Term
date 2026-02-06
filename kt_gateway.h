@@ -198,6 +198,45 @@ static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color) {
     return false;
 }
 
+static uint32_t KTerm_ParseAttributeString(const char* str) {
+    if (!str || str[0] == '\0') return 0;
+
+    // Try numeric first
+    char* endptr;
+    unsigned long val = strtoul(str, &endptr, 0);
+    if (*endptr == '\0') return (uint32_t)val;
+
+    // String based
+    uint32_t flags = 0;
+
+    // We need a mutable copy to tokenize, or we can use the KTermLexer/Scanner
+    // Simple tokenizer for '|'
+    char buffer[256];
+    strncpy(buffer, str, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char* tok = strtok(buffer, "|");
+    while (tok) {
+        if (KTerm_Strcasecmp(tok, "BOLD") == 0) flags |= KTERM_ATTR_BOLD;
+        else if (KTerm_Strcasecmp(tok, "DIM") == 0) flags |= KTERM_ATTR_FAINT;
+        else if (KTerm_Strcasecmp(tok, "FAINT") == 0) flags |= KTERM_ATTR_FAINT;
+        else if (KTerm_Strcasecmp(tok, "ITALIC") == 0) flags |= KTERM_ATTR_ITALIC;
+        else if (KTerm_Strcasecmp(tok, "UNDERLINE") == 0) flags |= KTERM_ATTR_UNDERLINE;
+        else if (KTerm_Strcasecmp(tok, "BLINK") == 0) flags |= KTERM_ATTR_BLINK;
+        else if (KTerm_Strcasecmp(tok, "REVERSE") == 0) flags |= KTERM_ATTR_REVERSE;
+        else if (KTerm_Strcasecmp(tok, "INVERSE") == 0) flags |= KTERM_ATTR_REVERSE;
+        else if (KTerm_Strcasecmp(tok, "HIDDEN") == 0) flags |= KTERM_ATTR_CONCEAL;
+        else if (KTerm_Strcasecmp(tok, "CONCEAL") == 0) flags |= KTERM_ATTR_CONCEAL;
+        else if (KTerm_Strcasecmp(tok, "STRIKE") == 0) flags |= KTERM_ATTR_STRIKE;
+        else if (KTerm_Strcasecmp(tok, "PROTECTED") == 0) flags |= KTERM_ATTR_PROTECTED;
+        else if (KTerm_Strcasecmp(tok, "DIRTY") == 0) flags |= KTERM_FLAG_DIRTY;
+
+        tok = strtok(NULL, "|");
+    }
+
+    return flags;
+}
+
 static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* options) {
     // Default values
     memset(options, 0, sizeof(BannerOptions));
@@ -1753,7 +1792,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
         KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
 
     if (count > style_idx+6 && tokens[style_idx+6][0] != '\0')
-        style.flags = (uint32_t)strtoul(tokens[style_idx+6], NULL, 0);
+        style.flags = KTerm_ParseAttributeString(tokens[style_idx+6]);
 
 
     // Dispatch

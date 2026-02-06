@@ -3,7 +3,10 @@
 ## [v2.4.24] - Gateway Grid Flexible Params
 - **Flexible Syntax**: Gateway Grid extension (`EXT;grid`) now supports optional/empty parameters (`switch;;;;value`). Omitted parameters default to the current session attributes (if masked in) or are ignored (if masked out).
 - **Stencil Mode**: Excluding the `CH` (Character) bit from the mask in `fill` or `banner` commands now acts as a stencil, applying colors and attributes to the shape without modifying the underlying text characters.
+- **Design Mode**: Gateway Grid operations now bypass the `PROTECTED` attribute check, enabling host applications to overwrite protected cells (e.g., carving out editable fields in a protected form background).
+- **Named Attributes**: Added support for human-readable attribute flags (e.g., `PROTECTED|BOLD`) in Gateway commands via `KTerm_ParseAttributeString`.
 - **Robustness**: Replaced `strtok` with a custom tokenizer in `KTerm_Ext_Grid` to correctly handle empty fields in semicolon-separated lists.
+- **Fixes**: Resolved a critical regression where DCS payloads containing `p` or `q` (e.g., `pal:1`) incorrectly triggered protocol switches by enforcing strict DCS header validation.
 
 ## [v2.4.23] - Gateway Grid Banner
 - **Gateway Extensions**: Added `banner` subcommand to the `grid` extension (`EXT;grid;banner;...`).
