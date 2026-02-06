@@ -914,7 +914,23 @@ The **grid** extension provides high-performance primitives for bulk manipulatio
 
 **Subcommands:**
 
-1.  **`fill` (Rectangular Fill)**
+1.  **`banner` (Large Text Banner) - v2.4.23**
+    *   **Syntax:** `banner ; <sid> ; <x> ; <y> ; <text> ; <scale> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags> [; <opts...>]`
+    *   **Description:** Plots a large, scaled text banner directly onto the grid using the built-in 8x8 bitmap font. This bypasses VT parsing for high-performance dashboard or overlay construction.
+    *   **Parameters:**
+        *   `x, y`: Anchor coordinate (Top-Left of the first character, adjusted by alignment).
+        *   `text`: The string to render. Supports `\n` for newlines.
+        *   `scale`: Integer scaling factor (e.g., `2` makes 8x8 glyphs into 16x16 blocks).
+        *   `mask`: Bitmask indicating which properties to update (usually `1` for char, or `1|2` for char+color).
+        *   `ch`: The character used to "paint" the bits (e.g., `#` or `█`).
+        *   `fg, bg...`: Styling for the painted cells.
+        *   `opts`: Semicolon-separated options.
+            *   `align=left` (Default): Text starts at `x`.
+            *   `align=center`: Each line is centered horizontally around `x`.
+            *   `align=right`: Each line ends at `x`.
+            *   `kern=1`: Enables intelligent kerning (proportional spacing) for the built-in font, reducing gaps between characters.
+
+2.  **`fill` (Rectangular Fill)**
     *   **Syntax:** `fill ; <sid> ; <x> ; <y> ; <w> ; <h> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags>`
     *   **Description:** Fills a rectangular region defined by `x,y,w,h` with the specified character and attributes.
     *   **Parameters:**
