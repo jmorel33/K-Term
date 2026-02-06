@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 25
+#define KTERM_VERSION_PATCH 26
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.25 (Forms & Parser Enhancements)"
+#define KTERM_VERSION_STRING "2.4.26 (Forms & Relative Grid)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -295,6 +295,14 @@ typedef struct {
 #define KTERM_MODE_DECXRLM          (1U << 31) // DECXRLM (Mode 88) - Transmit XOFF/XON on Receive Limit
 
 typedef uint32_t DECModes;
+
+// Forms Mode Home Behavior
+typedef enum {
+    HOME_MODE_ABSOLUTE = 0, // (0,0)
+    HOME_MODE_FIRST_UNPROTECTED, // First unprotected cell in grid
+    HOME_MODE_FIRST_UNPROTECTED_LINE, // First unprotected cell in current line
+    HOME_MODE_LAST_FOCUSED // Last focused unprotected cell (requires tracking)
+} KTermHomeMode;
 
 // ANSI Modes
 typedef struct {
@@ -1748,6 +1756,9 @@ typedef struct KTermSession_T {
     bool raw_mode;
     bool direct_input; // Direct Input Mode (Local Editor)
     bool skip_protect; // Cursor skips protected fields (Forms Mode)
+    KTermHomeMode home_mode;
+    int last_focused_x;
+    int last_focused_y;
     bool paused;
 
     bool printer_available;
@@ -5892,6 +5903,13 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
     session->cursor.x += advance;
 }
 
+// Forward declarations for Forms Mode helpers
+static void KTerm_AdvanceCursorSkipProtect(KTermSession* s);
+static void KTerm_RetreatCursorSkipProtect(KTermSession* s);
+static void KTerm_ResolveProtectionForward(KTermSession* s);
+static void KTerm_ResolveProtectionBackward(KTermSession* s);
+static void KTerm_GoHome(KTermSession* s);
+
 // Update KTerm_ProcessControlChar
 void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch) {
     switch (ch) {
@@ -5909,14 +5927,27 @@ void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char 
             }
             break;
         case 0x08: // BS - Backspace
-            if (session->cursor.x > session->left_margin) {
-                session->cursor.x--;
+            if (session->skip_protect) {
+                KTerm_RetreatCursorSkipProtect(session);
+                KTerm_ResolveProtectionBackward(session);
+            } else {
+                if (session->cursor.x > session->left_margin) {
+                    session->cursor.x--;
+                }
             }
             break;
         case 0x09: // HT - Horizontal Tab
-            session->cursor.x = NextTabStop(term, session->cursor.x);
-            if (session->cursor.x > session->right_margin) {
-                session->cursor.x = session->right_margin;
+            if (session->skip_protect) {
+                // In Forms Mode, Tab acts as "Next Field"
+                // First, advance past current position
+                KTerm_AdvanceCursorSkipProtect(session);
+                // Then resolve (skip protected)
+                KTerm_ResolveProtectionForward(session);
+            } else {
+                session->cursor.x = NextTabStop(term, session->cursor.x);
+                if (session->cursor.x > session->right_margin) {
+                    session->cursor.x = session->right_margin;
+                }
             }
             break;
         case 0x0A: // LF - Line Feed
@@ -6924,6 +6955,51 @@ static void KTerm_RetreatCursorSkipProtect(KTermSession* s) {
     }
 }
 
+static void KTerm_GoHome(KTermSession* s) {
+    switch (s->home_mode) {
+        case HOME_MODE_ABSOLUTE:
+            s->cursor.x = 0;
+            s->cursor.y = 0;
+            break;
+        case HOME_MODE_LAST_FOCUSED:
+            s->cursor.x = s->last_focused_x;
+            s->cursor.y = s->last_focused_y;
+            break;
+        case HOME_MODE_FIRST_UNPROTECTED:
+            {
+                // Scan from 0,0
+                int cx = 0, cy = 0;
+                while (cy < s->rows) {
+                    if (!KTerm_IsCellProtected(s, cx, cy)) {
+                        s->cursor.x = cx; s->cursor.y = cy;
+                        return;
+                    }
+                    cx++;
+                    if (cx >= s->cols) { cx = 0; cy++; }
+                }
+                // Fallback to absolute if none found
+                s->cursor.x = 0; s->cursor.y = 0;
+            }
+            break;
+        case HOME_MODE_FIRST_UNPROTECTED_LINE:
+            {
+                // Scan current line
+                int cx = 0;
+                int cy = s->cursor.y;
+                while (cx < s->cols) {
+                    if (!KTerm_IsCellProtected(s, cx, cy)) {
+                        s->cursor.x = cx;
+                        return;
+                    }
+                    cx++;
+                }
+                // Fallback: don't move X? Or 0? Usually 0.
+                s->cursor.x = 0;
+            }
+            break;
+    }
+}
+
 static void KTerm_ResolveProtectionForward(KTermSession* s) {
     if (!s->skip_protect) return;
     int start_x = s->cursor.x;
@@ -6933,11 +7009,12 @@ static void KTerm_ResolveProtectionForward(KTermSession* s) {
     while (KTerm_IsCellProtected(s, s->cursor.x, s->cursor.y)) {
         KTerm_AdvanceCursorSkipProtect(s);
 
-        // Safety break
+        // Safety break to prevent infinite loops if all cells are protected
         if (s->cursor.x == start_x && s->cursor.y == start_y) {
              looped++;
              if (looped > 1) {
-                 s->cursor.x = 0; s->cursor.y = 0;
+                 // If the entire grid is protected, attempt to return to Home.
+                 KTerm_GoHome(s);
                  return;
              }
         }
@@ -13050,6 +13127,12 @@ void KTerm_Update(KTerm* term) {
         // Process input from the pipeline
         KTerm_ProcessEventsInternal(term, session);
 
+        // Track Last Focused Unprotected Cell
+        if (!KTerm_IsCellProtected(session, session->cursor.x, session->cursor.y)) {
+            session->last_focused_x = session->cursor.x;
+            session->last_focused_y = session->cursor.y;
+        }
+
         // Flush queued operations to the grid
         KTerm_FlushOps(term, session);
 
@@ -14471,6 +14554,9 @@ static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
     session->mouse.cursor_y = -1;
     session->input.auto_process = true;
     session->skip_protect = false;
+    session->home_mode = HOME_MODE_ABSOLUTE;
+    session->last_focused_x = 0;
+    session->last_focused_y = 0;
 
     session->cursor.visible = true;
     session->cursor.blink_enabled = true;

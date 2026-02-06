@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.4.26] - Forms & Relative Grid
+- **Forms Mode Enhancements**:
+    - **Skip Protect Navigation**: Cursor movement (Right, Left, Tab, Backspace) now automatically skips protected cells (`DECSCA 1`) if `SKIP_PROTECT` is enabled via Gateway (`SET;CURSOR;SKIP_PROTECT=1`).
+    - **Configurable Home**: Added `HOME_MODE` to `SET;CURSOR`. Options include `ABSOLUTE` (0,0), `FIRST_UNPROTECTED` (scan grid), `FIRST_UNPROTECTED_LINE` (scan current line), and `LAST_FOCUSED` (return to last known unprotected cell).
+    - **Focus Tracking**: The terminal now tracks the last valid cursor position on an unprotected cell for use with `HOME_MODE=LAST_FOCUSED`.
+- **Relative Grid Coords**: Gateway Grid operations (`fill`, `fill_circle`, `fill_line`, `banner`) now support relative coordinates prefixed with `+` or `-` (e.g., `x=+5`, `y=-2`).
+- **Negative Dimensions**: Negative width/height/length parameters in Grid ops now reverse the drawing direction (mirroring), allowing for intuitive "draw left" or "draw up" commands.
+- **Strict Mode**: If `strict_mode` is enabled, negative absolute grid coordinates are clamped to 0, while explicit relative coordinates are preserved.
+
 ## [v2.4.25] - Forms & Parser Enhancements
 - **Cursor Skip Protect**: Implemented "forms mode" cursor navigation. When enabled (`SET;CURSOR;SKIP_PROTECT=1`), cursor movement commands (`CUF`, `CUB`, `CUD`, `CUU`, etc.) automatically skip over protected cells (`DECSCA 1`), wrapping to the next line if necessary.
 - **Signed Numeric Params**: Hardened CSI/OSC/DCS parser to support signed integer parameters (e.g., `CSI -5 ; ...`). Negative values are preserved unless `strict_mode` is enabled, in which case they are clamped to 0.
