@@ -48,7 +48,7 @@
 #define KTERM_VERSION_MINOR 4
 #define KTERM_VERSION_PATCH 24
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.24 (Gateway Grid Flexible)"
+#define KTERM_VERSION_STRING "2.4.24 (Gateway Grid Flexible Params)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -4532,7 +4532,19 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
         // Ensure this is not DECRQSS ($q)
         bool is_decrqss = (session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '$');
 
-        if (ch == 'q' && (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) && !is_decrqss) {
+        // Check if the current buffer content constitutes a valid DCS header (Params + Intermediates only).
+        // If the buffer contains other data (e.g. "GATE..."), 'q' or 'p' should be treated as data, not protocol initiators.
+        bool is_valid_header = true;
+        for (int i = 0; i < session->escape_pos - 1; i++) {
+            char c = session->escape_buffer[i];
+            // Valid: 0x20-0x2F (Intermediate) and 0x30-0x3F (Params: 0-9:;<=>?)
+            if (c < 0x20 || c > 0x3F) {
+                is_valid_header = false;
+                break;
+            }
+        }
+
+        if (ch == 'q' && (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) && !is_decrqss && is_valid_header) {
             // Sixel Graphics command
             // Determine Target Session
             KTermSession* target_session = session;
@@ -4581,7 +4593,7 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
             return;
         }
 
-        if (ch == 'p' && (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS)) {
+        if (ch == 'p' && (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS) && is_valid_header) {
             // ReGIS (Remote Graphics Instruction Set)
             // Initialize ReGIS state
             session->regis.state = 0; // Expecting command
