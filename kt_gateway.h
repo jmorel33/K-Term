@@ -676,6 +676,20 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                         int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
                         if (strcmp(key, "SKIP_PROTECT") == 0) {
                             target_session->skip_protect = (v != 0);
+                        } else if (strcmp(key, "HOME_MODE") == 0) {
+                            if (val.type == KT_TOK_IDENTIFIER) {
+                                char valBuf[64];
+                                int vlen = val.length < 63 ? val.length : 63;
+                                strncpy(valBuf, val.start, vlen);
+                                valBuf[vlen] = '\0';
+
+                                if (KTerm_Strcasecmp(valBuf, "ABSOLUTE") == 0) target_session->home_mode = HOME_MODE_ABSOLUTE;
+                                else if (KTerm_Strcasecmp(valBuf, "FIRST_UNPROTECTED") == 0) target_session->home_mode = HOME_MODE_FIRST_UNPROTECTED;
+                                else if (KTerm_Strcasecmp(valBuf, "FIRST_UNPROTECTED_LINE") == 0) target_session->home_mode = HOME_MODE_FIRST_UNPROTECTED_LINE;
+                                else if (KTerm_Strcasecmp(valBuf, "LAST_FOCUSED") == 0) target_session->home_mode = HOME_MODE_LAST_FOCUSED;
+                            } else {
+                                target_session->home_mode = (KTermHomeMode)v;
+                            }
                         }
                         token = KTerm_LexerNext(&lexer);
                     } else token = next;
@@ -1454,6 +1468,25 @@ static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* ar
     }
 }
 
+static int KTerm_ParseGridCoord(KTerm* term, KTermSession* s, const char* str, int base_val) {
+    if (!str || !*str) return 0;
+
+    // Explicit relative sign ('+' or '-') triggers relative positioning.
+    bool is_relative = (str[0] == '+' || str[0] == '-');
+    int val = atoi(str);
+
+    if (is_relative) {
+        return base_val + val;
+    }
+
+    // Strict Mode Clamping: Negative absolute coordinates are clamped to 0
+    if (term->config.strict_mode && val < 0) {
+        return 0;
+    }
+
+    return val;
+}
+
 static bool KTerm_ParseGridColor(const char* str, ExtendedKTermColor* out) {
     if (!str || !out) return false;
     
@@ -1832,31 +1865,48 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
     int cells_applied = 0;
 
     if (strcmp(tokens[0], "fill") == 0) {
-        int x = atoi(tokens[2]);
-        int y = atoi(tokens[3]);
+        int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         int w = atoi(tokens[4]);
         int h = atoi(tokens[5]);
-        if (w <= 0) w = 1; // Legacy behavior
-        if (h <= 0) h = 1; // Legacy behavior
+
+        // Handle negative W/H (Mirror/Reverse)
+        if (w < 0) { x += w; w = -w; }
+        if (h < 0) { y += h; h = -h; }
+
+        if (w == 0) w = 1; // Legacy behavior
+        if (h == 0) h = 1; // Legacy behavior
         cells_applied = KTerm_QueueGridOp(target, x, y, w, h, &style);
     } else if (strcmp(tokens[0], "fill_circle") == 0) {
-        int cx = atoi(tokens[2]);
-        int cy = atoi(tokens[3]);
+        int cx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int cy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         int r = atoi(tokens[4]);
+        if (r < 0) r = -r; // Absolute radius
         cells_applied = KTerm_Grid_FillCircle(target, cx, cy, r, &style);
     } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
-        int sx = atoi(tokens[2]);
-        int sy = atoi(tokens[3]);
+        int sx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int sy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         char dir = tokens[4][0];
         int len = atoi(tokens[5]);
+
+        // Handle negative length by reversing direction
+        if (len < 0) {
+            len = -len;
+            // Toggle direction: Right <-> Left, Down <-> Up
+            if (dir == 'h' || dir == '0') dir = 'l';
+            else if (dir == 'l' || dir == '2') dir = 'h';
+            else if (dir == 'v' || dir == '1') dir = 'u';
+            else if (dir == 'u' || dir == '3') dir = 'v';
+        }
+
         bool wrap = false;
         if (count > 13) {
             wrap = (atoi(tokens[13]) != 0);
         }
         cells_applied = KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
     } else if (strcmp(tokens[0], "banner") == 0) {
-        int x = atoi(tokens[2]);
-        int y = atoi(tokens[3]);
+        int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         const char* text = tokens[4];
         int scale = atoi(tokens[5]);
 

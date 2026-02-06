@@ -852,7 +852,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
 | `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
 | `SET;KEYBOARD`| `REPEAT_RATE=<0-31>;DELAY=<ms>;REPEAT=<SOFTWARE\|HOST>` | Configures keyboard repeat behavior. `REPEAT_RATE`: 0 (Fast, 30Hz) to 30 (Slow, 2Hz), 31=Off. `DELAY`: Initial delay in milliseconds (default 500). `REPEAT`: Selects repeat engine (`SOFTWARE` for authentic VT timing, `HOST` for low-latency OS repeats). |
-| `SET;CURSOR`  | `SKIP_PROTECT=<1\|0>` | "Forms Mode" control. If `1`, standard cursor movement keys/sequences (CUF, CUB, etc.) will automatically skip over protected cells (`DECSCA`), wrapping lines if necessary. If `0` (default), cursor lands on protected cells. |
+| `SET;CURSOR`  | `SKIP_PROTECT=<1\|0>;HOME_MODE=<Mode>` | "Forms Mode" control.<br>- `SKIP_PROTECT`: If `1`, cursor movement (Arrow keys, Tab, Backspace) automatically skips protected cells (`DECSCA 1`).<br>- `HOME_MODE`: Defines behavior when cursor loops or no cells are valid. Options: `ABSOLUTE` (0,0), `FIRST_UNPROTECTED` (Scan from top), `FIRST_UNPROTECTED_LINE` (Scan current line), `LAST_FOCUSED` (Return to last known valid cell). |
 | `RESET;TABS` | `DEFAULT8` | Resets tab stops to every 8 columns (DECST8C behavior). |
 | `SET;OUTPUT` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
 | `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
@@ -974,6 +974,17 @@ All style parameters (`ch`, `fg`, `bg`, `ul`, `st`, `flags`) are optional in the
 *   If a parameter is omitted (e.g., `;;` empty field) but its bit is set in the `mask`, the current session's default value for that attribute is used.
 *   If a parameter is omitted and its bit is *not* set in the `mask`, it is ignored (grid cell value preserved).
 *   If `mask` is `0` (or omitted), the command is treated as a no-op to prevent accidental overwrites.
+
+**Relative & Signed Coordinates (v2.4.26+):**
+Grid operations support relative and signed coordinates for flexible positioning.
+*   **Relative Offset:** Prefixing a coordinate with `+` or `-` makes it relative to the current cursor position.
+    *   `x=+5`: 5 cells to the right of the cursor.
+    *   `y=-2`: 2 cells above the cursor.
+*   **Negative Dimensions:** Passing a negative value for width (`w`), height (`h`), radius (`r`), or length (`len`) reverses the drawing direction (mirroring).
+    *   `w=-10`: Draws 10 cells to the left of `x`.
+    *   `h=-5`: Draws 5 cells upwards from `y`.
+    *   `len=-20`: In `fill_line`, reverses the direction logic (e.g., Right becomes Left).
+*   **Strict Mode:** If `strict_mode` is enabled in `KTermConfig`, absolute negative coordinates are clamped to 0. Explicit relative coordinates (`-5`) remain valid.
 
 **Safe Plotting (Out-of-Bounds):**
 All grid operations are safe against out-of-bounds coordinates.
