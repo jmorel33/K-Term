@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.26
+# K-Term Emulation Library v2.4.27
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.4.27: Advanced Grid Ops**
+*   **Grid Streaming**: Added `stream` Gateway command for high-performance bulk cell updates using packed binary data (Base64), ideal for AI overlays or dynamic UIs.
+*   **Copy & Move**: Added GPU-side `copy` and `move` subcommands for efficient rectangular blit operations on the grid.
+*   **Masked Fill Fix**: Fixed masking behavior in `fill` command to correctly preserve existing attributes.
+*   **Safety & Stability**: Hardened stream processing against concurrency issues and division-by-zero errors.
 
 **New in v2.4.26: Forms Mode & Relative Grid Ops**
 *   **Forms Mode**: Enhanced cursor navigation (`Arrow keys`, `Tab`, `Backspace`) now automatically skips over protected cells when `SKIP_PROTECT` is enabled. Added configurable "Home" behaviors (e.g., return to last focused field) via `SET;CURSOR;HOME_MODE`.

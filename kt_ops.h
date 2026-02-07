@@ -47,6 +47,7 @@ typedef struct {
             KTermRect src;
             int dst_x;
             int dst_y;
+            uint32_t mode; // Bit 0: Overwrite Protected, Bit 1: Clear Source
         } copy;
         struct {
             KTermRect rect;

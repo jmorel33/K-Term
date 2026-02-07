@@ -70,6 +70,30 @@ static int KTerm_Base64Value(char c) {
     return -1;
 }
 
+// Decode Base64 to a raw buffer (caller must free if it returns a pointer, but here we use output buffer)
+// Returns number of bytes written.
+static size_t KTerm_Base64DecodeBuffer(const char* in, unsigned char* out, size_t max_len) {
+    if (!in || !out) return 0;
+    size_t len = strlen(in);
+    unsigned int val = 0;
+    int valb = -8;
+    size_t out_pos = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (in[i] == '=') break;
+        int c = KTerm_Base64Value(in[i]);
+        if (c == -1) continue;
+        val = (val << 6) + c;
+        valb += 6;
+        if (valb >= 0) {
+            if (out_pos < max_len) {
+                out[out_pos++] = (unsigned char)((val >> valb) & 0xFF);
+            }
+            valb -= 8;
+        }
+    }
+    return out_pos;
+}
+
 static void KTerm_Base64StreamDecode(KTerm* term, int session_idx, const char* in) {
     if (!term || !in) return;
     size_t len = strlen(in);
@@ -1827,38 +1851,55 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
             return;
         }
         style_idx = 6;
+    } else if (strcmp(tokens[0], "stream") == 0) {
+        // stream;sid;x;y;w;h;mask;count;compress;data
+        if (count < 10) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
+        }
+        // stream handles mask differently (packed data), so style_idx logic below is skipped/custom
+        style_idx = -1;
+    } else if (strcmp(tokens[0], "copy") == 0 || strcmp(tokens[0], "move") == 0) {
+        // copy;sid;sx;sy;dx;dy;w;h;mode
+        if (count < 9) {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+            return;
+        }
+        style_idx = -1;
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_SUBCOMMAND");
         return;
     }
 
-    // Parse Style (Optional Params)
-    if (count > style_idx && tokens[style_idx][0] != '\0')
-        style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
+    // Parse Style (Optional Params) for standard fill commands
+    if (style_idx != -1) {
+        if (count > style_idx && tokens[style_idx][0] != '\0')
+            style.mask = (uint32_t)strtoul(tokens[style_idx], NULL, 0);
 
-    // If mask is 0 (or omitted), it's a no-op (safe fail)
-    if (style.mask == 0) {
-        if (respond) respond(term, session, "OK;NOOP;MASK_ZERO");
-        return;
+        // If mask is 0 (or omitted), it's a no-op (safe fail)
+        if (style.mask == 0) {
+            if (respond) respond(term, session, "OK;NOOP;MASK_ZERO");
+            return;
+        }
+
+        if (count > style_idx+1 && tokens[style_idx+1][0] != '\0')
+            style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
+
+        if (count > style_idx+2 && tokens[style_idx+2][0] != '\0')
+            KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
+
+        if (count > style_idx+3 && tokens[style_idx+3][0] != '\0')
+            KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
+
+        if (count > style_idx+4 && tokens[style_idx+4][0] != '\0')
+            KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
+
+        if (count > style_idx+5 && tokens[style_idx+5][0] != '\0')
+            KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
+
+        if (count > style_idx+6 && tokens[style_idx+6][0] != '\0')
+            style.flags = KTerm_ParseAttributeString(tokens[style_idx+6]);
     }
-
-    if (count > style_idx+1 && tokens[style_idx+1][0] != '\0')
-        style.ch = (unsigned int)strtoul(tokens[style_idx+1], NULL, 0);
-
-    if (count > style_idx+2 && tokens[style_idx+2][0] != '\0')
-        KTerm_ParseGridColor(tokens[style_idx+2], &style.fg);
-
-    if (count > style_idx+3 && tokens[style_idx+3][0] != '\0')
-        KTerm_ParseGridColor(tokens[style_idx+3], &style.bg);
-
-    if (count > style_idx+4 && tokens[style_idx+4][0] != '\0')
-        KTerm_ParseGridColor(tokens[style_idx+4], &style.ul);
-
-    if (count > style_idx+5 && tokens[style_idx+5][0] != '\0')
-        KTerm_ParseGridColor(tokens[style_idx+5], &style.st);
-
-    if (count > style_idx+6 && tokens[style_idx+6][0] != '\0')
-        style.flags = KTerm_ParseAttributeString(tokens[style_idx+6]);
 
 
     // Dispatch
@@ -1918,6 +1959,142 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args,
             opt_count = count - 13;
         }
         cells_applied = KTerm_Grid_Banner(target, x, y, text, scale, &style, opts, opt_count);
+    } else if (strcmp(tokens[0], "copy") == 0 || strcmp(tokens[0], "move") == 0) {
+        // copy;sid;src_x;src_y;dst_x;dst_y;w;h;mode
+        int sx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int sy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
+        int dx = KTerm_ParseGridCoord(term, target, tokens[4], target->cursor.x);
+        int dy = KTerm_ParseGridCoord(term, target, tokens[5], target->cursor.y);
+        int w = atoi(tokens[6]);
+        int h = atoi(tokens[7]);
+        uint32_t mode = (uint32_t)strtoul(tokens[8], NULL, 0);
+
+        if (strcmp(tokens[0], "move") == 0) {
+            mode |= 0x2; // Set Clear Source
+        }
+
+        KTermRect src = {sx, sy, w, h};
+        KTerm_QueueCopyRectWithMode(target, src, dx, dy, mode);
+        cells_applied = w * h;
+    } else if (strcmp(tokens[0], "stream") == 0) {
+        // stream;sid;x;y;w;h;mask;count;compress;data
+        int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
+        int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
+        int w = atoi(tokens[4]);
+        int h = atoi(tokens[5]);
+        uint32_t mask = (uint32_t)strtoul(tokens[6], NULL, 0);
+        int count_cells = atoi(tokens[7]);
+        int compress = atoi(tokens[8]);
+        const char* b64_data = tokens[9];
+
+        // Handle negative W/H (Mirroring logic consistent with fill)
+        if (w < 0) { x += w; w = -w; }
+        if (h < 0) { y += h; h = -h; }
+        if (w == 0) w = 1;
+        if (h == 0) h = 1;
+
+        if (compress != 0) {
+            if (respond) respond(term, session, "ERR;COMPRESSION_NOT_SUPPORTED");
+            return;
+        }
+
+        // Flush pending ops to ensure we read up-to-date screen state
+        // This prevents race conditions where a preceding operation (e.g. fill)
+        // hasn't been applied to the screen buffer yet.
+        KTerm_FlushOps(term, target);
+
+        size_t b64_len = strlen(b64_data);
+        size_t buffer_size = (b64_len * 3) / 4 + 4; // Approx size
+        unsigned char* buffer = (unsigned char*)malloc(buffer_size);
+        if (!buffer) {
+            if (respond) respond(term, session, "ERR;OOM");
+            return;
+        }
+
+        size_t data_len = KTerm_Base64DecodeBuffer(b64_data, buffer, buffer_size);
+        unsigned char* ptr = buffer;
+        unsigned char* end = buffer + data_len;
+
+        for (int i = 0; i < count_cells; i++) {
+            if (ptr >= end) break; // Unexpected end of data
+
+            int cx = x + (i % w);
+            int cy = y + (i / w);
+
+            // Fetch current cell to modify partially
+            EnhancedTermChar cell = {0};
+
+            EnhancedTermChar* existing = GetActiveScreenCell(target, cy, cx);
+            if (existing) {
+                cell = *existing; // Copy current state
+            } else {
+                // Out of bounds or invalid?
+                // If out of bounds, skip
+                if (cx >= target->cols || cy >= target->rows) continue;
+            }
+
+            if (mask & GRID_MASK_CH) {
+                if (ptr + 4 <= end) {
+                    uint32_t val = (uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24);
+                    cell.ch = val;
+                    ptr += 4;
+                }
+            }
+
+            // Helper to read color
+            // Format: 1 byte Mode + Data
+            // Mode 0: Index (1 byte)
+            // Mode 1: RGB (3 bytes)
+            // Mode 2: Default (0 bytes)
+
+            #define READ_COLOR_FROM_STREAM(c) do { \
+                if (ptr + 1 > end) break; \
+                int mode = *ptr++; \
+                (c)->color_mode = mode; \
+                if (mode == 0) { \
+                    if (ptr + 1 <= end) { \
+                        (c)->value.index = *ptr++; \
+                    } \
+                } else if (mode == 1) { \
+                    if (ptr + 3 <= end) { \
+                        (c)->value.rgb.r = ptr[0]; \
+                        (c)->value.rgb.g = ptr[1]; \
+                        (c)->value.rgb.b = ptr[2]; \
+                        (c)->value.rgb.a = 255; \
+                        ptr += 3; \
+                    } \
+                } \
+            } while(0)
+
+            if (mask & GRID_MASK_FG) READ_COLOR_FROM_STREAM(&cell.fg_color);
+            if (mask & GRID_MASK_BG) READ_COLOR_FROM_STREAM(&cell.bg_color);
+            if (mask & GRID_MASK_UL) READ_COLOR_FROM_STREAM(&cell.ul_color);
+            if (mask & GRID_MASK_ST) READ_COLOR_FROM_STREAM(&cell.st_color);
+
+            #undef READ_COLOR_FROM_STREAM
+
+            if (mask & GRID_MASK_FLAGS) {
+                if (ptr + 4 <= end) {
+                    uint32_t val = (uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24);
+                    cell.flags = val;
+                    ptr += 4;
+                }
+            }
+
+            // Queue Op
+            KTermOp op;
+            op.type = KTERM_OP_SET_CELL;
+            op.u.set_cell.x = cx;
+            op.u.set_cell.y = cy;
+            op.u.set_cell.cell = cell;
+            // Ensure dirty flag is set
+            op.u.set_cell.cell.flags |= KTERM_FLAG_DIRTY;
+            KTerm_QueueOp(&target->op_queue, op);
+
+            cells_applied++;
+        }
+
+        free(buffer);
     }
 
     if (respond) {

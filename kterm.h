@@ -46,9 +46,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
-#define KTERM_VERSION_PATCH 26
+#define KTERM_VERSION_PATCH 27
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.4.26 (Forms & Relative Grid)"
+#define KTERM_VERSION_STRING "2.4.27 (Advanced Grid Ops)"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -2123,6 +2123,7 @@ static unsigned int KTerm_CalculateRectChecksum(KTerm *term, int top, int left, 
 // Forward declarations for Op Queue helpers
 void KTerm_QueueFillRect(KTermSession* session, KTermRect rect, EnhancedTermChar fill_char);
 void KTerm_QueueCopyRect(KTermSession* session, KTermRect src, int dst_x, int dst_y);
+void KTerm_QueueCopyRectWithMode(KTermSession* session, KTermRect src, int dst_x, int dst_y, uint32_t mode);
 void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr_mask, uint32_t attr_values, uint32_t attr_xor_mask, bool set_fg, ExtendedKTermColor fg, bool set_bg, ExtendedKTermColor bg);
 void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected);
 void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_protected);
@@ -13758,11 +13759,16 @@ void KTerm_QueueFillRect(KTermSession* session, KTermRect rect, EnhancedTermChar
 }
 
 void KTerm_QueueCopyRect(KTermSession* session, KTermRect src, int dst_x, int dst_y) {
+    KTerm_QueueCopyRectWithMode(session, src, dst_x, dst_y, 0);
+}
+
+void KTerm_QueueCopyRectWithMode(KTermSession* session, KTermRect src, int dst_x, int dst_y, uint32_t mode) {
     KTermOp op;
     op.type = KTERM_OP_COPY_RECT;
     op.u.copy.src = src;
     op.u.copy.dst_x = dst_x;
     op.u.copy.dst_y = dst_y;
+    op.u.copy.mode = mode;
     KTerm_QueueOp(&session->op_queue, op);
 }
 
@@ -14240,9 +14246,12 @@ static void KTerm_ApplyCopyRectOp(KTermSession* session, KTermOp* op) {
     int dest_y = op->u.copy.dst_y;
     int width = src.w;
     int height = src.h;
+    uint32_t mode = op->u.copy.mode;
+    bool force = (mode & 0x1);
+    bool clear_src = (mode & 0x2);
 
     // Allocate temp buffer
-    EnhancedTermChar* temp = KTerm_Malloc(width * height * sizeof(EnhancedTermChar));
+    EnhancedTermChar* temp = (EnhancedTermChar*)KTerm_Malloc(width * height * sizeof(EnhancedTermChar));
     if (!temp) return;
 
     // Copy src to temp
@@ -14261,7 +14270,7 @@ static void KTerm_ApplyCopyRectOp(KTermSession* session, KTermOp* op) {
             int dx = dest_x + x;
             if (dy >= 0 && dy < session->rows && dx >= 0 && dx < session->cols) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, dy, dx);
-                if (cell->flags & KTERM_ATTR_PROTECTED) continue;
+                if (!force && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
 
                 *cell = temp[y * width + x];
                 cell->flags |= KTERM_FLAG_DIRTY;
@@ -14272,15 +14281,58 @@ static void KTerm_ApplyCopyRectOp(KTermSession* session, KTermOp* op) {
         }
     }
     KTerm_Free(temp);
+
+    // Clear source if requested (Move)
+    if (clear_src) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int sy = src.y + y;
+                int sx = src.x + x;
+                // Bounds check source
+                // Use session->rows check to be consistent with viewport operations
+                // (GetActiveScreenCell handles wrap if Y is relative to head, but if sy is treated as viewport row, we should clamp to viewport?)
+                // Assuming operations are on the active viewport.
+                if (sx >= 0 && sx < session->cols && sy >= 0 && sy < session->rows) {
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, sy, sx);
+                    if (!force && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
+                    KTerm_ClearCell_Internal(session, cell);
+                    cell->flags |= KTERM_FLAG_DIRTY;
+                }
+            }
+            if (src.y + y >= 0 && src.y + y < session->rows) {
+                session->row_dirty[src.y + y] = KTERM_DIRTY_FRAMES;
+            }
+        }
+    }
+
     // Update dirty rect (Destination)
     KTermRect dst_rect = {dest_x, dest_y, width, height};
+
+    // Union destination with source if cleared
+    if (clear_src) {
+        // Simple Union of two rects (AABB)
+        int min_x = (src.x < dst_rect.x) ? src.x : dst_rect.x;
+        int min_y = (src.y < dst_rect.y) ? src.y : dst_rect.y;
+        int max_x1 = src.x + src.w;
+        int max_x2 = dst_rect.x + dst_rect.w;
+        int max_x = (max_x1 > max_x2) ? max_x1 : max_x2;
+        int max_y1 = src.y + src.h;
+        int max_y2 = dst_rect.y + dst_rect.h;
+        int max_y = (max_y1 > max_y2) ? max_y1 : max_y2;
+
+        dst_rect.x = min_x;
+        dst_rect.y = min_y;
+        dst_rect.w = max_x - min_x;
+        dst_rect.h = max_y - min_y;
+    }
+
     if (session->dirty_rect.w == 0) {
         session->dirty_rect = dst_rect;
     } else {
-        int x1 = (dest_x < session->dirty_rect.x) ? dest_x : session->dirty_rect.x;
-        int y1 = (dest_y < session->dirty_rect.y) ? dest_y : session->dirty_rect.y;
-        int x2 = (dest_x + width > session->dirty_rect.x + session->dirty_rect.w) ? dest_x + width : session->dirty_rect.x + session->dirty_rect.w;
-        int y2 = (dest_y + height > session->dirty_rect.y + session->dirty_rect.h) ? dest_y + height : session->dirty_rect.y + session->dirty_rect.h;
+        int x1 = (dst_rect.x < session->dirty_rect.x) ? dst_rect.x : session->dirty_rect.x;
+        int y1 = (dst_rect.y < session->dirty_rect.y) ? dst_rect.y : session->dirty_rect.y;
+        int x2 = (dst_rect.x + dst_rect.w > session->dirty_rect.x + session->dirty_rect.w) ? dst_rect.x + dst_rect.w : session->dirty_rect.x + session->dirty_rect.w;
+        int y2 = (dst_rect.y + dst_rect.h > session->dirty_rect.y + session->dirty_rect.h) ? dst_rect.y + dst_rect.h : session->dirty_rect.y + session->dirty_rect.h;
         session->dirty_rect = (KTermRect){x1, y1, x2 - x1, y2 - y1};
     }
 }

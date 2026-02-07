@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.25
+# kterm.h - Technical Reference Manual v2.4.27
 
 **(c) 2026 Jacques Morel**
 
@@ -56,6 +56,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.10. Retro Visual Effects](#410-retro-visual-effects)
     *   [4.11. ReGIS Graphics](#411-regis-graphics)
     *   [4.12. Gateway Protocol](#412-gateway-protocol)
+        *   [4.12.1. Gateway Grid Extension (v2.4.21+)](#4121-gateway-grid-extension-v2421)
     *   [4.13. RAWDUMP (Raw Input Mirroring)](#413-rawdump-raw-input-mirroring)
     *   [4.14. Kitty Protocols (Graphics & Keyboard)](#414-kitty-protocols-graphics--keyboard)
         *   [4.14.1. Kitty Graphics Protocol](#4141-kitty-graphics-protocol)
@@ -944,14 +945,41 @@ The **grid** extension provides high-performance primitives for bulk manipulatio
             *   Supported names: `BOLD`, `DIM` (or `FAINT`), `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE` (or `INVERSE`), `HIDDEN` (or `CONCEAL`), `STRIKE`, `PROTECTED`.
             *   Passing `0` or an empty string clears the flags if masking bit 32 is set.
 
-2.  **`fill_circle` (Circular Fill) - v2.4.22**
+3.  **`stream` (Streamed Packed Data) - v2.4.27**
+    *   **Syntax:** `stream ; <sid> ; <x> ; <y> ; <w> ; <h> ; <mask> ; <count> ; <compress> ; <data_base64>`
+    *   **Description:** Efficiently updates a large number of cells with varying content via a packed binary stream. Flushes pending ops to ensure concurrency safety.
+    *   **Parameters:**
+        *   `x, y`: Start coordinate (Top-Left).
+        *   `w, h`: Rect dimensions. Used for wrapping (row-major order).
+        *   `mask`: Bitmask indicating fields present in the packed stream (Same bits as `fill`).
+        *   `count`: Number of cells to process.
+        *   `compress`: `0` (None). Compression is currently reserved/unsupported.
+        *   `data_base64`: Base64-encoded packed binary data.
+    *   **Packed Format:** For each cell, fields are packed sequentially based on `mask` bits:
+        *   `CH` (Bit 0): 4 bytes (uint32_t LE).
+        *   `Colors` (Bits 1-4): Variable length per color:
+            *   `Mode` (1 byte): 0=Index, 1=RGB, 2=Default.
+            *   `Value`: 1 byte (Index) or 3 bytes (RGB). None for Default.
+        *   `Flags` (Bit 5): 4 bytes (uint32_t LE).
+
+4.  **`copy` / `move` (Rectangular Copy) - v2.4.27**
+    *   **Syntax:** `copy ; <sid> ; <sx> ; <sy> ; <dx> ; <dy> ; <w> ; <h> ; <mode>`
+    *   **Syntax:** `move ; <sid> ; <sx> ; <sy> ; <dx> ; <dy> ; <w> ; <h> ; <mode>`
+    *   **Description:** Copies or moves a rectangular block of cells from source `(sx,sy)` to destination `(dx,dy)`. `move` automatically clears the source rectangle after copying.
+    *   **Parameters:**
+        *   `sx, sy`: Source Top-Left.
+        *   `dx, dy`: Destination Top-Left.
+        *   `w, h`: Dimensions.
+        *   `mode`: Bitmask. `1` = Overwrite Protected Cells. `2` = Clear Source (Implicit for `move`).
+
+5.  **`fill_circle` (Circular Fill) - v2.4.22**
     *   **Syntax:** `fill_circle ; <sid> ; <cx> ; <cy> ; <radius> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags>`
     *   **Description:** Fills a circle centered at `cx,cy` with `radius` using the integer midpoint algorithm.
     *   **Parameters:**
         *   `cx, cy`: Center coordinate (0-based).
         *   `radius`: Radius in cells.
 
-3.  **`fill_line` (Linear Span) - v2.4.22**
+6.  **`fill_line` (Linear Span) - v2.4.22**
     *   **Syntax:** `fill_line ; <sid> ; <sx> ; <sy> ; <dir> ; <len> ; <mask> ; <ch> ; <fg> ; <bg> ; <ul> ; <st> ; <flags> [; <wrap>]`
     *   **Description:** Fills a linear span of `len` cells starting at `sx,sy` in direction `dir`.
     *   **Parameters:**
