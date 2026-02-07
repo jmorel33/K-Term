@@ -1,5 +1,18 @@
 # Update Log
 
+## [v2.4.27] - Advanced Grid Ops
+- **Grid Streaming**: Added `EXT;grid;stream` for high-performance bulk cell updates.
+    - Uses packed binary data (CH+ATTR) encoded in Base64 for escape safety.
+    - Supports sparse updates via attribute masks (e.g., update only FG color for a region).
+    - Prevents race conditions by flushing the operation queue before read-modify-write cycles.
+- **Copy & Move**: Added `EXT;grid;copy` and `EXT;grid;move` subcommands.
+    - Performs rectangular blit operations entirely on the GPU/Grid side.
+    - `move` automatically clears the source region after copying.
+    - Supports overwrite modes (`PROTECTED` bypass).
+- **Masked Fill Fix**: Updated `EXT;grid;fill` to correctly utilize `KTERM_OP_FILL_RECT_MASKED`, enabling true masked fills that preserve existing cell attributes (e.g., change background color while keeping text).
+- **Safety**: Hardened `stream` against division-by-zero errors by clamping dimensions. Fixed inconsistent viewport bounds checking in internal copy operations.
+- **API**: Introduced `KTerm_QueueCopyRectWithMode` to support advanced copy flags while maintaining ABI compatibility for `KTerm_QueueCopyRect`.
+
 ## [v2.4.26] - Forms & Relative Grid
 - **Forms Mode Enhancements**:
     - **Skip Protect Navigation**: Cursor movement (Right, Left, Tab, Backspace) now automatically skips protected cells (`DECSCA 1`) if `SKIP_PROTECT` is enabled via Gateway (`SET;CURSOR;SKIP_PROTECT=1`).
