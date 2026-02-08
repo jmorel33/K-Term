@@ -1,5 +1,39 @@
 # Update Log
 
+## [v2.5.0] - Feature Consolidation & Stabilization
+
+This major release consolidates the extensive feature set introduced throughout the v2.4.x development cycle, delivering a production-ready, high-performance terminal emulation engine. It marks the complete integration with the Situation framework and finalizes the advanced Gateway Grid system.
+
+### Major Features
+- **Situation Integration:** Seamless integration with the Situation framework for cross-platform windowing, input handling, and hardware-accelerated rendering.
+- **Compute Shader Rendering:** A fully operational compute-shader-based rendering pipeline (SSBO) supporting text, Sixel, and vector graphics with advanced CRT effects.
+- **Advanced Grid Operations:**
+    - **Streaming:** High-performance bulk binary updates via `EXT;grid;stream` (Base64).
+    - **Direct Manipulation:** GPU-side `copy`, `move`, and masked `fill` operations.
+    - **Shape Primitives:** `fill_circle`, `fill_line`, and `banner` for rapid UI construction.
+    - **Flexible Coordinates:** Support for relative coordinates and negative dimensions.
+- **Forms Mode:** Enhanced cursor navigation (`SKIP_PROTECT`) and focus management (`HOME_MODE`) for building robust terminal-based forms.
+- **Unified Input Pipeline:**
+    - Lock-free Single-Producer Single-Consumer (SPSC) input queue for high throughput.
+    - `Direct Input` mode for local editing without escape sequence round-trips.
+    - `RAWDUMP` for debugging input streams.
+- **Gateway Protocol Enhancements:**
+    - Session targeting (`SET;SESSION`) and routing.
+    - Flexible parameter parsing (optional/empty fields).
+    - Stencil and Design modes for grid operations.
+- **Graphics & Visuals:**
+    - **Kitty Graphics Protocol:** Full support including animations and compositing.
+    - **Sixel & ReGIS:** GPU-accelerated implementations with per-session isolation.
+    - **Shader Effects:** Simulation of Bold (smear), Italic (skew), and CRT effects (scanlines, curvature).
+- **Safety & Stability:**
+    - Mandatory Operation Queue (`KTermOpQueue`) for thread-safe grid mutations.
+    - Sanitizer-verified codebase (ASan/Valgrind clean).
+    - Fuzzing infrastructure and hardened parser logic.
+
+### API Changes
+- Version bump to `v2.5.0`.
+- Consolidated and stabilized public API surface.
+
 ## [v2.4.28] - Situation Integration & Compute Rendering Complete
 
 ### Major Achievement: K-Term Terminal Rendering Infrastructure

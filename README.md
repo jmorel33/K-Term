@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.4.28
+# K-Term Emulation Library v2.5.0
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -47,88 +47,42 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.4.27: Advanced Grid Ops**
-*   **Grid Streaming**: Added `stream` Gateway command for high-performance bulk cell updates using packed binary data (Base64), ideal for AI overlays or dynamic UIs.
-*   **Copy & Move**: Added GPU-side `copy` and `move` subcommands for efficient rectangular blit operations on the grid.
-*   **Masked Fill Fix**: Fixed masking behavior in `fill` command to correctly preserve existing attributes.
-*   **Safety & Stability**: Hardened stream processing against concurrency issues and division-by-zero errors.
+**New in v2.5.0: Feature Consolidation & Stabilization**
+This major release consolidates the extensive feature set introduced throughout the v2.4.x development cycle, delivering a production-ready, high-performance terminal emulation engine. It marks the complete integration with the Situation framework and finalizes the advanced Gateway Grid system.
 
-**New in v2.4.26: Forms Mode & Relative Grid Ops**
-*   **Forms Mode**: Enhanced cursor navigation (`Arrow keys`, `Tab`, `Backspace`) now automatically skips over protected cells when `SKIP_PROTECT` is enabled. Added configurable "Home" behaviors (e.g., return to last focused field) via `SET;CURSOR;HOME_MODE`.
-*   **Relative Grid Coords**: Gateway Grid operations (`fill`, `banner`, etc.) now support relative coordinates (`x=+5`, `y=-2`) and negative dimensions for mirroring/reversing direction.
-*   **Strict Mode**: Parsing logic now clamps negative absolute grid coordinates to 0 in strict mode, while allowing explicit relative offsets.
+*   **Situation Integration:**
+    *   **Backend Integration:** Seamless integration with the Situation framework for cross-platform windowing, input handling, and hardware-accelerated rendering.
+    *   **Compute Pipeline:** A fully operational compute-shader-based rendering pipeline (SSBO) supporting text, Sixel, and vector graphics with advanced CRT effects.
+    *   **Device Address Support:** Buffer device address support for shader access to terminal state.
+    *   **Multi-Threaded Safety:** Atomic state management prevents initialization deadlocks.
 
-**New in v2.4.25: Forms & Parser Enhancements**
-*   **Cursor Skip Protect**: "Forms Mode" cursor navigation (`SET;CURSOR;SKIP_PROTECT=1`) makes standard cursor movements (CUF, CUB, etc.) skip over protected cells, enabling intuitive navigation in block-mode interfaces.
-*   **Signed Numeric Params**: The escape sequence parser now supports signed integers, preserving negative values in permissive mode (clamped to 0 in strict mode).
-*   **Safe Grid Ops**: Gateway Grid operations (`fill`, `banner`, etc.) are now out-of-bound safe, silently ignoring off-screen plots and returning the count of successfully applied cells.
+*   **Advanced Grid Operations:**
+    *   **Streaming:** Added `EXT;grid;stream` Gateway command for high-performance bulk binary updates (Base64), ideal for AI overlays or dynamic UIs.
+    *   **Direct Manipulation:** GPU-side `copy`, `move`, and masked `fill` subcommands for efficient rectangular blit operations.
+    *   **Shape Primitives:** Expanded `grid` extension with `fill_circle`, `fill_line` (directional spans), and `banner` (direct text plotting) subcommands.
+    *   **Flexible Coordinates:** Support for relative coordinates (`x=+5`) and negative dimensions for mirroring/reversing direction.
+    *   **Forms Mode:** Enhanced cursor navigation (`SKIP_PROTECT`) and focus management (`HOME_MODE`) for robust form building.
 
-**New in v2.4.24: Gateway Grid Flexible Params**
-*   **Flexible Syntax**: Gateway Grid extension (`EXT;grid`) now supports optional/empty parameters (`switch;;;;value`). Omitted parameters default to the current session attributes (if masked in) or are ignored (if masked out).
-*   **Stencil Mode**: Excluding the `CH` (Character) bit from the mask in `fill` or `banner` commands now acts as a stencil, applying colors and attributes to the shape without modifying the underlying text characters.
-*   **Robustness**: Replaced `strtok` with a custom tokenizer in `KTerm_Ext_Grid` to correctly handle empty fields in semicolon-separated lists.
+*   **Unified Input Pipeline:**
+    *   **Architecture:** Replaced legacy input handling with a dynamic, lock-free Single-Producer Single-Consumer (SPSC) queue for high throughput and backpressure monitoring.
+    *   **Direct Input:** `KTERM_MODE_DIRECT_INPUT` allows local editing without escape sequence round-trips.
+    *   **Debugging:** `RAWDUMP` extension mirrors raw input bytes for inspection.
+    *   **Key Translation:** Centralized `KTerm_TranslateKey` logic ensures consistent behavior across all input sources.
 
-**New in v2.4.23: Gateway Grid Banner**
-*   **Gateway Extensions**: Added `banner` subcommand to the `grid` extension (`EXT;grid;banner;...`).
-    *   **Direct Plotting**: Plots large, scaled text directly onto the grid using the built-in 8x8 bitmap font.
-    *   **Features**: Supports integer scaling, text alignment (Left/Center/Right), masked styling, and intelligent kerning (`kern=1`).
-    *   **Performance**: Bypasses escape sequence parsing for high-performance dashboard/overlay construction.
+*   **Gateway Protocol Enhancements:**
+    *   **Session Targeting:** Commands can now target specific sessions (`SET;SESSION`) regardless of the parsing source.
+    *   **Flexible Params:** Support for optional/empty parameters and named attributes (`PROTECTED|BOLD`).
+    *   **Modes:** Stencil Mode (masking CH) and Design Mode (bypassing PROTECTED) for advanced grid manipulation.
 
-**New in v2.4.22: Gateway Grid Shapes**
-*   **Gateway Extensions**: Expanded `grid` extension with `fill_circle` and `fill_line` subcommands.
-    *   `fill_circle`: Draws filled circles using the midpoint algorithm.
-    *   `fill_line`: Draws linear spans in cardinal directions (h, v) with optional wrapping for horizontal lines.
-*   **Fixes**: Fixed `fill` subcommand to correctly handle 0-width/height arguments (defaulting to 1).
+*   **Graphics & Visuals:**
+    *   **Kitty Protocol:** Full support for the Kitty Graphics Protocol, including animations, compositing, z-index layering, and transparency.
+    *   **Vector Graphics:** GPU-accelerated Sixel and ReGIS implementations with per-session isolation to prevent state bleeding.
+    *   **Shader Effects:** Simulation of **Bold** (smear), **Italic** (skew), and authentic CRT effects (scanlines, curvature, glow).
 
-**New in v2.4.10: Shader-based Bold & Italic Simulation**
-*   **Visuals:** Implemented shader-based simulation for **Bold** (smear effect) and **Italic** (coordinate skew) text attributes in `shaders/terminal.comp`.
-*   **Accuracy:** Added bounds checking to texture sampling to prevent atlas bleeding when distorting glyph coordinates.
-*   **Completeness:** These attributes are now visually distinct even when using the standard bitmap font, improving readability and styling support.
-
-**New in v2.4.9: Session Routing, Queries, Macros, State Snapshot**
-*   **Per-Session Response Routing:** Fixed critical data contention issues in multi-session environments. Responses (`DSR`, `OSC`) are now routed exclusively to the originating session's ring buffer (`response_ring`) instead of the active session, ensuring 100% reliable output handling for background tasks.
-*   **Expanded Query Handlers:** Added support for `CSI ?10n` (Graphics Capabilities), `?20n` (Macro Storage), and `?30n` (Session State). Fixed `CSI 98n` (Error Reporting) to comply with standard syntax.
-*   **Macro Acknowledgements:** Implemented robust success/error reporting for DCS macro definitions (`\x1BP1$sOK\x1B\` / `\x1BP1$sERR\x1B\`), enabling reliable upload flows for host applications.
-*   **State Snapshot:** Added `DECRQSS` (`DCS $ q`) support for state snapshots (`state` argument), returning a packed, parsable string of the terminal's cursor, modes, and attributes for session persistence or debugging.
-
-**New in v2.4.8: Parser Hardening & Fuzzing Support**
-*   **Malicious Input Resilience:** Introduced configurable limits for Sixel graphics (`max_sixel_width`/`height`), Kitty graphics (`max_kitty_image_pixels`), and grid operations (`max_ops_per_flush`) to prevent DoS attacks via memory exhaustion or CPU hogging.
-*   **Continuous Fuzzing:** Added `tests/libfuzzer_target.c` and GitHub Actions workflow for continuous regression fuzzing with libFuzzer/AddressSanitizer, targeting parser robustness against malformed sequences.
-*   **Strict Mode:** Exposed `strict_mode` in `KTermConfig` to enforce stricter parsing rules.
-
-**New in v2.4.7: Memory & Sanitizer Hardening**
-*   **ReGIS Memory Safety:** Fixed memory leaks in ReGIS macro handling by properly freeing existing macros before re-initialization or reset commands (`RESET;REGIS`).
-*   **Shutdown Cleanup:** Enhanced `KTerm_Cleanup` to ensure all internal buffers (e.g., `row_dirty`, `row_scratch_buffer`) are freed, eliminating leaks on session destruction.
-*   **Buffer Hardening:** Mitigated buffer overflow risks in `KTerm_SetLevel` by enforcing correct size limits on the answerback buffer.
-*   **Sanitizer Compliance:** The codebase is now verified clean under AddressSanitizer (ASan) and Valgrind, ensuring robust operation in CI environments.
-
-**New in v2.4.6: Conversational UI Hardening**
-*   **Synchronized Output (DECSET 2026):** Implemented support for synchronized updates (`\x1B[?2026h` ... `\x1B[?2026l`), preventing visual tearing during batched high-speed text output (e.g., LLM streaming).
-*   **Focus Tracking:** Added Focus In/Out event reporting (`\x1B[I` / `\x1B[O`) via `KTerm_SetFocus`, enabling host applications to dim interfaces or pause updates when inactive.
-*   **Clipboard Hardening:** Increased `MAX_COMMAND_BUFFER` to 256KB to robustly handle large `OSC 52` clipboard copy/paste payloads and improved verification tests for malicious base64 inputs.
-
-**New in v2.4.5: Hardened Conversational Interface**
-*   **Kitty Keyboard Protocol:** Full implementation of the progressive keyboard enhancement protocol (`CSI > 1 u`), enabling unambiguous key reporting (distinguishing `Tab` vs `Ctrl+I`, `Enter` vs `Ctrl+Enter`), explicit modifier reporting (Shift, Alt, Ctrl, Super), and key release events.
-*   **Input Hardening:** Introduced `KTermKey` enum for standardized key codes and hardened the `ParseCSI` logic to correctly handle modern prefix parameters (e.g., `>`).
-*   **Ring Buffer Integration:** Finalized the per-session `response_ring` integration for robust, lock-free output interleaving in high-throughput conversational scenarios (AI streaming, chat UIs).
-
-**New in v2.4.4: Conversational Completeness & Output Refactor**
-*   **Per-Session Output Ring:** Replaced the legacy linear output buffer with a lock-free, per-session ring buffer (`response_ring`). This ensures thread-safe, non-blocking response generation in multi-session environments and prevents data drops under load.
-*   **Expanded Query Support:** Added new DSR queries for inspecting internal state:
-    *   `CSI ? 10 n`: Graphics capabilities bitmask (Sixel, ReGIS, Kitty, etc.).
-    *   `CSI ? 20 n`: Macro storage usage (slots used, free bytes).
-    *   `CSI ? 30 n`: Session state (active ID, max sessions, scroll region).
-    *   `CSI 98 n`: Internal error count.
-*   **Macro Acknowledgments:** Macro definitions now reply with `DCS > ID ; Status ST` (0=Success, 1=Full, 2=Error), allowing hosts to verify uploads.
-*   **Gateway State Snapshot:** New `GET;STATE` command returns a packed, comprehensive snapshot of the terminal's state (cursor, modes, attributes, scroll region) for seamless reattachment or debugging.
-
-**New in v2.4.3: Multi-Session Graphics & Lifecycle Fixes**
-*   **Tektronix Isolation:** Moved Tektronix graphics state from global storage to per-session storage, ensuring that vector graphics in one session do not bleed into others.
-*   **Kitty Lifecycle:** Fixed Kitty graphics lifecycle issues during resize events. Images now correctly track their logical position in the scrollback buffer when the grid is resized, preventing visual artifacts or lost images.
-*   **Initialization:** Standardized graphics subsystem initialization (Sixel, ReGIS, Tektronix, Kitty) within `KTerm_InitSession`.
-
-**v2.4.1 Core Advancement: ReGIS Per-Session Architecture**
-Moved ReGIS graphics state (cursor position, macros, colors) from the global `KTerm` struct to the per-session `KTermSession` struct. This ensures that in multi-session environments (e.g., split panes or background sessions), each terminal session maintains its own independent graphics context.
+*   **Safety & Stability:**
+    *   **Mandatory Op Queue:** All grid mutations are unconditionally batched via `KTermOpQueue` for thread safety.
+    *   **Sanitizer Compliance:** Codebase verified clean under AddressSanitizer (ASan) and Valgrind.
+    *   **Fuzzing:** Continuous regression fuzzing infrastructure and hardened parser logic (signed params, safe allocations).
 
 **v2.4.0 Core Advancement: Mandatory Op Queue Decoupling**
 All grid mutations are batched atomically via a lock-free queue — direct writes have been eliminated for absolute thread-safety and efficiency. The post-flush grid is pure and directly addressable, ready for external simulation layers, bytecode hooks, or custom extensions.
