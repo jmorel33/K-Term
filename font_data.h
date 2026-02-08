@@ -6703,8 +6703,8 @@ const uint16_t vcr_osd_font_12x14[128 * 14] = {
 
 // Builtin font table
 const KTermFontInfo kterm_builtin_fonts[] = {
-    { "DEC VT220 8x10",        8, 10, 1, 1, 0, 256, 1, dec_vt220_cp437_8x10 },
-    { "IBM 8x8",               8,  8, 0, 0, 0, 256, 1, ibm_font_8x8 },
+    { "DEC VT220 8x10",        8, 10, 0, 0, 0, 256, 1, dec_vt220_cp437_8x10 },
+    { "IBM 8x8",               8,  8, 1, 1, 0, 256, 1, ibm_font_8x8 },
     { "VGA Perfect 8x8",       8,  8, 0, 0, 0, 256, 1, vga_perfect_8x8_font },
     { "Ultimate Oldschool 8x16", 8, 16, 0, 0, 0, 256, 1, ultimate_oldschool_pc_font_8x16 },
     { "CP437 8x16",            8, 16, 0, 0, 0, 256, 1, cp437_font__8x16 },
