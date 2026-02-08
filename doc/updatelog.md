@@ -1,5 +1,70 @@
 # Update Log
 
+## [v2.4.28] - Situation Integration & Compute Rendering Complete
+
+### Major Achievement: K-Term Terminal Rendering Infrastructure
+Successfully integrated K-Term terminal emulator with Situation's rendering pipeline:
+- **Compute Pipeline Infrastructure:** Full compute shader support for terminal text rendering
+- **Descriptor Layout System:** Compute-specific bindings (binding 0) separate from graphics pipelines
+- **Buffer Device Address Support:** Shader access to terminal state via device addresses
+- **Font Atlas Integration:** Proper texture creation with compute-sampled descriptors
+- **Storage Image Compatibility:** Compute shader writes now work correctly
+- **Multi-Threaded Safety:** Atomic state management prevents initialization deadlocks
+
+### Critical Fixes: Storage Image & Compute Shader Support
+Fixed 6 critical issues blocking compute shader rendering:
+1. **Storage Image Layout Transitions** - Images now properly transition from UNDEFINED to GENERAL layout
+2. **Command Buffer State Tracking** - Added `in_frame` flag to prevent commands before `vkBeginCommandBuffer()`
+3. **Compute Pipeline Descriptor Layout** - Created dedicated `compute_sampler_layout` with correct bindings
+4. **Atomic Bool Location** - Moved `gl_context_released` to common render state (was Vulkan-specific)
+5. **Font Atlas Color Consistency** - Fallback glyphs now use consistent RGBA format
+6. **Initialization Deadlock Prevention** - Removed premature state checks that blocked buffer creation
+
+### New Features
+- **`SituationColorEncoding` enum** - LINEAR (storage) vs SRGB (gamma-corrected)
+- **`color_encoding` field** - Added to `SituationImage` struct
+- **Automatic Format Selection** - GPU format chosen based on usage flags and encoding
+- **`SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED` flag** - Signals compute-compatible descriptor layout
+- **Storage Image Override** - Storage textures automatically use LINEAR format
+- **Atomic State Management** - Foundation for safe multi-threaded initialization
+
+### Technical Details
+**Format Mappings:**
+- LINEAR: `VK_FORMAT_R8G8B8A8_UNORM` (Vulkan) / `GL_RGBA8` (OpenGL)
+- SRGB: `VK_FORMAT_R8G8B8A8_SRGB` (Vulkan) / `GL_SRGB8_ALPHA8` (OpenGL)
+
+**Descriptor Layout Architecture:**
+- Graphics: `image_sampler_layout` (binding 4, fragment stage)
+- Compute: `compute_sampler_layout` (binding 0, compute stage)
+
+### K-Term Integration
+- Compute shader infrastructure fully operational
+- Terminal buffer with device address support
+- Font atlas with compute-sampled descriptors
+- Output texture for compute shader writes
+- Input/output adapters (kt_io_sit.h, kt_render_sit.h, kt_composite_sit.h)
+
+### Verification Results
+✅ Format fields added to texture slots (both backends)
+✅ Vulkan format selection logic implemented
+✅ Vulkan storage image override working
+✅ OpenGL format selection logic implemented
+✅ Compute descriptor layout properly configured
+✅ Storage image layout transitions working
+✅ Command buffer state tracking functional
+✅ Vulkan initialization complete on Windows
+✅ All major validation errors fixed
+✅ K-Term integration infrastructure complete
+
+### Platform Support
+- ✅ Windows (MSVC, MinGW, GCC 15.1.0)
+- ✅ Vulkan 1.4.313.2
+- ✅ OpenGL 4.6
+- ✅ Backend-neutral API design
+- ✅ Multi-threaded initialization safety
+
+---
+
 ## [v2.4.27] - Advanced Grid Ops
 - **Grid Streaming**: Added `EXT;grid;stream` for high-performance bulk cell updates.
     - Uses packed binary data (CH+ATTR) encoded in Base64 for escape safety.
