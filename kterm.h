@@ -43,6 +43,17 @@
 #ifndef KTERM_H
 #define KTERM_H
 
+// --- Debug Control ---
+#ifndef KTERM_ENABLE_DEBUG_OUTPUT
+#define KTERM_ENABLE_DEBUG_OUTPUT 0  // Set to 1 to enable debug fprintf statements
+#endif
+
+#if KTERM_ENABLE_DEBUG_OUTPUT
+#define KTERM_DEBUG_PRINT(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define KTERM_DEBUG_PRINT(...) ((void)0)
+#endif
+
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 4
@@ -110,7 +121,7 @@ void KTerm_Free(void* ptr);
 #define DEFAULT_TERM_HEIGHT 50
 #define KTERM_MAX_COLS 2048
 #define KTERM_MAX_ROWS 2048
-#define DEFAULT_CHAR_WIDTH 8
+#define DEFAULT_CHAR_WIDTH 10
 #define DEFAULT_CHAR_HEIGHT 10
 #define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering
 #define DEFAULT_WINDOW_WIDTH (DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)
@@ -937,92 +948,142 @@ typedef struct {
 
 // --- Shader Code ---
 #ifndef KTERM_TERMINAL_SHADER_PATH
-#define KTERM_TERMINAL_SHADER_PATH "shaders/terminal.comp"
+#define KTERM_TERMINAL_SHADER_PATH "sit/k-term/shaders/terminal.comp"
 #endif
 #ifndef KTERM_VECTOR_SHADER_PATH
-#define KTERM_VECTOR_SHADER_PATH "shaders/vector.comp"
+#define KTERM_VECTOR_SHADER_PATH "sit/k-term/shaders/vector.comp"
 #endif
 #ifndef KTERM_SIXEL_SHADER_PATH
-#define KTERM_SIXEL_SHADER_PATH "shaders/sixel.comp"
+#define KTERM_SIXEL_SHADER_PATH "sit/k-term/shaders/sixel.comp"
 #endif
 
 
+// --- DUAL BACKEND SHADER PREAMBLES ---
+// Terminal Compute Shader Preamble
 #if defined(SITUATION_USE_VULKAN)
-    // --- VULKAN DEFINITIONS ---
     static const char* terminal_compute_preamble =
     "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#define VULKAN_BACKEND\n"
+    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
+    "// Vulkan: Individual texture bindings (not array)\n"
+    "layout(set = 2, binding = 0) uniform sampler2D u_font_texture;\n"
+    "layout(set = 3, binding = 0) uniform sampler2D u_sixel_texture;\n"
+    "#define GET_SAMPLER_2D(h) u_font_texture\n"  // Ignore handle, always use font texture
+    "#define GET_SIXEL_SAMPLER() u_sixel_texture\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
+    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
+    "} pc;\n";
+#else
+    static const char* terminal_compute_preamble =
+    "#version 460\n"
     "#extension GL_EXT_buffer_reference : require\n"
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_ARB_bindless_texture : require\n"
+    "#extension GL_GOOGLE_include_directive : require\n"
+    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
+    "// OpenGL: Bindless texture handles\n"
+    "#define GET_SAMPLER_2D(h) sampler2D(h)\n"
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
-    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
-    "layout(push_constant) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
     "} pc;\n";
+#endif
 
+// Vector Compute Shader Preamble
+#if defined(SITUATION_USE_VULKAN)
     static const char* vector_compute_preamble =
     "#version 460\n"
     "#extension GL_EXT_buffer_reference : require\n"
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_EXT_nonuniform_qualifier : require\n"
     "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
     "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
     "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
     "} pc;\n";
+#else
+    static const char* vector_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
+    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
+    "} pc;\n";
+#endif
 
+// Sixel Compute Shader Preamble
+#if defined(SITUATION_USE_VULKAN)
     static const char* sixel_compute_preamble =
     "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_EXT_nonuniform_qualifier : require\n"
     "#define VULKAN_BACKEND\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
+    "} pc;\n";
+#else
+    static const char* sixel_compute_preamble =
+    "#version 460\n"
     "#extension GL_EXT_buffer_reference : require\n"
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
@@ -1031,180 +1092,50 @@ typedef struct {
     "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
     "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
     "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
-    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
-    "layout(push_constant) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
+    "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
+    "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
+    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
     "} pc;\n";
+#endif
 
+// Texture Blit Compute Shader Preamble
+#if defined(SITUATION_USE_VULKAN)
     static const char* blit_compute_preamble =
     "#version 460\n"
-    "#define VULKAN_BACKEND\n"
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
-    "#extension GL_ARB_bindless_texture : require\n"
+    "#define VULKAN_BACKEND\n"
     "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n"
+    "// Vulkan: Descriptor array for bindless textures\n"
+    "layout(set = 2, binding = 0) uniform sampler2D u_textures[4096];\n"
+    "#define BINDLESS_SAMPLER2D(handle) u_textures[uint(handle)]\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D dstImage;\n"
     "layout(push_constant) uniform PushConstants {\n"
-    "    ivec2 dest_pos;\n"
-    "    ivec2 src_size;\n"
-    "    uint64_t src_texture_handle;\n"
-    "    ivec4 clip_rect;\n"
+    "    ivec2 dest_pos; ivec2 src_size;\n"
+    "    uint64_t src_texture_handle; ivec4 clip_rect;\n"
     "} pc;\n";
-
 #else
-    // --- OPENGL / DEFAULT DEFINITIONS ---
-    static const char* terminal_compute_preamble =
-    "#version 460\n"
-    "#extension GL_EXT_buffer_reference : require\n"
-    "#extension GL_EXT_scalar_block_layout : require\n"
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
-    "#extension GL_ARB_bindless_texture : require\n"
-    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
-    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
-    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
-    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
-    "layout(scalar, binding = 0) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
-    "} pc;\n";
-
-    static const char* vector_compute_preamble =
-    "#version 460\n"
-    "#extension GL_EXT_buffer_reference : require\n"
-    "#extension GL_EXT_scalar_block_layout : require\n"
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
-    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
-    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
-    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
-    "layout(scalar, binding = 0) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
-    "} pc;\n";
-
-    static const char* sixel_compute_preamble =
-    "#version 460\n"
-    "#extension GL_EXT_buffer_reference : require\n"
-    "#extension GL_EXT_scalar_block_layout : require\n"
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
-    "#extension GL_ARB_bindless_texture : require\n"
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
-    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
-    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
-    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; };\n"
-    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
-    "layout(scalar, binding = 0) uniform PushConstants {\n"
-    "    vec2 screen_size;\n"
-    "    vec2 char_size;\n"
-    "    vec2 grid_size;\n"
-    "    float time;\n"
-    "    uint cursor_index;\n"
-    "    uint cursor_blink_state;\n"
-    "    uint text_blink_state;\n"
-    "    uint sel_start;\n"
-    "    uint sel_end;\n"
-    "    uint sel_active;\n"
-    "    uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr;\n"
-    "    uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle;\n"
-    "    uint64_t sixel_texture_handle;\n"
-    "    uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr;\n"
-    "    uint atlas_cols;\n"
-    "    uint vector_count;\n"
-    "    int sixel_y_offset;\n"
-    "    uint grid_color;\n"
-    "    uint conceal_char_code;\n"
-    "} pc;\n";
-
     static const char* blit_compute_preamble =
     "#version 460\n"
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_ARB_bindless_texture : require\n"
     "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n"
+    "#define BINDLESS_SAMPLER2D(handle) sampler2D(handle)\n"
     "layout(binding = 1, rgba8) uniform image2D dstImage;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
-    "    ivec2 dest_pos;\n"
-    "    ivec2 src_size;\n"
-    "    uint64_t src_texture_handle;\n"
-    "    ivec4 clip_rect;\n"
+    "    ivec2 dest_pos; ivec2 src_size;\n"
+    "    uint64_t src_texture_handle; ivec4 clip_rect;\n"
     "} pc;\n";
 #endif
 
-
-
-// External declarations for users of the library (if not header-only)
-// extern Texture2D font_texture; // Moved to struct
-// extern RGB_KTermColor color_palette[256]; // Moved to struct
-extern KTermColor ansi_colors[16];        // KTerm Color type for the 16 base ANSI colors
-// extern unsigned char font_data[256 * 32]; // Defined in implementation
 
 // =============================================================================
 // VT COMPLIANCE LEVELS
@@ -1527,7 +1458,7 @@ typedef struct {
   #define FONT_DATA_IMPLEMENTATION
 #include "font_data.h"
 #undef FONT_DATA_IMPLEMENTATION
-#include "stb_truetype.h"
+// #include "stb_truetype.h"  // Using stb_truetype from situation.h instead
 #include "kt_parser.h"
 #include "kt_layout.h"
 
@@ -3078,7 +3009,7 @@ static void KTerm_InitKitty(KTerm* term, KTermSession* session) {
                     if (session->kitty.images[k].frames[f].data) {
                         KTerm_Free(session->kitty.images[k].frames[f].data);
                     }
-                    if (session->kitty.images[k].frames[f].texture.id != 0) {
+                    if (session->kitty.images[k].frames[f].texture.slot_index != 0) {
                         KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
                     }
                 }
@@ -3167,12 +3098,12 @@ bool KTerm_Init(KTerm* term) {
         KTERM_MUTEX_INIT(term->sessions[i].lock);
     }
 
-    // Default Font
-    term->char_width = DEFAULT_CHAR_WIDTH;
-    term->char_height = DEFAULT_CHAR_HEIGHT;
-    term->font_data_width = 8;
-    term->font_data_height = 10;
-    term->current_font_data = dec_vt220_cp437_8x10;
+    // Default Font - IBM 8x8 in 10x10 cells
+    term->char_width = 10;   // IBM font cell width
+    term->char_height = 10;  // IBM font cell height
+    term->font_data_width = 8;   // IBM font data width
+    term->font_data_height = 8;  // IBM font data height
+    term->current_font_data = ibm_font_8x8;
     term->current_font_is_16bit = false;
     KTerm_CalculateFontMetrics(term->current_font_data, 256, term->font_data_width, term->font_data_height, 0, false, term->font_metrics);
     term->active_session = 0;
@@ -3234,9 +3165,10 @@ bool KTerm_Init(KTerm* term) {
     if (!term->glyph_map) return false;
 
     // Initialize Dynamic Atlas dimensions before creation
-    term->atlas_width = 1024;
+    // 256 chars * 8 pixels = 2048 width needed for single-row layout
+    term->atlas_width = 2048;
     term->atlas_height = 1024;
-    term->atlas_cols = 128;
+    term->atlas_cols = 256;
 
     // Allocate LRU Cache
     size_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
@@ -4643,6 +4575,15 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
 // =============================================================================
 
 void KTerm_CreateFontTexture(KTerm* term) {
+    KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] START\n");
+    KTERM_DEBUG_PRINT("  - current_font_data: %p\n", (void*)term->current_font_data);
+    KTERM_DEBUG_PRINT("  - font_data_width: %d\n", term->font_data_width);
+    KTERM_DEBUG_PRINT("  - font_data_height: %d\n", term->font_data_height);
+    KTERM_DEBUG_PRINT("  - current_font_is_16bit: %d\n", term->current_font_is_16bit);
+    KTERM_DEBUG_PRINT("  - char_width: %d\n", term->char_width);
+    KTERM_DEBUG_PRINT("  - char_height: %d\n", term->char_height);
+    fflush(stderr);
+    
     if (term->font_texture.generation != 0) {
         KTerm_DestroyTexture(&term->font_texture);
     }
@@ -4652,7 +4593,14 @@ void KTerm_CreateFontTexture(KTerm* term) {
     // Allocate persistent CPU buffer if not present
     if (!term->font_atlas_pixels) {
         term->font_atlas_pixels = KTerm_Calloc(term->atlas_width * term->atlas_height * 4, 1);
-        if (!term->font_atlas_pixels) return;
+        if (!term->font_atlas_pixels) {
+            KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] FATAL: Failed to allocate font_atlas_pixels (%dx%d)\n", term->atlas_width, term->atlas_height);
+            fflush(stderr);
+            return;
+        }
+        KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] Allocated font_atlas_pixels: %p (%dx%d = %d bytes)\n", 
+                (void*)term->font_atlas_pixels, term->atlas_width, term->atlas_height, term->atlas_width * term->atlas_height * 4);
+        fflush(stderr);
         term->next_atlas_index = 256; // Start dynamic allocation after base set
     }
     // Clear buffer for new layout
@@ -4660,53 +4608,63 @@ void KTerm_CreateFontTexture(KTerm* term) {
 
     unsigned char* pixels = term->font_atlas_pixels;
 
-    int char_w = term->char_width;
-    int char_h = term->char_height;
+    // Atlas stores raw glyph data without padding
+    // Use font_data dimensions for atlas layout
+    int data_w = term->font_data_width;
+    int data_h = term->font_data_height;
+    
+    // Cell dimensions for rendering (includes padding)
+    int cell_w = term->char_width;
+    int cell_h = term->char_height;
+    
     if (GET_SESSION(term)->soft_font.active) {
-        char_w = GET_SESSION(term)->soft_font.char_width;
-        char_h = GET_SESSION(term)->soft_font.char_height;
+        data_w = GET_SESSION(term)->soft_font.char_width;
+        data_h = GET_SESSION(term)->soft_font.char_height;
+        cell_w = GET_SESSION(term)->soft_font.char_width;
+        cell_h = GET_SESSION(term)->soft_font.char_height;
     }
-    int dynamic_chars_per_row = term->atlas_width / char_w;
+    
+    int dynamic_chars_per_row = term->atlas_width / data_w;
+    
+    // Update atlas_cols to match actual layout
+    term->atlas_cols = dynamic_chars_per_row;
 
-    // Calculate Centering Offsets
-    int pad_x = (char_w - term->font_data_width) / 2;
-    int pad_y = (char_h - term->font_data_height) / 2;
+    // Calculate Centering Offsets (for rendering data within cell)
+    int pad_x = (cell_w - data_w) / 2;
+    int pad_y = (cell_h - data_h) / 2;
 
     // Unpack the font data (Base 256 chars)
     for (int i = 0; i < num_chars_base; i++) {
         int glyph_col = i % dynamic_chars_per_row;
         int glyph_row = i / dynamic_chars_per_row;
-        int dest_x_start = glyph_col * char_w;
-        int dest_y_start = glyph_row * char_h;
+        int dest_x_start = glyph_col * data_w;
+        int dest_y_start = glyph_row * data_h;
 
-        for (int y = 0; y < char_h; y++) {
+        for (int y = 0; y < data_h; y++) {
             uint16_t row_data = 0;
-            bool in_glyph_y = (y >= pad_y && y < (pad_y + term->font_data_height));
+            bool in_glyph_y = (y >= 0 && y < data_h);
 
             if (in_glyph_y) {
-                int src_y = y - pad_y;
+                int src_y = y;
                 if (GET_SESSION(term)->soft_font.active && GET_SESSION(term)->soft_font.loaded[i]) {
                     row_data = GET_SESSION(term)->soft_font.font_data[i][src_y]; // Soft fonts limited to 8-bit width for now
                 } else if (term->current_font_data) {
                     if (term->current_font_is_16bit) {
-                         row_data = ((const uint16_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                         row_data = ((const uint16_t*)term->current_font_data)[i * data_h + src_y];
                     } else {
-                         row_data = ((const uint8_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                         row_data = ((const uint8_t*)term->current_font_data)[i * data_h + src_y];
                     }
                 }
             }
 
-            for (int x = 0; x < char_w; x++) {
+            for (int x = 0; x < data_w; x++) {
                 int px_idx = ((dest_y_start + y) * term->atlas_width + (dest_x_start + x)) * 4;
                 bool pixel_on = false;
 
-                bool in_glyph_x = (x >= pad_x && x < (pad_x + term->font_data_width));
-
-                if (in_glyph_y && in_glyph_x) {
-                    int src_x = x - pad_x;
-                    // Shift: For 8-bit, 7-src_x. For W-bit, (W - 1 - src_x).
-                    pixel_on = (row_data >> (term->font_data_width - 1 - src_x)) & 1;
-                }
+                // No padding in atlas - store raw glyph data
+                int src_x = x;
+                // Shift: For 8-bit, 7-src_x. For W-bit, (W - 1 - src_x).
+                pixel_on = (row_data >> (data_w - 1 - src_x)) & 1;
 
                 if (pixel_on) {
                     pixels[px_idx + 0] = 255;
@@ -4718,6 +4676,15 @@ void KTerm_CreateFontTexture(KTerm* term) {
         }
     }
 
+    // Debug: Count non-zero pixels after rendering
+    int total_non_zero = 0;
+    for (int i = 0; i < term->atlas_width * term->atlas_height * 4; i++) {
+        if (pixels[i] != 0) total_non_zero++;
+    }
+    KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] After rendering: %d non-zero bytes (out of %d total)\n", 
+            total_non_zero, term->atlas_width * term->atlas_height * 4);
+    fflush(stderr);
+    
     // Create GPU Texture
     KTermImage img = {0};
     img.width = term->atlas_width;
@@ -4726,20 +4693,66 @@ void KTerm_CreateFontTexture(KTerm* term) {
     img.data = pixels;
 
     if (term->font_texture.generation != 0) KTerm_DestroyTexture(&term->font_texture);
-    KTerm_CreateTexture(img, false, &term->font_texture);
+    // Font texture will be sampled in compute shader and has initial data
+    SituationTextureUsageFlags font_flags = SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED | SITUATION_TEXTURE_USAGE_TRANSFER_DST;
+    fprintf(stderr, "[KTerm_CreateFontTexture] Passing flags: 0x%x (COMPUTE_SAMPLED=0x%x, TRANSFER_DST=0x%x)\n",
+            font_flags, SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED, SITUATION_TEXTURE_USAGE_TRANSFER_DST);
+    KTerm_CreateTextureEx(img, false, font_flags, &term->font_texture);
+    
+    // Debug: Verify texture creation and descriptor
+    fprintf(stderr, "[KTerm_CreateFontTexture] Font texture created:\n");
+    fprintf(stderr, "  - slot_index: %u\n", term->font_texture.slot_index);
+    fprintf(stderr, "  - generation: %u\n", term->font_texture.generation);
+    fprintf(stderr, "  - width: %d, height: %d\n", term->atlas_width, term->atlas_height);
+    fprintf(stderr, "  - atlas_cols: %d\n", term->atlas_cols);
+    
+    // Verify descriptor set was created (Vulkan)
+    #if defined(SITUATION_USE_VULKAN)
+    extern _SituationTextureSlot* _SitGetTextureSlot(SituationTexture handle);
+    _SituationTextureSlot* slot = _SitGetTextureSlot(term->font_texture);
+    if (slot) {
+        fprintf(stderr, "  - Vulkan descriptor_set: %p\n", (void*)slot->descriptor_set);
+        fprintf(stderr, "  - Vulkan image: %p\n", (void*)slot->image);
+        fprintf(stderr, "  - Vulkan image_view: %p\n", (void*)slot->image_view);
+        fprintf(stderr, "  - Vulkan sampler: %p\n", (void*)slot->sampler);
+    } else {
+        fprintf(stderr, "  - ERROR: Could not get texture slot!\n");
+    }
+    #endif
+    
+    // Sample first few pixels to verify data
+    unsigned char* px = term->font_atlas_pixels;
+    int non_zero_count = 0;
+    for (int i = 0; i < 1024 && i < term->atlas_width * term->atlas_height * 4; i++) {
+        if (px[i] != 0) non_zero_count++;
+    }
+    fprintf(stderr, "  - First 1024 bytes: %d non-zero pixels\n", non_zero_count);
+    fflush(stderr);
+    
     // Don't unload image data as it points to persistent buffer
 }
 
 void KTerm_InitCompute(KTerm* term) {
+    fprintf(stderr, "[KTerm_InitCompute] Starting...\n"); fflush(stderr);
+    SituationRendererType backend = SituationGetRendererType();
+    fprintf(stderr, "[KTerm_InitCompute] Backend: %s\n", backend == SIT_RENDERER_VULKAN ? "Vulkan" : "OpenGL"); fflush(stderr);
+#if defined(SITUATION_USE_VULKAN)
+    fprintf(stderr, "[KTerm_InitCompute] Compiled with: SITUATION_USE_VULKAN\n"); fflush(stderr);
+#else
+    fprintf(stderr, "[KTerm_InitCompute] Compiled with: SITUATION_USE_OPENGL\n"); fflush(stderr);
+#endif
+    fprintf(stderr, "[KTerm_InitCompute] Preamble length: %zu\n", strlen(terminal_compute_preamble)); fflush(stderr);
+    fprintf(stderr, "[KTerm_InitCompute] Preamble (first 500 chars):\n%.500s\n", terminal_compute_preamble); fflush(stderr);
     if (term->compute_initialized) return;
 
     // 1. Create SSBO
     size_t buffer_size = term->width * term->height * sizeof(GPUCell);
-    KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
+    KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_COMPUTE, &term->terminal_buffer);
     if (term->terminal_buffer.id == 0) {
         KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to create terminal GPU buffer");
     }
 
+    fprintf(stderr, "[KTerm_InitCompute] Buffer created\n"); fflush(stderr);
     // 2. Create Storage Image (Output)
     KTermImage empty_img = {0};
     // Use current dimensions
@@ -4751,15 +4764,17 @@ void KTerm_InitCompute(KTerm* term) {
     }
     // We can init to black if we want, but compute will overwrite.
     KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
-    if (term->output_texture.id == 0) {
+    if (term->output_texture.slot_index == 0) {
         KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to create terminal output texture");
     }
     KTerm_UnloadImage(empty_img);
 
+    fprintf(stderr, "[KTerm_InitCompute] Output texture created\n"); fflush(stderr);
     // 3. Create Compute Pipeline
     {
         unsigned char* shader_body = NULL;
         unsigned int bytes_read = 0;
+        fprintf(stderr, "[KTerm_InitCompute] Loading terminal shader...\n"); fflush(stderr);
         if (KTerm_LoadFileData(KTERM_TERMINAL_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(terminal_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
@@ -4767,8 +4782,15 @@ void KTerm_InitCompute(KTerm* term) {
                 strcpy(src, terminal_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
+                fprintf(stderr, "[KTerm_InitCompute] Shader source: preamble=%zu bytes, body=%u bytes, total=%zu bytes\n", l1, bytes_read, strlen(src)); fflush(stderr);
+                fprintf(stderr, "[KTerm_InitCompute] Compiling terminal shader (300+ lines, may take 30-60 seconds on first run)...\n"); fflush(stderr);
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+                fprintf(stderr, "[KTerm_InitCompute] Terminal shader compiled successfully\n"); fflush(stderr);
                 if (term->compute_pipeline.id == 0) {
+                    char* err_msg = NULL;
+                    SituationGetLastErrorMsg(&err_msg);
+                    fprintf(stderr, "[KTerm] Terminal shader compilation error: %s\n", err_msg ? err_msg : "Unknown");
+                    if (err_msg) free(err_msg);
                     KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to compile/create terminal compute pipeline");
                 }
                 KTerm_Free(src);
@@ -4781,18 +4803,19 @@ void KTerm_InitCompute(KTerm* term) {
         }
     }
 
+    fprintf(stderr, "[KTerm_InitCompute] Terminal pipeline created\n"); fflush(stderr);
     // Create Dummy Sixel Texture (1x1 transparent)
     KTermImage dummy_img = {0};
     if (KTerm_CreateImage(1, 1, 4, &dummy_img) == KTERM_SUCCESS) {
         memset(dummy_img.data, 0, 4); // Clear to transparent
-        KTerm_CreateTextureEx(dummy_img, false, KTERM_TEXTURE_USAGE_SAMPLED, &term->dummy_sixel_texture);
+        KTerm_CreateTextureEx(dummy_img, false, KTERM_TEXTURE_USAGE_COMPUTE_SAMPLED, &term->dummy_sixel_texture);
         KTerm_UnloadImage(dummy_img);
     }
 
     // Create Clear Texture (1x1 opaque black)
     KTermImage clear_img = {0};
     if (KTerm_CreateImage(1, 1, 4, &clear_img) == KTERM_SUCCESS) {
-        clear_img.data[0] = 0; clear_img.data[1] = 0; clear_img.data[2] = 0; clear_img.data[3] = 255;
+        ((unsigned char*)clear_img.data)[0] = 0; ((unsigned char*)clear_img.data)[1] = 0; ((unsigned char*)clear_img.data)[2] = 0; ((unsigned char*)clear_img.data)[3] = 255;
         KTerm_CreateTextureEx(clear_img, false, KTERM_TEXTURE_USAGE_SAMPLED, &term->clear_texture);
         KTerm_UnloadImage(clear_img);
     }
@@ -4812,6 +4835,7 @@ void KTerm_InitCompute(KTerm* term) {
     KTerm_CreateTextureEx(vec_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
     KTerm_UnloadImage(vec_img);
 
+    fprintf(stderr, "[KTerm_InitCompute] Creating vector pipeline...\n"); fflush(stderr);
     // Create Vector Pipeline
     {
         unsigned char* shader_body = NULL;
@@ -4823,7 +4847,9 @@ void KTerm_InitCompute(KTerm* term) {
                 strcpy(src, vector_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
+                fprintf(stderr, "[KTerm_InitCompute] Compiling vector shader...\n"); fflush(stderr);
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
+                fprintf(stderr, "[KTerm_InitCompute] Vector shader compiled\n"); fflush(stderr);
                 KTerm_Free(src);
             }
             KTerm_Free(shader_body);
@@ -4832,6 +4858,7 @@ void KTerm_InitCompute(KTerm* term) {
         }
     }
 
+    fprintf(stderr, "[KTerm_InitCompute] Creating sixel pipeline...\n"); fflush(stderr);
     // 5. Init Sixel Engine
     KTerm_CreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
     KTerm_CreateBuffer(256 * sizeof(uint32_t), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
@@ -4845,7 +4872,9 @@ void KTerm_InitCompute(KTerm* term) {
                 strcpy(src, sixel_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
+                fprintf(stderr, "[KTerm_InitCompute] Compiling sixel shader...\n"); fflush(stderr);
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
+                fprintf(stderr, "[KTerm_InitCompute] Sixel shader compiled\n"); fflush(stderr);
                 KTerm_Free(src);
             }
             KTerm_Free(shader_body);
@@ -4873,6 +4902,7 @@ void KTerm_InitCompute(KTerm* term) {
         }
     }
 
+    fprintf(stderr, "[KTerm_InitCompute] Complete!\n"); fflush(stderr);
     term->compute_initialized = true;
 }
 
@@ -4982,10 +5012,10 @@ static void RenderGlyphToAtlas(KTerm* term, uint32_t codepoint, uint32_t idx) {
 
                     int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
                     unsigned char val = on ? 255 : 0;
-                    term->font_atlas_pixels[px_idx+0] = val;
-                    term->font_atlas_pixels[px_idx+1] = val;
-                    term->font_atlas_pixels[px_idx+2] = val;
-                    term->font_atlas_pixels[px_idx+3] = val;
+                    term->font_atlas_pixels[px_idx+0] = 255;  // White RGB
+                    term->font_atlas_pixels[px_idx+1] = 255;
+                    term->font_atlas_pixels[px_idx+2] = 255;
+                    term->font_atlas_pixels[px_idx+3] = val;  // Alpha controls visibility
                 }
             }
         } else {
@@ -4998,10 +5028,10 @@ static void RenderGlyphToAtlas(KTerm* term, uint32_t codepoint, uint32_t idx) {
 
                     int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
                     unsigned char val = on ? 255 : 0;
-                    term->font_atlas_pixels[px_idx+0] = val;
-                    term->font_atlas_pixels[px_idx+1] = val;
-                    term->font_atlas_pixels[px_idx+2] = val;
-                    term->font_atlas_pixels[px_idx+3] = val;
+                    term->font_atlas_pixels[px_idx+0] = 255;  // White RGB
+                    term->font_atlas_pixels[px_idx+1] = 255;
+                    term->font_atlas_pixels[px_idx+2] = 255;
+                    term->font_atlas_pixels[px_idx+3] = val;  // Alpha controls visibility
                 }
             }
         }
@@ -11801,7 +11831,7 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
                                 kitty->current_memory_usage -= img->frames[f].capacity;
                             KTerm_Free(img->frames[f].data);
                         }
-                        if (img->frames[f].texture.id != 0) KTerm_DestroyTexture(&img->frames[f].texture);
+                        if (img->frames[f].texture.slot_index != 0) KTerm_DestroyTexture(&img->frames[f].texture);
                     }
                     KTerm_Free(img->frames);
                 }
@@ -12040,7 +12070,7 @@ void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
                     if (kitty->images[i].frames) {
                         for (int f = 0; f < kitty->images[i].frame_count; f++) {
                             if (kitty->images[i].frames[f].data) KTerm_Free(kitty->images[i].frames[f].data);
-                            if (kitty->images[i].frames[f].texture.id != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
+                            if (kitty->images[i].frames[f].texture.slot_index != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
                         }
                         KTerm_Free(kitty->images[i].frames);
                     }
@@ -12066,7 +12096,7 @@ void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
                                 }
                                 KTerm_Free(kitty->images[i].frames[f].data);
                             }
-                            if (kitty->images[i].frames[f].texture.id != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
+                            if (kitty->images[i].frames[f].texture.slot_index != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
                         }
                         KTerm_Free(kitty->images[i].frames);
                     }
@@ -13229,6 +13259,12 @@ void KTerm_Update(KTerm* term) {
         while (current_tail != current_head) {
             KTermKeyEvent* event = &session->input.buffer[current_tail];
 
+            // DEBUG: Log what's being sent to response ring
+            fprintf(stderr, "[AutoProcess] Queuing key event: sequence[0]=0x%02X ('%c'), len=%zu\n",
+                    (unsigned char)event->sequence[0],
+                    (event->sequence[0] >= 32 && event->sequence[0] < 127) ? event->sequence[0] : '?',
+                    strlen(event->sequence));
+
             // 1. Send Sequence to Host
             if (event->sequence[0] != '\0') {
                 KTerm_QueueSessionResponse(term, session, event->sequence);
@@ -13507,7 +13543,7 @@ static void KTerm_CleanupSession(KTermSession* session) {
                     if (session->kitty.images[k].frames[f].data) {
                         KTerm_Free(session->kitty.images[k].frames[f].data);
                     }
-                    if (session->kitty.images[k].frames[f].texture.id != 0) {
+                    if (session->kitty.images[k].frames[f].texture.slot_index != 0) {
                         KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
                     }
                 }

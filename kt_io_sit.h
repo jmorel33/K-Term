@@ -64,19 +64,13 @@ static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk
     event.key.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
     event.key.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
 
-    // Filter printable characters if not modified
-    // If it is printable and no modifiers, we inject it directly as a character event (via KEY event with sequence populated)
-    // because we are suppressing OS repeats (CharPressed relies on OS repeats).
+    // Skip printable characters - GetCharPressed handles them with correct case
+    // UNLESS Ctrl or Alt is held (for shortcuts like Ctrl+C)
     if (rk >= 32 && rk <= 126 && !event.key.ctrl && !event.key.alt) {
-        event.key.sequence[0] = (char)rk;
-        event.key.sequence[1] = '\0';
-        KTerm_ProcessEvent(term, session, &event);
         return;
     }
 
     // Special Scrollback Handling (Shift + PageUp/Down)
-    // TODO: This should probably be moved to KTerm_ProcessEvent or generic handler too?
-    // For now, keeping it here as it manipulates session state directly.
     if (event.key.shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
         if (rk == SIT_KEY_PAGE_UP) session->view_offset += DEFAULT_TERM_HEIGHT / 2;
         else session->view_offset -= DEFAULT_TERM_HEIGHT / 2;
@@ -93,54 +87,23 @@ static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk
 
 static void KTermSit_UpdateKeyboard(KTerm* term) {
     // Process Key Events (Queue based to preserve order)
-    // We swallow OS repeats here and implement our own repeater.
     int rk;
     double now = KTerm_TimerGetTime();
     KTermSession* session = GET_SESSION(term);
 
+    // Process virtual key presses (for special keys and tracking)
     while ((rk = SituationGetKeyPressed()) != 0) {
-        // Suppress OS repeats if matching the held key
-        if (session->input.use_software_repeat && rk == session->input.last_key_code) {
-            // It's likely an OS repeat. Ignore it.
-            continue;
-        }
-
-        // New key press
+        // New key press - update tracking
         session->input.last_key_code = rk;
         session->input.last_key_time = now;
         session->input.repeat_state = 1; // WaitDelay
 
-        // Process immediately (First Press)
+        // Process immediately (First Press) - only for special keys
         KTermSit_ProcessSingleKey(term, session, rk);
     }
 
-    // Software Repeater (Poller)
-    if (session->input.use_software_repeat && session->input.last_key_code != -1 && session->auto_repeat_rate != 31) {
-        if (!SituationIsKeyDown(session->input.last_key_code)) {
-            session->input.last_key_code = -1;
-            session->input.repeat_state = 0;
-        } else {
-            // Key is held
-            double interval;
-            if (session->input.repeat_state == 1) { // Waiting for Initial Delay
-                interval = session->auto_repeat_delay / 1000.0;
-            } else { // Repeating
-                // Rate 0=33ms, 30=500ms
-                interval = 0.033 + (session->auto_repeat_rate * (0.500 - 0.033) / 30.0);
-            }
-
-            if ((now - session->input.last_key_time) >= interval) {
-                // Generate Repeat
-                session->input.last_key_time = now;
-                session->input.repeat_state = 2; // Now repeating
-
-                // Process Repeat
-                KTermSit_ProcessSingleKey(term, session, session->input.last_key_code);
-            }
-        }
-    }
-
-    // Process Unicode Characters
+    // Process Unicode Characters - correct case and keyboard layout
+    // This handles ALL printable text input
     int ch_unicode;
     while ((ch_unicode = SituationGetCharPressed()) != 0) {
         KTermEvent event = {0};
@@ -164,9 +127,14 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
             KTermSit_EncodeUTF8(ch_unicode, sequence);
         }
 
+        fprintf(stderr, "[IO] CharPressed: unicode=%d(0x%02X) seq[0]=0x%02X('%c')\n",
+                ch_unicode, ch_unicode, (unsigned char)sequence[0], sequence[0] >= 32 ? sequence[0] : '?');
+
         if (sequence[0] != '\0') {
             strncpy(event.key.sequence, sequence, sizeof(event.key.sequence));
             KTerm_ProcessEvent(term, session, &event);
+        } else {
+            fprintf(stderr, "[IO] WARNING: sequence[0] is NULL for unicode=%d!\n", ch_unicode);
         }
     }
 }
@@ -199,51 +167,48 @@ static int KTermSit_EncodeUTF8(int codepoint, char* buffer) {
 
 static void KTermSit_UpdateMouse(KTerm* term) {
     Vector2 mouse_pos = SituationGetMousePosition();
+    KTermSession* session = GET_SESSION(term);
 
-    // [FIX] Mouse Tracking Precision
+    // Calculate Cell Dimensions
     float cell_w = (float)term->char_width * DEFAULT_WINDOW_SCALE;
     float cell_h = (float)term->char_height * DEFAULT_WINDOW_SCALE;
+    if (cell_w < 1.0f) cell_w = 1.0f;
+    if (cell_h < 1.0f) cell_h = 1.0f;
 
-    // Avoid division by zero
-    if (cell_w < 1.0f) cell_w = 8.0f;
-    if (cell_h < 1.0f) cell_h = 10.0f;
-
-    // Use floorf for precise cell mapping
+    // Map to Grid
     int global_cell_x = (int)floorf(mouse_pos.x / cell_w);
     int global_cell_y = (int)floorf(mouse_pos.y / cell_h);
 
+    // Handle Split Screen targeting
     int target_session_idx = term->active_session;
     int local_cell_y = global_cell_y;
 
     if (term->split_screen_active) {
         if (global_cell_y <= term->split_row) {
             target_session_idx = term->session_top;
-            local_cell_y = global_cell_y;
         } else {
             target_session_idx = term->session_bottom;
             local_cell_y = global_cell_y - (term->split_row + 1);
         }
     }
 
+    // Auto-Focus on Click
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         if (term->active_session != target_session_idx) {
             KTerm_SetActiveSession(term, target_session_idx);
         }
     }
 
-    // Temporarily switch to target session for correct context
-    int saved_session_idx = term->active_session;
-    term->active_session = target_session_idx;
-    KTermSession* session = &term->sessions[target_session_idx];
+    // Switch context to target session
+    KTermSession* target_session = &term->sessions[target_session_idx];
 
-    // Clamp coordinates to valid range
+    // Clamp
     if (global_cell_x < 0) global_cell_x = 0;
     if (global_cell_x >= term->width) global_cell_x = term->width - 1;
-
     if (local_cell_y < 0) local_cell_y = 0;
-    if (local_cell_y >= session->rows) local_cell_y = session->rows - 1;
+    if (local_cell_y >= target_session->rows) local_cell_y = target_session->rows - 1;
 
-    // Build Mouse Event
+    // Prepare Event
     KTermEvent event = {0};
     event.type = KTERM_EVENT_MOUSE;
     event.mouse.x = global_cell_x;
@@ -253,7 +218,7 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     event.mouse.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
     event.mouse.wheel_delta = SituationGetMouseWheelMove();
 
-    // Check buttons
+    // Check Buttons
     bool current_buttons[3] = {
         SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT),
         SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE),
@@ -262,87 +227,58 @@ static void KTermSit_UpdateMouse(KTerm* term) {
 
     bool event_sent = false;
 
-    // Wheel events always fire
+    // 1. Wheel
     if (event.mouse.wheel_delta != 0) {
-        // Note: For wheel, button is irrelevant for core event but used in legacy report gen?
-        // We set button=0 but wheel_delta is set.
-        KTerm_ProcessEvent(term, session, &event);
+        KTerm_ProcessEvent(term, target_session, &event);
         event_sent = true;
     }
 
-    // Button state changes
-    for (int i=0; i<3; i++) {
-        if (current_buttons[i] != session->mouse.buttons[i]) {
-            session->mouse.buttons[i] = current_buttons[i];
+    // 2. Buttons
+    for (int i = 0; i < 3; i++) {
+        if (current_buttons[i] != target_session->mouse.buttons[i]) {
+            target_session->mouse.buttons[i] = current_buttons[i];
             event.mouse.button = i;
             event.mouse.is_release = !current_buttons[i];
-            event.mouse.is_drag = false; // Click/Release
-            // Reset wheel for button event
-            event.mouse.wheel_delta = 0;
-            KTerm_ProcessEvent(term, session, &event);
+            event.mouse.is_drag = false;
+            event.mouse.wheel_delta = 0; // Clear wheel for button event
+            KTerm_ProcessEvent(term, target_session, &event);
             event_sent = true;
         }
     }
 
-    // Drag / Motion
+    // 3. Drag / Motion
     if (!event_sent) {
-        // If button down and moved
-        bool any_button_down = current_buttons[0] || current_buttons[1] || current_buttons[2];
-        if (any_button_down && (global_cell_x != session->mouse.last_x || local_cell_y != session->mouse.last_y)) {
-             event.mouse.is_drag = true;
-             event.mouse.button = current_buttons[0] ? 0 : (current_buttons[1] ? 1 : 2); // Priority to Left
-             event.mouse.wheel_delta = 0;
-             KTerm_ProcessEvent(term, session, &event);
-        }
-        else if (global_cell_x != session->mouse.last_x || local_cell_y != session->mouse.last_y) {
-             // Just motion (no button)
-             // Only if tracking ANY
-             if (session->mouse.mode == MOUSE_TRACKING_ANY_EVENT) {
-                 event.mouse.is_drag = false;
-                 // Button?
-                 KTerm_ProcessEvent(term, session, &event);
-             }
+        bool any_down = current_buttons[0] || current_buttons[1] || current_buttons[2];
+        if (any_down && (global_cell_x != target_session->mouse.last_x || local_cell_y != target_session->mouse.last_y)) {
+            event.mouse.is_drag = true;
+            event.mouse.button = current_buttons[0] ? 0 : (current_buttons[1] ? 1 : 2);
+            event.mouse.wheel_delta = 0;
+            KTerm_ProcessEvent(term, target_session, &event);
+        } else if (target_session->mouse.mode == MOUSE_TRACKING_ANY_EVENT &&
+                   (global_cell_x != target_session->mouse.last_x || local_cell_y != target_session->mouse.last_y)) {
+            event.mouse.is_drag = false;
+            KTerm_ProcessEvent(term, target_session, &event);
         }
     }
 
-    session->mouse.last_x = global_cell_x;
-    session->mouse.last_y = local_cell_y;
+    target_session->mouse.last_x = global_cell_x;
+    target_session->mouse.last_y = local_cell_y;
 
-    // Selection Logic (Local) - Kept here or moved?
-    // Moving it to KTerm_ProcessEvent is cleaner but selection interacts with `Situation` inputs directly here?
-    // Actually selection state is in session.
-    // I can leave selection logic here or move it.
-    // Selection is "Client Side" feature, not VT emulation (usually).
-    // KTerm is a library.
-    // I'll keep selection logic here for now as it uses Situation mouse buttons directly.
-    // But wait, I updated `session->mouse.buttons` above.
-
+    // 4. Selection Logic (Client side)
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        session->selection.active = true;
-        session->selection.dragging = true;
-        session->selection.start_x = global_cell_x;
-        session->selection.start_y = local_cell_y;
-        session->selection.end_x = global_cell_x;
-        session->selection.end_y = local_cell_y;
-    } else if (SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && session->selection.dragging) {
-        session->selection.end_x = global_cell_x;
-        session->selection.end_y = local_cell_y;
-    } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && session->selection.dragging) {
-        session->selection.dragging = false;
+        target_session->selection.active = true;
+        target_session->selection.dragging = true;
+        target_session->selection.start_x = global_cell_x;
+        target_session->selection.start_y = local_cell_y;
+        target_session->selection.end_x = global_cell_x;
+        target_session->selection.end_y = local_cell_y;
+    } else if (SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && target_session->selection.dragging) {
+        target_session->selection.end_x = global_cell_x;
+        target_session->selection.end_y = local_cell_y;
+    } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && target_session->selection.dragging) {
+        target_session->selection.dragging = false;
         KTerm_CopySelectionToClipboard(term);
     }
-
-    // Focus Tracking
-    bool current_focus = SituationHasWindowFocus();
-    if (current_focus != session->mouse.focused) {
-        KTermEvent fe = {0};
-        fe.type = KTERM_EVENT_FOCUS;
-        fe.focused = current_focus;
-        KTerm_ProcessEvent(term, session, &fe);
-    }
-
-    // Restore active session
-    term->active_session = saved_session_idx;
 }
 
 #endif // KTERM_IO_SIT_IMPLEMENTATION
@@ -351,4 +287,4 @@ static void KTermSit_UpdateMouse(KTerm* term) {
 }
 #endif
 
-#endif // KTERM_IO_SIT_H
+#endif // KT_IO_SIT_H
