@@ -32,9 +32,11 @@ typedef Color KTermColor;
 #define KTERM_TEXTURE_USAGE_STORAGE SITUATION_TEXTURE_USAGE_STORAGE
 #define KTERM_TEXTURE_USAGE_TRANSFER_SRC SITUATION_TEXTURE_USAGE_TRANSFER_SRC
 #define KTERM_TEXTURE_USAGE_TRANSFER_DST SITUATION_TEXTURE_USAGE_TRANSFER_DST
+#define KTERM_TEXTURE_USAGE_COMPUTE_SAMPLED SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED
 
 #define KTERM_BUFFER_USAGE_STORAGE_BUFFER SITUATION_BUFFER_USAGE_STORAGE_BUFFER
 #define KTERM_BUFFER_USAGE_TRANSFER_DST SITUATION_BUFFER_USAGE_TRANSFER_DST
+#define KTERM_BUFFER_USAGE_STORAGE_COMPUTE SITUATION_BUFFER_USAGE_STORAGE_COMPUTE
 
 #define KTERM_BARRIER_COMPUTE_SHADER_WRITE SITUATION_BARRIER_COMPUTE_SHADER_WRITE
 #define KTERM_BARRIER_COMPUTE_SHADER_READ SITUATION_BARRIER_COMPUTE_SHADER_READ
@@ -42,7 +44,7 @@ typedef Color KTermColor;
 
 #define KTERM_COMPUTE_LAYOUT_TERMINAL SIT_COMPUTE_LAYOUT_TERMINAL
 #define KTERM_COMPUTE_LAYOUT_VECTOR SIT_COMPUTE_LAYOUT_VECTOR
-#define KTERM_COMPUTE_LAYOUT_SIXEL SIT_COMPUTE_LAYOUT_SIXEL
+#define KTERM_COMPUTE_LAYOUT_SIXEL SIT_COMPUTE_LAYOUT_TERMINAL  // Sixel layout not in current API
 
 #define KTERM_SCALING_INTEGER SITUATION_SCALING_INTEGER
 #define KTERM_BLEND_ALPHA SITUATION_BLEND_ALPHA
@@ -70,8 +72,14 @@ typedef Color KTermColor;
 #define KTerm_GetCommandBuffer SituationGetMainCommandBuffer
 #define KTerm_EndFrame SituationEndFrame
 
-#define KTerm_CmdBindPipeline SituationCmdBindComputePipeline
+// Wrapper for SituationCmdBindComputePipeline (returns void, but K-Term expects KTERM_SUCCESS)
+static inline int KTerm_CmdBindPipeline(SituationCommandBuffer cmd, SituationComputePipeline pipeline) {
+    SituationCmdBindComputePipeline(cmd, pipeline);
+    return KTERM_SUCCESS;
+}
+
 #define KTerm_CmdBindTexture SituationCmdBindComputeTexture
+#define KTerm_CmdBindBuffer SituationCmdBindComputeBuffer
 #define KTerm_CmdSetPushConstant SituationCmdSetPushConstant
 #define KTerm_CmdDispatch SituationCmdDispatch
 #define KTerm_CmdPipelineBarrier SituationCmdPipelineBarrier

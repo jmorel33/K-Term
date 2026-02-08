@@ -1,6 +1,10 @@
 #ifndef FONT_DATA_H
 #define FONT_DATA_H
 
+#include <stdint.h>
+#include <stddef.h>
+
+// Raw data arrays (keep exactly as you have—unchanged)
 extern const uint8_t dec_vt220_8x10[256 * 10];
 extern const uint8_t ibm_font_8x8[256 * 8];
 extern const uint8_t vga_perfect_8x8_font[256 * 8];
@@ -19,6 +23,23 @@ extern const uint8_t topaz_font_8x8[256 * 8];
 extern const uint8_t preppie_font_8x8[256 * 8];
 extern const uint8_t neogeo_bios_8x8[256 * 8];
 extern const uint16_t vcr_osd_font_12x14[128 * 14];
+
+// Metadata struct — self-describing fonts
+typedef struct {
+    const char* name;          // Human-readable name
+    int width;                 // Pixel width per glyph
+    int height;                // Pixel height per glyph
+    int left_kerning;          // Pixels to trim/offset left (for tighter fit or padding)
+    int right_kerning;         // Pixels to trim/offset right
+    int char_start;            // First char index (usually 0, 0-127 for vcr)
+    int char_count;            // Number of glyphs
+    size_t row_stride_bytes;   // Bytes per row (1 for 8-wide packed uint8_t, 2 for vcr uint16_t)
+    const void* data;          // Pointer to raw bitmap data
+} KTermFontInfo;
+
+// Builtin font table — easy to loop/search/load
+extern const KTermFontInfo kterm_builtin_fonts[];
+extern const int kterm_builtin_font_count;
 
 #endif // FONT_DATA_H
 
@@ -6680,14 +6701,29 @@ const uint16_t vcr_osd_font_12x14[128 * 14] = {
     0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, // 0x7F DEL
 };
 
+// Builtin font table
+const KTermFontInfo kterm_builtin_fonts[] = {
+    { "DEC VT220 8x10",        8, 10, 1, 1, 0, 256, 1, dec_vt220_cp437_8x10 },
+    { "IBM 8x8",               8,  8, 0, 0, 0, 256, 1, ibm_font_8x8 },
+    { "VGA Perfect 8x8",       8,  8, 0, 0, 0, 256, 1, vga_perfect_8x8_font },
+    { "Ultimate Oldschool 8x16", 8, 16, 0, 0, 0, 256, 1, ultimate_oldschool_pc_font_8x16 },
+    { "CP437 8x16",            8, 16, 0, 0, 0, 256, 1, cp437_font__8x16 },
+    { "NEC APC3 8x16",         8, 16, 0, 0, 0, 256, 1, nec_apc3_font_8x16 },
+    { "Toshiba SAT 8x16",      8, 16, 0, 0, 0, 256, 1, toshiba_sat_8x16 },
+    { "Trident 8x16",          8, 16, 0, 0, 0, 256, 1, trident_8x16 },
+    { "Compaq Portable3 8x16", 8, 16, 0, 0, 0, 256, 1, compaq_portable3_8x16 },
+    { "Olympiad 8x16",         8, 16, 0, 0, 0, 256, 1, olympiad_font_8x16 },
+    { "MC6847 8x8",            8,  8, 0, 0, 0, 256, 1, MC6847_font_8x8 },
+    { "ATASCII 8x8",           8,  8, 0, 0, 0, 256, 1, atascii_font_8x8 },
+    { "PETSCII Unshifted 8x8", 8,  8, 0, 0, 0, 256, 1, petscii_unshifted_font_8x8 },
+    { "PETSCII Shifted 8x8",   8,  8, 0, 0, 0, 256, 1, petscii_shifted_font_8x8 },
+    { "Topaz 8x8",             8,  8, 0, 0, 0, 256, 1, topaz_font_8x8 },
+    { "Preppie 8x8",           8,  8, 0, 0, 0, 256, 1, preppie_font_8x8 },
+    { "NeoGeo BIOS 8x8",       8,  8, 0, 0, 0, 256, 1, neogeo_bios_8x8 },
+    { "VCR OSD 12x14",        12, 14, 0, 0, 0, 128, 2, vcr_osd_font_12x14 },
+};
+
+const int kterm_builtin_font_count = sizeof(kterm_builtin_fonts) / sizeof(kterm_builtin_fonts[0]);
+
 #endif // FONT_DATA_IMPLEMENTATION_ONCE
 #endif // FONT_DATA_IMPLEMENTATION
-
-
-
-
-
-
-
-
-

@@ -48,7 +48,14 @@ typedef struct {
     float noise_intensity;
     float visual_bell_intensity;
     uint32_t flags; // 1=CRT, 2=Scanline, 4=Glow, 8=Noise
-    float padding[2];
+    
+    // Font dimensions
+    uint32_t font_cell_width;   // Full cell size (e.g., 10 for IBM font)
+    uint32_t font_cell_height;  // Full cell size (e.g., 10 for IBM font)
+    uint32_t font_data_width;   // Actual glyph data size (e.g., 8 for IBM font)
+    uint32_t font_data_height;  // Actual glyph data size (e.g., 8 for IBM font)
+    uint32_t atlas_cols;        // Number of columns in font atlas (e.g., 256 for IBM font)
+    uint32_t padding_reserved;  // Reserved for alignment
 } GPUShaderConfig;
 
 typedef struct {
@@ -208,7 +215,7 @@ void KTermCompositor_Cleanup(KTermCompositor* comp) {
         if (comp->render_buffers[i].kitty_ops) KTerm_Free(comp->render_buffers[i].kitty_ops);
 
         for (int g = 0; g < comp->render_buffers[i].garbage_count; g++) {
-            if (comp->render_buffers[i].garbage[g].id != 0) {
+            if (comp->render_buffers[i].garbage[g].slot_index != 0) {
                 KTerm_DestroyTexture(&comp->render_buffers[i].garbage[g]);
             }
         }
@@ -494,13 +501,13 @@ static bool KTerm_RecursiveUpdateSSBO(KTerm* term, KTermPane* pane, KTermRenderB
 
 void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
     KTermSession* session = GET_SESSION(term);
-    if (!term->terminal_buffer.id) return;
+    if (term->terminal_buffer.id == 0) return;
 
     KTermRenderBuffer* rb = &comp->render_buffers[comp->rb_back];
 
     // Cleanup leftover garbage
     for (int g = 0; g < rb->garbage_count; g++) {
-        if (rb->garbage[g].id != 0) KTerm_DestroyTexture(&rb->garbage[g]);
+        if (rb->garbage[g].slot_index != 0) KTerm_DestroyTexture(&rb->garbage[g]);
     }
     rb->garbage_count = 0;
 
@@ -518,10 +525,11 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
             img.data = term->font_atlas_pixels;
 
             KTermTexture new_texture = {0};
-            KTerm_CreateTexture(img, false, &new_texture);
+            // Font texture will be sampled in compute shader and has initial data
+            KTerm_CreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &new_texture);
 
-            if (new_texture.id != 0) {
-                if (term->font_texture.generation != 0) {
+            if (new_texture.slot_index != 0) {
+                if (term->font_texture.slot_index != 0) {
                     if (rb->garbage_count < 8) rb->garbage[rb->garbage_count++] = term->font_texture;
                     else KTerm_DestroyTexture(&term->font_texture);
                 }
@@ -538,7 +546,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
         if (KTerm_CreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &clear_img) == KTERM_SUCCESS) {
             memset(clear_img.data, 0, DEFAULT_WINDOW_WIDTH * DEFAULT_WINDOW_HEIGHT * 4);
 
-            if (term->vector_layer_texture.generation != 0) {
+            if (term->vector_layer_texture.slot_index != 0) {
                 if (rb->garbage_count < 8) rb->garbage[rb->garbage_count++] = term->vector_layer_texture;
                 else KTerm_DestroyTexture(&term->vector_layer_texture);
             }
@@ -585,7 +593,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
     int sixel_y_shift = 0;
     if (sixel_session->sixel.active && sixel_session->sixel.strip_count > 0) {
         bool recreate = false;
-        if (term->sixel_texture.id == 0 || term->sixel_texture.width != sixel_session->sixel.width || term->sixel_texture.height != sixel_session->sixel.height) {
+        if (term->sixel_texture.slot_index == 0 || term->sixel_texture.width != sixel_session->sixel.width || term->sixel_texture.height != sixel_session->sixel.height) {
             recreate = true;
         }
         if (sixel_session->sixel.dirty || recreate) {
@@ -593,11 +601,11 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
              KTerm_CreateImage(sixel_session->sixel.width, sixel_session->sixel.height, 4, &img);
              if (img.data) memset(img.data, 0, img.width * img.height * 4);
              KTermTexture new_tex = {0};
-             KTerm_CreateTextureEx(img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &new_tex);
+             KTerm_CreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &new_tex);
              KTerm_UnloadImage(img);
 
-             if (new_tex.id != 0) {
-                 if (term->sixel_texture.generation != 0) {
+             if (new_tex.slot_index != 0) {
+                 if (term->sixel_texture.slot_index != 0) {
                      if (rb->garbage_count < 8) rb->garbage[rb->garbage_count++] = term->sixel_texture;
                      else KTerm_DestroyTexture(&term->sixel_texture);
                  }
@@ -642,6 +650,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
 
     pc->terminal_buffer_addr = KTerm_GetBufferAddress(term->terminal_buffer);
     pc->font_texture_handle = KTerm_GetTextureHandle(term->font_texture);
+    
     if (session->sixel.active && term->sixel_texture.generation != 0) {
         pc->sixel_texture_handle = KTerm_GetTextureHandle(term->sixel_texture);
     } else {
@@ -661,6 +670,20 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
     pc->char_size = (KTermVector2){{(float)char_w, (float)char_h}};
     pc->grid_size = (KTermVector2){{(float)term->width, (float)term->height}};
     pc->time = (float)KTerm_TimerGetTime();
+    
+    // Debug: Verify push constants (AFTER all values are set)
+    static int debug_frame_count = 0;
+    if (debug_frame_count < 5) {  // Only first 5 frames
+        fprintf(stderr, "[KTerm_CmdPresent] Push Constants (frame %d):\n", debug_frame_count);
+        fprintf(stderr, "  - terminal_buffer_addr: 0x%llx\n", (unsigned long long)pc->terminal_buffer_addr);
+        fprintf(stderr, "  - font_texture_handle: %u\n", pc->font_texture_handle);
+        fprintf(stderr, "  - atlas_cols: %d\n", pc->atlas_cols);
+        fprintf(stderr, "  - grid_size: %.0fx%.0f\n", pc->grid_size.x, pc->grid_size.y);
+        fprintf(stderr, "  - char_size: %.0fx%.0f\n", pc->char_size.x, pc->char_size.y);
+        fprintf(stderr, "  - screen_size: %.0fx%.0f\n", pc->screen_size.x, pc->screen_size.y);
+        fflush(stderr);
+        debug_frame_count++;
+    }
 
     uint32_t cursor_idx = 0xFFFFFFFF;
     KTermSession* focused_session = NULL;
@@ -708,6 +731,13 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
         config.glow_intensity = term->visual_effects.glow_intensity;
         config.noise_intensity = term->visual_effects.noise_intensity;
         config.flags = term->visual_effects.flags;
+
+        // Font dimensions
+        config.font_cell_width = term->char_width;
+        config.font_cell_height = term->char_height;
+        config.font_data_width = term->font_data_width;
+        config.font_data_height = term->font_data_height;
+        config.atlas_cols = term->atlas_cols;
 
         if (GET_SESSION(term)->visual_bell_timer > 0.0) {
             float intensity = (float)(GET_SESSION(term)->visual_bell_timer / 0.2);
@@ -771,7 +801,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
             if (img->current_frame >= img->frame_count) img->current_frame = 0;
             KittyFrame* frame = &img->frames[img->current_frame];
 
-            if (frame->texture.id == 0 && frame->data) {
+            if (frame->texture.slot_index == 0 && frame->data) {
                 KTermImage kimg = {0};
                 kimg.width = frame->width;
                 kimg.height = frame->height;
@@ -780,7 +810,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
                 KTerm_CreateTextureEx(kimg, false, KTERM_TEXTURE_USAGE_SAMPLED, &frame->texture);
             }
 
-            if (frame->texture.id == 0) continue;
+            if (frame->texture.slot_index == 0) continue;
 
             if (rb->kitty_count >= rb->kitty_capacity) {
                 rb->kitty_capacity = (rb->kitty_capacity == 0) ? 64 : rb->kitty_capacity * 2;
@@ -823,12 +853,21 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
     KTermRenderBuffer* rb = &comp->render_buffers[comp->rb_front];
 
     for (int g = 0; g < rb->garbage_count; g++) {
-        if (rb->garbage[g].id != 0) KTerm_DestroyTexture(&rb->garbage[g]);
+        if (rb->garbage[g].slot_index != 0) KTerm_DestroyTexture(&rb->garbage[g]);
     }
     rb->garbage_count = 0;
 
-    if (KTerm_AcquireFrameCommandBuffer()) {
+    bool acquired = KTerm_AcquireFrameCommandBuffer();
+    if (!acquired) {
+        // Get the error from Situation
+        char* err_msg = NULL;
+        SituationGetLastErrorMsg(&err_msg);
+        fprintf(stderr, "[KTerm] AcquireFrameCommandBuffer FAILED: %s\n", err_msg ? err_msg : "Unknown error"); 
+        fflush(stderr);
+        if (err_msg) free(err_msg);
+    } else {
         KTermCommandBuffer cmd = KTerm_GetCommandBuffer();
+        fprintf(stderr, "[KTerm] AcquireFrameCommandBuffer SUCCESS, cmd=%p\n", cmd); fflush(stderr);
 
         // 1. Sixel Graphics
         if (rb->sixel_active && rb->sixel_count > 0) {
@@ -852,7 +891,7 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
         }
 
         // 2. Clear Screen
-        if (term->texture_blit_pipeline.id != 0 && term->clear_texture.id != 0) {
+        if (term->texture_blit_pipeline.id != 0 && term->clear_texture.slot_index != 0) {
             if (KTerm_CmdBindPipeline(cmd, term->texture_blit_pipeline) == KTERM_SUCCESS &&
                 KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
 
@@ -892,14 +931,73 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
 
         // 4. Terminal Text
         size_t required_size = rb->cell_count * sizeof(GPUCell);
+        fprintf(stderr, "[KTerm] Rendering terminal: %zu cells\n", rb->cell_count); fflush(stderr);
         KTerm_UpdateBuffer(term->terminal_buffer, 0, required_size, rb->cells);
+        
+        // Debug: Check terminal buffer content (first frame only)
+        static bool buffer_checked = false;
+        if (!buffer_checked) {
+            GPUCell* cells = rb->cells;
+            if (cells) {
+                fprintf(stderr, "[KTerm_CmdPresent] Terminal buffer sample (first 10 cells):\n");
+                for (int i = 0; i < 10 && i < term->width * term->height; i++) {
+                    fprintf(stderr, "  Cell[%d]: char=0x%04x fg=0x%08x bg=0x%08x flags=0x%08x\n",
+                            i, cells[i].char_code, cells[i].fg_color, cells[i].bg_color, cells[i].flags);
+                }
+                fflush(stderr);
+            } else {
+                fprintf(stderr, "[KTerm_CmdPresent] WARNING: rb->cells is NULL!\n");
+                fflush(stderr);
+            }
+            buffer_checked = true;
+        }
 
         if (KTerm_CmdBindPipeline(cmd, term->compute_pipeline) == KTERM_SUCCESS &&
             KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
+            
+            // CRITICAL: Bind terminal buffer to set 0 (required by pipeline layout even though shader uses BDA)
+            // The SIT_COMPUTE_LAYOUT_TERMINAL layout expects set 0 to be bound
+            KTerm_CmdBindBuffer(cmd, 0, term->terminal_buffer);
+            
+            // Bind font texture to set 2
+            KTerm_CmdBindTexture(cmd, 2, term->font_texture);
+            
+            // Bind sixel texture to set 3
+            KTermSession* active_session = GET_SESSION(term);
+            if (active_session->sixel.active && term->sixel_texture.generation != 0) {
+                KTerm_CmdBindTexture(cmd, 3, term->sixel_texture);
+            } else {
+                KTerm_CmdBindTexture(cmd, 3, term->dummy_sixel_texture);
+            }
+            
+            // Debug: Verify bindings (first frame only)
+            static bool bind_checked = false;
+            if (!bind_checked) {
+                fprintf(stderr, "[KTerm] Pipeline and all resources bound successfully\n");
+                fprintf(stderr, "[KTerm] terminal_buffer.id=%u\n", term->terminal_buffer.id);
+                fprintf(stderr, "[KTerm] output_texture.slot_index=%u, generation=%u\n", 
+                        term->output_texture.slot_index, term->output_texture.generation);
+                fprintf(stderr, "[KTerm] font_texture.slot_index=%u, generation=%u\n",
+                        term->font_texture.slot_index, term->font_texture.generation);
+                fflush(stderr);
+                bind_checked = true;
+            }
 
             KTerm_CmdSetPushConstant(cmd, 0, &rb->constants, sizeof(KTermPushConstants));
-            KTerm_CmdDispatch(cmd, term->width, term->height, 1);
+            
+            // Calculate workgroups based on screen size and workgroup size (8x16)
+            uint32_t screen_w = (uint32_t)rb->constants.screen_size.x;
+            uint32_t screen_h = (uint32_t)rb->constants.screen_size.y;
+            uint32_t groups_x = (screen_w + 7) / 8;
+            uint32_t groups_y = (screen_h + 15) / 16;
+            
+            KTerm_CmdDispatch(cmd, groups_x, groups_y, 1);
+            fprintf(stderr, "[KTerm] Dispatched terminal compute: %dx%d workgroups (screen %dx%d pixels)\n", 
+                    groups_x, groups_y, screen_w, screen_h); 
+            fflush(stderr);
             KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
+        } else {
+            fprintf(stderr, "[KTerm] ERROR: Failed to bind pipeline or texture!\n"); fflush(stderr);
         }
 
         // 5. Kitty Graphics (Foreground)
@@ -939,7 +1037,10 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
         }
 
         KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_TRANSFER_READ);
-        if (KTerm_CmdPresent(cmd, term->output_texture) != KTERM_SUCCESS) {
+        fprintf(stderr, "[KTerm] About to present output_texture (slot_index=%u)\n", term->output_texture.slot_index); fflush(stderr);
+        SituationError present_result = KTerm_CmdPresent(cmd, term->output_texture);
+        fprintf(stderr, "[KTerm] Present result: %d (%s)\n", present_result, present_result == SITUATION_SUCCESS ? "SUCCESS" : "FAILED"); fflush(stderr);
+        if (present_result != SITUATION_SUCCESS) {
              if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Present failed");
         }
     }
