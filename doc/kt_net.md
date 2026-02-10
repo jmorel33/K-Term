@@ -6,9 +6,11 @@ The `kt_net.h` module provides a lightweight, single-header networking abstracti
 
 - **Client Mode:** Connect to remote TCP servers or SSH hosts.
 - **Non-Blocking Architecture:** Connection attempts and I/O are non-blocking to prevent UI freezes.
+- **Event-Driven:** Callbacks for connection status (`on_connect`, `on_disconnect`) and data reception.
+- **Security Hooks:** Interface for plugging in TLS/SSL (e.g., OpenSSL, mbedTLS) or custom encryption.
+- **Protocol Framing:** Optional binary framing protocol for multiplexing resizing, gateway commands, and data over a single stream.
 - **Gateway Integration:** Control networking via DCS Gateway commands (e.g., `DCS GATE ... connect ... ST`).
-- **Secure Shell (SSH):** Optional support for SSHv2 via `libssh` (requires `KTERM_USE_LIBSSH`).
-- **Clean Architecture:** Decoupled from the core terminal logic; plugs in via the `output_sink` interface.
+- **Session Multiplexing:** Route network traffic to specific local sessions via `ATTACH` command.
 
 ## Usage
 
@@ -21,35 +23,44 @@ Include the header and define the implementation in **one** source file:
 #include "kt_net.h"
 ```
 
-Initialize the networking subsystem after creating your KTerm instance:
+Initialize the networking subsystem (automatically called by `KTerm_Init`, but configuration can be added):
 
 ```c
 KTerm* term = KTerm_Create(config);
-KTerm_Net_Init(term); // Sets up output sink and networking context
+// KTerm_Net_Init(term) is called internally
 ```
 
-### 2. The Event Loop
+### 2. Async Callbacks
 
-To handle network I/O, you must call `KTerm_Net_Process` periodically in your main loop (e.g., every frame or tick). This function handles:
-- Connection state machine (Resolving -> Connecting -> Auth -> Connected).
-- Non-blocking socket I/O (sending buffered data, reading incoming data).
-- Reading from the network and injecting into KTerm via `KTerm_WriteCharToSession`.
+To handle network events asynchronously:
+
+```c
+void my_connect(KTerm* term, KTermSession* session) {
+    printf("Connected!\n");
+}
+
+KTermNetCallbacks callbacks = {
+    .on_connect = my_connect,
+    .on_disconnect = my_disconnect,
+    .on_data = my_data,
+    .on_error = my_error
+};
+
+KTerm_Net_SetCallbacks(term, session, callbacks);
+```
+
+### 3. The Event Loop
+
+To handle network I/O, you must call `KTerm_Update` (which calls `KTerm_Net_Process`) periodically.
 
 ```c
 while (running) {
-    // 1. Process Network I/O
-    KTerm_Net_Process(term);
-
-    // 2. Process Terminal Logic
+    // KTerm_Update processes Network I/O, timers, and logic
     KTerm_Update(term);
-
-    // 3. Render...
 }
 ```
 
-### 3. Connecting (Client Mode)
-
-You can initiate a connection programmatically or via Gateway commands.
+### 4. Connecting (Client Mode)
 
 **Programmatic:**
 ```c
@@ -57,13 +68,12 @@ KTermSession* session = &term->sessions[0];
 KTerm_Net_Connect(term, session, "192.168.1.50", 23, "user", "password");
 ```
 
-**Gateway Command (from inside the terminal or script):**
+**Gateway Command:**
 ```
-DCS GATE;KTERM;1;EXT;ssh;connect;192.168.1.50:23 ST
+DCS GATE;KTERM;1;EXT;net;connect;192.168.1.50:23 ST
 ```
-*(Note: The `ssh` extension name is used for both raw TCP and SSH connections currently, pending rename to `net`)*
 
-### 4. SSH Support
+### 5. SSH Support
 
 To enable SSH, define `KTERM_USE_LIBSSH` before including `kt_net.h` and link against `libssh`.
 
@@ -73,23 +83,44 @@ To enable SSH, define `KTERM_USE_LIBSSH` before including `kt_net.h` and link ag
 #include "kt_net.h"
 ```
 
-When enabled, `KTerm_Net_Connect` attempts an SSH handshake. If disabled, it falls back to raw TCP sockets.
+### 6. Security Hooks (TLS/SSL)
 
-## Architecture
+You can provide custom read/write/handshake functions to integrate TLS libraries like OpenSSL without modifying KTerm core.
 
-### Non-Blocking Connection
-The module uses non-blocking sockets. When `KTerm_Net_Connect` is called:
-1.  **RESOLVING:** Hostname resolution (currently blocking, future work to async).
-2.  **CONNECTING:** Socket is set to non-blocking mode. `connect()` is called. If it returns `EINPROGRESS`/`EWOULDBLOCK`, the state machine waits in this state, polling the socket for writeability via `select()`.
-3.  **CONNECTED:** Once writable, the connection is established.
+```c
+KTermNetSecurity sec = {
+    .ctx = my_ssl_context,
+    .handshake = my_ssl_handshake, // Returns KTERM_SEC_OK, AGAIN, or ERROR
+    .read = my_ssl_read,
+    .write = my_ssl_write,
+    .close = my_ssl_close
+};
+KTerm_Net_SetSecurity(term, session, sec);
+```
 
-### Output Routing
-`KTerm_Net_Init` registers `KTerm_Net_Sink` as the terminal's output sink.
-- **If Connected:** Terminal output is buffered in `tx_buffer` and sent to the socket in `KTerm_Net_Process`.
-- **If Disconnected:** Terminal output falls back to `term->response_callback` (local echo or host application handling).
+### 7. Protocol Framing
 
-## Server Mode (Hosting)
+By default, `kt_net` uses `KTERM_NET_PROTO_RAW` (raw byte stream). You can switch to `KTERM_NET_PROTO_FRAMED` to support multiplexed events.
 
-`kt_net.h` is primarily a client implementation. To implement a server (accepting connections and spawning KTerm instances), you should write your own `accept()` loop and pipe data into KTerm.
+```c
+KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_FRAMED);
+```
 
-See `example/net_server.c` for a reference implementation of a non-blocking TCP server.
+**Packet Format:** `[TYPE:1][LEN:4 (Big Endian)][PAYLOAD:LEN]`
+
+| Type | Name | Payload |
+|---|---|---|
+| `0x01` | DATA | Raw terminal I/O bytes |
+| `0x02` | RESIZE | `[Width:4][Height:4]` (BE) |
+| `0x03` | GATEWAY | Gateway Command String |
+| `0x04` | ATTACH | `[SessionID:1]` (Routes future traffic to session N) |
+
+## Remote Session Control
+
+You can control which local session processes network data using the Gateway:
+
+```
+DCS GATE;KTERM;1;ATTACH;SESSION=2 ST
+```
+
+This directs all subsequent data received on that connection to Session 2.

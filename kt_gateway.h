@@ -626,8 +626,10 @@ static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, cons
 static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
 static const GatewayCommand gateway_commands[] = {
+    { "ATTACH", KTerm_Gateway_HandleAttach },
     { "EXT", KTerm_Gateway_HandleExt },
     { "GET", KTerm_Gateway_HandleGet },
     { "INIT", KTerm_Gateway_HandleInit },
@@ -644,6 +646,23 @@ static int GatewayCommandCmp(const void* key, const void* elem) {
 }
 
 // Handlers
+
+static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    char subcmd[64];
+    if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
+
+    if (strcmp(subcmd, "SESSION") == 0) {
+        if (Stream_Expect(scanner, '=')) {
+            int s_idx;
+            if (Stream_ReadInt(scanner, &s_idx)) {
+                KTerm_Net_SetTargetSession(term, session, s_idx);
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;ATTACH;OK;SESSION=%d\x1B\\", id, s_idx);
+                KTerm_QueueResponse(term, response);
+            }
+        }
+    }
+}
 
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
     KTermSession* target_session = KTerm_GetTargetSession(term, session);
@@ -1493,6 +1512,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
     }
 }
 
+static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    KTerm_Ext_SSH(term, session, args, respond);
+}
+
 static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
 
@@ -2172,6 +2195,7 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "rawdump", KTerm_Ext_RawDump);
     KTerm_RegisterGatewayExtension(term, "grid", KTerm_Ext_Grid);
     KTerm_RegisterGatewayExtension(term, "ssh", KTerm_Ext_SSH);
+    KTerm_RegisterGatewayExtension(term, "net", KTerm_Ext_Net);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
