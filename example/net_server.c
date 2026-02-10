@@ -1,171 +1,165 @@
 #define KTERM_IMPLEMENTATION
+// Define KTERM_TESTING to use mock_situation.h for headless compilation
+#define KTERM_TESTING
+
 #include "../kterm.h"
+// kt_net.h is included and implemented by kterm.h
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/select.h>
+#include <termios.h>
 
-#define SERVER_PORT 9090
-#define BUFFER_SIZE 1024
+// Simple Telnet Server Example
 
-// Global server state
-int server_fd = -1;
-int client_fd = -1;
+static bool server_running = true;
 
-// Output callback: Send terminal output to the connected client
-void server_output_callback(KTerm* term, const char* data, int length) {
-    if (client_fd >= 0) {
-        // In a real server, you'd buffer this to handle partial writes
-        // For this example, we just write and ignore errors/blocking (bad practice for prod)
-        // But since we are in non-blocking mode, we should handle EAGAIN
-        ssize_t sent = send(client_fd, data, length, 0);
-        if (sent < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                perror("send failed");
-                close(client_fd);
-                client_fd = -1;
+// Custom Telnet Command Handler
+bool my_telnet_command(KTerm* term, KTermSession* session, unsigned char command, unsigned char option) {
+    printf("[Server] Telnet Command: %d %d\n", command, option);
+
+    // Accept Echo (client will echo locally or we echo back? Usually server echoes)
+    if (command == KTERM_TELNET_DO && option == KTERM_TELNET_ECHO) {
+        KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_WILL, KTERM_TELNET_ECHO);
+        return true;
+    }
+    // Accept Suppress Go Ahead (SGA)
+    if (command == KTERM_TELNET_DO && option == KTERM_TELNET_SGA) {
+        KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_WILL, KTERM_TELNET_SGA);
+        return true;
+    }
+    // Accept NAWS (Negotiate About Window Size)
+    if (command == KTERM_TELNET_WILL && option == KTERM_TELNET_NAWS) {
+        KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_DO, KTERM_TELNET_NAWS);
+        return true;
+    }
+
+    return false; // Let default logic handle or reject
+}
+
+// Custom Auth Handler
+bool my_auth(KTerm* term, KTermSession* session, const char* user, const char* pass) {
+    printf("[Server] Auth Request: %s / %s\n", user, pass);
+    if (strcmp(user, "admin") == 0 && strcmp(pass, "password") == 0) return true;
+    return false;
+}
+
+// Shell State
+typedef struct {
+    char cmd_buf[256];
+    int cmd_len;
+    bool last_was_cr;
+} ShellState;
+
+ShellState shells[4];
+
+void process_shell(KTerm* term, int session_idx, const char* data, size_t len) {
+    ShellState* sh = &shells[session_idx];
+    for(size_t i=0; i<len; i++) {
+        char c = data[i];
+
+        // Handle CR/LF
+        if (c == '\r') {
+            sh->last_was_cr = true;
+        } else if (c == '\n') {
+            if (sh->last_was_cr) {
+                sh->last_was_cr = false;
+                continue; // Ignore \n after \r
+            }
+            sh->last_was_cr = false;
+        } else {
+            sh->last_was_cr = false;
+        }
+
+        if (c == '\r' || c == '\n') {
+            sh->cmd_buf[sh->cmd_len] = '\0';
+            KTerm_WriteString(term, "\r\n"); // Echo newline
+
+            if (sh->cmd_len > 0) {
+                if (strcmp(sh->cmd_buf, "exit") == 0) {
+                    KTerm_WriteString(term, "Goodbye.\r\n");
+                    KTerm_Net_Disconnect(term, &term->sessions[session_idx]);
+                } else if (strcmp(sh->cmd_buf, "help") == 0) {
+                    KTerm_WriteString(term, "Commands: help, status, resize <w> <h>, clear, exit\r\n");
+                } else if (strcmp(sh->cmd_buf, "status") == 0) {
+                    KTerm_WriteString(term, "System OK. K-Term v2.5.11 Running.\r\n");
+                } else if (strcmp(sh->cmd_buf, "clear") == 0) {
+                    KTerm_WriteString(term, "\033[2J\033[H");
+                } else if (strncmp(sh->cmd_buf, "resize ", 7) == 0) {
+                    int w, h;
+                    if (sscanf(sh->cmd_buf + 7, "%d %d", &w, &h) == 2) {
+                        KTerm_Resize(term, w, h);
+                        char msg[64]; snprintf(msg, sizeof(msg), "Resized to %dx%d\r\n", w, h);
+                        KTerm_WriteString(term, msg);
+                    } else {
+                        KTerm_WriteString(term, "Usage: resize <w> <h>\r\n");
+                    }
+                } else {
+                    KTerm_WriteString(term, "Unknown command.\r\n");
+                }
+            }
+
+            KTerm_WriteString(term, "KTerm> ");
+            sh->cmd_len = 0;
+        } else if (c == 0x7F || c == 0x08) { // Backspace
+            if (sh->cmd_len > 0) {
+                sh->cmd_len--;
+                KTerm_WriteString(term, "\x08 \x08");
+            }
+        } else if (c >= 32 && c <= 126) {
+            if (sh->cmd_len < 255) {
+                sh->cmd_buf[sh->cmd_len++] = c;
+                char echo[2] = {c, 0};
+                KTerm_WriteString(term, echo);
             }
         }
     }
 }
 
-void set_nonblocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+void my_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
+    int idx = (int)(session - term->sessions);
+    process_shell(term, idx, data, len);
+}
+
+void my_on_connect(KTerm* term, KTermSession* session) {
+    int idx = (int)(session - term->sessions);
+    printf("[Server] Client Connected on Session %d\n", idx);
+    shells[idx].cmd_len = 0;
+    shells[idx].last_was_cr = false;
+    KTerm_WriteString(term, "\r\nWelcome to K-Term Telnet Server.\r\nType 'help' for commands.\r\nKTerm> ");
 }
 
 int main() {
-    printf("Starting KTerm TCP Server on port %d...\n", SERVER_PORT);
+    printf("Starting K-Term Telnet Server on port 8023...\n");
 
-    // 1. Initialize KTerm
-    KTermConfig config = {0};
+    KTermConfig config;
+    memset(&config, 0, sizeof(config));
     config.width = 80;
     config.height = 24;
-    config.response_callback = server_output_callback;
 
+    // Pass by value as KTerm_Create(KTermConfig config)
     KTerm* term = KTerm_Create(config);
-    if (!term) {
-        fprintf(stderr, "Failed to create KTerm instance\n");
-        return 1;
-    }
+    KTerm_Net_Init(term);
 
-    // 2. Setup Server Socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        perror("socket");
-        return 1;
-    }
+    // Setup Server on Session 0
+    KTermNetCallbacks cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.on_telnet_command = my_telnet_command;
+    cb.on_auth = my_auth;
+    cb.on_data = my_on_data;
+    cb.on_connect = my_on_connect;
 
-    int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    set_nonblocking(server_fd);
+    KTerm_Net_SetCallbacks(term, &term->sessions[0], cb);
+    KTerm_Net_SetProtocol(term, &term->sessions[0], KTERM_NET_PROTO_TELNET);
+    KTerm_Net_Listen(term, &term->sessions[0], 8023);
 
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(SERVER_PORT);
-
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        perror("bind");
-        return 1;
-    }
-
-    if (listen(server_fd, 1) < 0) {
-        perror("listen");
-        return 1;
-    }
-
-    printf("Listening... Connect with 'nc localhost %d'\n", SERVER_PORT);
-
-    // 3. Main Loop
-    fd_set readfds;
-    char buffer[BUFFER_SIZE];
-
-    // Initial welcome message
-    KTerm_QueueResponse(term, "Welcome to KTerm Server!\r\n");
-
-    while (1) {
-        FD_ZERO(&readfds);
-        FD_SET(server_fd, &readfds);
-        int max_fd = server_fd;
-
-        if (client_fd >= 0) {
-            FD_SET(client_fd, &readfds);
-            if (client_fd > max_fd) max_fd = client_fd;
-        }
-
-        struct timeval timeout = {0, 10000}; // 10ms timeout for UI update loop integration
-        int activity = select(max_fd + 1, &readfds, NULL, NULL, &timeout);
-
-        if (activity < 0 && errno != EINTR) {
-            perror("select");
-            break;
-        }
-
-        // Check for new connection
-        if (FD_ISSET(server_fd, &readfds)) {
-            int new_socket = accept(server_fd, NULL, NULL);
-            if (new_socket >= 0) {
-                if (client_fd >= 0) {
-                    // Reject if already connected (simple 1-client server)
-                    const char* msg = "Server busy. Try again later.\r\n";
-                    send(new_socket, msg, strlen(msg), 0);
-                    close(new_socket);
-                } else {
-                    client_fd = new_socket;
-                    set_nonblocking(client_fd);
-                    printf("Client connected!\n");
-
-                    // Force a redraw / welcome prompt
-                    const char* prompt = "\r\n$ ";
-                    KTerm_QueueResponse(term, prompt);
-                }
-            }
-        }
-
-        // Check for client data
-        if (client_fd >= 0 && FD_ISSET(client_fd, &readfds)) {
-            ssize_t valread = read(client_fd, buffer, BUFFER_SIZE);
-            if (valread > 0) {
-                // Pipe network data into KTerm input
-                // KTerm_ProcessEventsInternal handles raw bytes injection
-                // But typically we use KTerm_ProcessChar or similar for injection.
-                // KTerm_ProcessChar injects into input pipeline (keys/mouse)
-                // Wait, if this is a remote terminal, the bytes coming in ARE the keys.
-                // So we inject them into the active session.
-
-                KTermSession* s = GET_SESSION(term);
-                for (int i = 0; i < valread; i++) {
-                    KTerm_ProcessChar(term, s, (unsigned char)buffer[i]);
-                }
-            } else if (valread == 0) {
-                // Disconnected
-                printf("Client disconnected.\n");
-                close(client_fd);
-                client_fd = -1;
-            } else {
-                if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    perror("read");
-                    close(client_fd);
-                    client_fd = -1;
-                }
-            }
-        }
-
-        // Process Terminal Updates
-        // KTerm_Update processes queued events and generates response callbacks if needed (echo)
-        KTerm_Update(term);
+    // Main Loop
+    while(server_running) {
+        KTerm_Net_Process(term);
+        usleep(10000); // 10ms
     }
 
     KTerm_Destroy(term);
-    close(server_fd);
     return 0;
 }

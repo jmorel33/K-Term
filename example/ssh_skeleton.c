@@ -27,6 +27,9 @@
 #define SSH_MSG_USERAUTH_SUCCESS 52
 #define SSH_MSG_USERAUTH_BANNER 53
 #define SSH_MSG_USERAUTH_PK_OK 60
+#define SSH_MSG_GLOBAL_REQUEST 80
+#define SSH_MSG_REQUEST_SUCCESS 81
+#define SSH_MSG_REQUEST_FAILURE 82
 #define SSH_MSG_CHANNEL_OPEN 90
 #define SSH_MSG_CHANNEL_OPEN_CONFIRMATION 91
 #define SSH_MSG_CHANNEL_WINDOW_ADJUST 93
@@ -97,6 +100,25 @@ static uint32_t get_u32(const uint8_t* buf) {
     return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
 }
 
+// Helper: Read Length-Prefixed String
+// Returns length of string payload, or -1 if buffer too short
+// Updates offset
+static int ssh_read_string(const uint8_t* buf, size_t buf_len, size_t* offset, char* out, size_t out_max) {
+    if (*offset + 4 > buf_len) return -1;
+    uint32_t len = get_u32(buf + *offset);
+    *offset += 4;
+
+    if (*offset + len > buf_len) return -1;
+
+    if (out && out_max > 0) {
+        size_t copy = (len < out_max - 1) ? len : (out_max - 1);
+        memcpy(out, buf + *offset, copy);
+        out[copy] = '\0';
+    }
+    *offset += len;
+    return len;
+}
+
 // Helper: Send SSH Binary Packet (Framed)
 static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     if (fd < 0) return 0;
@@ -107,6 +129,10 @@ static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     // Payload includes the Message Type byte!
 
     uint8_t pad_len = 4; // Minimal padding for skeleton
+    // Ensure total length is multiple of 8 (block size)
+    // 4 (len) + 1 (pad_len) + 1 (type) + len + pad_len
+    // We can adjust pad_len if needed, but for skeleton we keep it simple.
+
     uint32_t pkt_len = 1 + 1 + len + pad_len;
 
     uint8_t header[5];
@@ -129,6 +155,41 @@ static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     if (send(fd, padding, pad_len, 0) != pad_len) perror("send padding failed");
 
     return 0;
+}
+
+// Packet Construction Helpers (for writing to a buffer before sending)
+// Added bounds checking
+static bool ssh_write_byte(uint8_t** ptr, size_t* rem, uint8_t val) {
+    if (*rem < 1) return false;
+    **ptr = val;
+    (*ptr)++;
+    (*rem)--;
+    return true;
+}
+
+static bool ssh_write_bool(uint8_t** ptr, size_t* rem, bool val) {
+    return ssh_write_byte(ptr, rem, val ? 1 : 0);
+}
+
+static bool ssh_write_u32(uint8_t** ptr, size_t* rem, uint32_t val) {
+    if (*rem < 4) return false;
+    put_u32(*ptr, val);
+    (*ptr) += 4;
+    (*rem) -= 4;
+    return true;
+}
+
+static bool ssh_write_string(uint8_t** ptr, size_t* rem, const char* str, size_t len) {
+    if (!ssh_write_u32(ptr, rem, (uint32_t)len)) return false;
+    if (*rem < len) return false;
+    memcpy(*ptr, str, len);
+    (*ptr) += len;
+    (*rem) -= len;
+    return true;
+}
+
+static bool ssh_write_cstring(uint8_t** ptr, size_t* rem, const char* str) {
+    return ssh_write_string(ptr, rem, str, strlen(str));
 }
 
 // Helper: Read next packet (Blocking-ish, returns type or -1 if incomplete)
@@ -168,6 +229,9 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
     int type;
     uint8_t buf[1024];
     size_t len;
+    uint8_t scratch[1024];
+    uint8_t* p;
+    size_t rem;
 
     switch (ssh->state) {
         case SSH_STATE_INIT:
@@ -187,15 +251,6 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 char vbuf[256];
                 ssize_t n = recv(fd, vbuf, sizeof(vbuf)-1, 0);
                 if (n < 0) {
-                    // MOCK SERVER for Testing: If no server, assume mock
-                    // In real world we return AGAIN
-                    // #ifdef KTERM_TESTING
-                    // const char* mock_srv = "SSH-2.0-OpenSSH_Mock\r\n";
-                    // strncpy(ssh->server_version, mock_srv, sizeof(ssh->server_version));
-                    // ssh_log("Version Exchange Complete (Mock)");
-                    // ssh->state = SSH_STATE_KEX_INIT;
-                    // return KTERM_SEC_AGAIN;
-                    // #endif
                     return KTERM_SEC_AGAIN;
                 }
 
@@ -224,10 +279,6 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             } else if (type != -1) {
                 // Ignore other packets or error
             }
-            // If MOCK mode and no data, advance to keep test running
-            // #ifdef KTERM_TESTING
-            // if (type == -1) ssh->state = SSH_STATE_NEW_KEYS;
-            // #endif
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_NEW_KEYS:
@@ -242,14 +293,13 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_log("Received SSH_MSG_NEWKEYS.");
                 ssh->state = SSH_STATE_SERVICE_REQUEST;
             }
-            // #ifdef KTERM_TESTING
-            // if (type == -1) ssh->state = SSH_STATE_SERVICE_REQUEST;
-            // #endif
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_SERVICE_REQUEST:
             ssh_log("Sending SSH_MSG_SERVICE_REQUEST (ssh-userauth)...");
-            send_packet(fd, SSH_MSG_SERVICE_REQUEST, "ssh-userauth", 12);
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_cstring(&p, &rem, "ssh-userauth")) return KTERM_SEC_ERROR;
+            send_packet(fd, SSH_MSG_SERVICE_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_SERVICE_ACCEPT;
             return KTERM_SEC_AGAIN;
 
@@ -259,27 +309,27 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_log("Received SSH_MSG_SERVICE_ACCEPT.");
                 ssh->state = SSH_STATE_USERAUTH_PUBKEY_PROBE;
             }
-            // #ifdef KTERM_TESTING
-            // if (type == -1) ssh->state = SSH_STATE_USERAUTH_PUBKEY_PROBE;
-            // #endif
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_USERAUTH_PUBKEY_PROBE:
             ssh_log("Auth: Probing Public Key (ssh-ed25519)...");
-            // NOTE: In a real implementation, you would:
-            // 1. Iterate through available keys (Agent, Disk).
-            // 2. Construct valid SSH_MSG_USERAUTH_REQUEST packet:
-            //    [byte]  SSH_MSG_USERAUTH_REQUEST
-            //    [string] user name
-            //    [string] service name ("ssh-connection")
-            //    [string] "publickey"
-            //    [boolean] FALSE (this is a probe)
-            //    [string] public key algorithm name
-            //    [string] public key blob
+            // RFC 4252:
+            // byte      SSH_MSG_USERAUTH_REQUEST
+            // string    user name
+            // string    service name ("ssh-connection")
+            // string    "publickey"
+            // boolean   FALSE
+            // string    public key algorithm name
+            // string    public key blob
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_cstring(&p, &rem, ssh->user)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "ssh-connection")) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "publickey")) return KTERM_SEC_ERROR;
+            if (!ssh_write_bool(&p, &rem, false)) return KTERM_SEC_ERROR; // Probe
+            if (!ssh_write_cstring(&p, &rem, "ssh-ed25519")) return KTERM_SEC_ERROR;
+            if (!ssh_write_string(&p, &rem, "dummy_key_blob", 14)) return KTERM_SEC_ERROR; // Mock key blob
 
-            // Mock Request: [user][service][method][0][algo][blob]
-            // We just send a dummy string to represent this structure
-            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, "dummy_pubkey_probe", 18);
+            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_PK_OK;
             return KTERM_SEC_AGAIN;
 
@@ -289,24 +339,32 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_log("Auth: Public Key Accepted. Signing...");
                 ssh->state = SSH_STATE_USERAUTH_PUBKEY_SIGN;
             } else if (type == SSH_MSG_USERAUTH_FAILURE) {
-                ssh_log("Auth: Public Key Rejected.");
-                // Fallback to Password would go here, but for skeleton we error or stop
+                ssh_log("Auth: Public Key Rejected. Falling back to Password (TODO).");
                 return KTERM_SEC_ERROR;
             }
-            // #ifdef KTERM_TESTING
-            // if (type == -1) ssh->state = SSH_STATE_USERAUTH_PUBKEY_SIGN;
-            // #endif
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_USERAUTH_PUBKEY_SIGN:
             ssh_log("Auth: Sending Signed Request...");
-            // NOTE: In a real implementation, you would:
-            // 1. Calculate Session ID (from KEX).
-            // 2. Construct data to sign (Session ID + Payload).
-            // 3. Sign using your crypto lib (e.g. libsodium/OpenSSL).
-            // 4. Send SSH_MSG_USERAUTH_REQUEST with [boolean] TRUE + [string] signature.
+            // RFC 4252:
+            // byte      SSH_MSG_USERAUTH_REQUEST
+            // string    user name
+            // string    service name ("ssh-connection")
+            // string    "publickey"
+            // boolean   TRUE
+            // string    public key algorithm name
+            // string    public key blob
+            // string    signature
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_cstring(&p, &rem, ssh->user)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "ssh-connection")) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "publickey")) return KTERM_SEC_ERROR;
+            if (!ssh_write_bool(&p, &rem, true)) return KTERM_SEC_ERROR; // Sign
+            if (!ssh_write_cstring(&p, &rem, "ssh-ed25519")) return KTERM_SEC_ERROR;
+            if (!ssh_write_string(&p, &rem, "dummy_key_blob", 14)) return KTERM_SEC_ERROR;
+            if (!ssh_write_string(&p, &rem, "dummy_signature", 15)) return KTERM_SEC_ERROR; // Mock signature
 
-            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, "dummy_signed_request", 20);
+            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_AUTH_SUCCESS;
             return KTERM_SEC_AGAIN;
 
@@ -315,15 +373,25 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             if (type == SSH_MSG_USERAUTH_SUCCESS) {
                 ssh_log("Auth: Success!");
                 ssh->state = SSH_STATE_CHANNEL_OPEN;
+            } else if (type == SSH_MSG_USERAUTH_FAILURE) {
+                ssh_log("Auth: Signature Rejected.");
+                return KTERM_SEC_ERROR;
             }
-            // #ifdef KTERM_TESTING
-            // if (type == -1) ssh->state = SSH_STATE_CHANNEL_OPEN;
-            // #endif
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_CHANNEL_OPEN:
             ssh_log("Sending SSH_MSG_CHANNEL_OPEN...");
-            send_packet(fd, SSH_MSG_CHANNEL_OPEN, "session", 7);
+            // byte      SSH_MSG_CHANNEL_OPEN
+            // string    "session"
+            // uint32    sender channel
+            // uint32    initial window size
+            // uint32    maximum packet size
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_cstring(&p, &rem, "session")) return KTERM_SEC_ERROR;
+            if (!ssh_write_u32(&p, &rem, 0)) return KTERM_SEC_ERROR; // Local channel ID
+            if (!ssh_write_u32(&p, &rem, 2097152)) return KTERM_SEC_ERROR; // Window size
+            if (!ssh_write_u32(&p, &rem, 32768)) return KTERM_SEC_ERROR; // Max packet size
+            send_packet(fd, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_CHANNEL_OPEN;
             return KTERM_SEC_AGAIN;
 
@@ -333,18 +401,46 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                  ssh_log("Channel Opened.");
                  ssh->state = SSH_STATE_PTY_REQ;
              }
-             // #ifdef KTERM_TESTING
-             // if (type == -1) ssh->state = SSH_STATE_PTY_REQ;
-             // #endif
              return KTERM_SEC_AGAIN;
 
         case SSH_STATE_PTY_REQ:
             ssh_log("Sending PTY Request (xterm-256color)...");
+            // byte      SSH_MSG_CHANNEL_REQUEST
+            // uint32    recipient channel
+            // string    "pty-req"
+            // boolean   want_reply
+            // string    TERM environment variable value (e.g., vt100)
+            // uint32    terminal width, characters (e.g., 80)
+            // uint32    terminal height, rows (e.g., 24)
+            // uint32    terminal width, pixels (e.g., 640)
+            // uint32    terminal height, pixels (e.g., 480)
+            // string    encoded terminal modes
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_u32(&p, &rem, 0)) return KTERM_SEC_ERROR; // Remote channel
+            if (!ssh_write_cstring(&p, &rem, "pty-req")) return KTERM_SEC_ERROR;
+            if (!ssh_write_bool(&p, &rem, true)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "xterm-256color")) return KTERM_SEC_ERROR;
+            if (!ssh_write_u32(&p, &rem, 80)) return KTERM_SEC_ERROR;
+            if (!ssh_write_u32(&p, &rem, 24)) return KTERM_SEC_ERROR;
+            if (!ssh_write_u32(&p, &rem, 0)) return KTERM_SEC_ERROR;
+            if (!ssh_write_u32(&p, &rem, 0)) return KTERM_SEC_ERROR;
+            if (!ssh_write_string(&p, &rem, "", 0)) return KTERM_SEC_ERROR; // No modes
+
+            // Note: In real packet, type is SSH_MSG_CHANNEL_REQUEST (98)
+            send_packet(fd, 98, scratch, p - scratch);
             ssh->state = SSH_STATE_SHELL;
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_SHELL:
+            // Wait for PTY Success (optional in skeleton, but good practice)
+            // Then send Shell request
             ssh_log("Sending Shell Request...");
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_u32(&p, &rem, 0)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "shell")) return KTERM_SEC_ERROR;
+            if (!ssh_write_bool(&p, &rem, true)) return KTERM_SEC_ERROR;
+            send_packet(fd, 98, scratch, p - scratch); // SSH_MSG_CHANNEL_REQUEST
+
             ssh->state = SSH_STATE_READY;
             return KTERM_SEC_OK; // Handshake Done!
 
@@ -395,6 +491,23 @@ static int my_ssh_read(void* ctx, int fd, char* buf, size_t len) {
         else if (type == SSH_MSG_DEBUG) {
             ssh_log("Received SSH_MSG_DEBUG");
         }
+        else if (type == SSH_MSG_GLOBAL_REQUEST) {
+            // "tcpip-forward", "cancel-tcpip-forward", "keepalive@openssh.com"
+            // We should reply with FAILURE for unsupported global requests
+            // Format: string request_name, bool want_reply
+            size_t offset = 0;
+            char req_name[64];
+            if (ssh_read_string(payload, payload_len, &offset, req_name, sizeof(req_name)) > 0) {
+                if (offset < (size_t)payload_len) {
+                    bool want_reply = payload[offset] != 0;
+                    ssh_log("Global Request:");
+                    ssh_log(req_name);
+                    if (want_reply) {
+                        send_packet(fd, SSH_MSG_REQUEST_FAILURE, NULL, 0);
+                    }
+                }
+            }
+        }
         else if (type == SSH_MSG_KEXINIT) {
             // Quirk: Re-keying triggered by server
             ssh_log("Re-keying initiated by Server...");
@@ -440,7 +553,15 @@ static int my_ssh_read(void* ctx, int fd, char* buf, size_t len) {
 
 static int my_ssh_write(void* ctx, int fd, const char* buf, size_t len) {
     // Encrypt & Frame outgoing terminal data
-    send_packet(fd, SSH_MSG_CHANNEL_DATA, buf, len);
+    // SSH_MSG_CHANNEL_DATA: uint32 recipient_channel, string data
+    uint8_t payload[4096];
+    uint8_t* p = payload;
+    size_t rem = sizeof(payload);
+
+    if (!ssh_write_u32(&p, &rem, 0)) return -1; // Channel 0
+    if (!ssh_write_string(&p, &rem, buf, len)) return -1;
+
+    send_packet(fd, SSH_MSG_CHANNEL_DATA, payload, p - payload);
     return len;
 }
 

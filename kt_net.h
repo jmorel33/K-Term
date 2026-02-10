@@ -94,6 +94,12 @@ typedef enum {
 #define KTERM_TELNET_IAC  255
 #define KTERM_TELNET_ECHO 1
 
+// Telnet Options (Common)
+#define KTERM_TELNET_SGA         3
+#define KTERM_TELNET_NAWS       31
+#define KTERM_TELNET_ENVIRON    36
+#define KTERM_TELNET_NEW_ENVIRON 39
+
 // Initialization
 void KTerm_Net_Init(KTerm* term);
 void KTerm_Net_Process(KTerm* term);
@@ -976,7 +982,9 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                             else {
                                 if (net->sb_len == 0) net->sb_option = c;
                                 else if (net->sb_len < 1024) net->sb_buffer[net->sb_len] = c;
-                                net->sb_len++;
+                                // If buffer full, we just don't write but still increment length to detect truncation if needed
+                                // or just clamp it.
+                                if (net->sb_len < 2048) net->sb_len++; // Limit growth to avoid wrap-around
                             }
                             break;
 
@@ -985,18 +993,22 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                                 // End of SB
                                 if (net->sb_len > 0) {
                                     if (net->callbacks.on_telnet_sb) {
-                                        net->callbacks.on_telnet_sb(term, session, net->sb_option, net->sb_buffer + 1, net->sb_len - 1);
+                                        // Pass robust length (clamped to buffer size)
+                                        int safe_len = (net->sb_len > 1024) ? 1024 : net->sb_len;
+                                        if (safe_len > 1) {
+                                            net->callbacks.on_telnet_sb(term, session, net->sb_option, net->sb_buffer + 1, safe_len - 1);
+                                        }
                                     }
-                                    // Default NEW-ENVIRON handling
+                                    // Default NEW-ENVIRON handling (internal stub)
                                     if (net->sb_option == 39) { // NEW-ENVIRON
                                         // Simple Parsing logic could go here or user callback
-                                        // For now we assume user callback handles it if set
                                     }
                                 }
                                 net->telnet_state = TELNET_STATE_NORMAL;
                             } else if (c == KTERM_TELNET_IAC) {
                                 // Escaped IAC in SB data
-                                if (net->sb_len < 1024) net->sb_buffer[net->sb_len++] = c;
+                                if (net->sb_len < 1024) net->sb_buffer[net->sb_len] = c;
+                                if (net->sb_len < 2048) net->sb_len++;
                                 net->telnet_state = TELNET_STATE_SB;
                             } else {
                                 // Malformed? Back to SB
