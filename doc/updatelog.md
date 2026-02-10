@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.5.4] - Networking Hardening
+- **Async API:** Enhanced `kt_net.h` with an event-driven callback system (`on_connect`, `on_data`, `on_error`) for robust non-blocking integration.
+- **Security Hooks:** Added `KTermNetSecurity` interface to support TLS/SSL integration (e.g., OpenSSL) without modifying core library code.
+- **Protocol Framing:** Introduced `KTERM_NET_PROTO_FRAMED` for binary packet multiplexing (Data, Resize, Gateway) over a single connection.
+- **Session Routing:** Implemented `ATTACH` Gateway command to route network traffic to specific local sessions (`ATTACH;SESSION=n`).
+- **Extensions:** Renamed `ssh` extension to `net` (preserving alias) and improved dispatch logic.
+
 ## [v2.5.3] - Networking Maturity
 - **Non-Blocking I/O:** Refactored `kt_net.h` to use a non-blocking connection state machine, eliminating UI freezes during connection attempts.
 - **Documentation:** Added `doc/kt_net.md` providing comprehensive usage guides, architecture details, and integration examples for the networking module.

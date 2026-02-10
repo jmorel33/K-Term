@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.3
+# K-Term Emulation Library v2.5.4
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -544,6 +544,7 @@ Other source files can simply include "kterm.h" for declarations.
 -   **Helper Headers:** The library is distributed as a set of headers:
     -   `kterm.h`: Main API.
     -   `kt_gateway.h`: Gateway Protocol implementation.
+    -   `kt_net.h`: Networking module (TCP/SSH client).
     -   `kt_render_sit.h`: Rendering abstraction layer for Situation.
     -   `kt_io_sit.h`: Input adapter for Situation.
     -   `font_data.h`: Built-in bitmap fonts.
