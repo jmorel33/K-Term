@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.5.2] - Networking & Architecture Fixes
+- **Networking Integration:** Fully integrated `kt_net` as a core module with clean API separation.
+- **Gateway Refactor:** Moved SSH command parsing to `kt_gateway.h`, consuming the `kt_net` API.
+- **Output Sink Fix:** Refactored `KTermOutputSink` to accept `KTermSession*`, ensuring correct output routing for background sessions and fixing potential data loss ("hell" scenario).
+- **Sink Fallback:** Added automatic fallback to `response_callback` if network is disconnected.
+
 ## [v2.5.1] - SSH Gateway Module & Real Networking
 
 This maintenance release introduces the long-awaited SSH Gateway Module (`kt_net.h`), transforming K-Term into a capable network client.

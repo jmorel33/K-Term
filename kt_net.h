@@ -9,9 +9,28 @@ extern "C" {
 typedef struct KTerm_T KTerm;
 typedef struct KTermSession_T KTermSession;
 
+// --- Networking Context & State ---
+
+typedef enum {
+    KTERM_NET_STATE_DISCONNECTED = 0,
+    KTERM_NET_STATE_RESOLVING,
+    KTERM_NET_STATE_CONNECTING,
+    KTERM_NET_STATE_HANDSHAKE,
+    KTERM_NET_STATE_AUTH,
+    KTERM_NET_STATE_CONNECTED,
+    KTERM_NET_STATE_ERROR
+} KTermNetState;
+
+#define NET_BUFFER_SIZE 16384
+
 // Initialization
 void KTerm_Net_Init(KTerm* term);
 void KTerm_Net_Process(KTerm* term);
+
+// API for Gateway Integration
+void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int port, const char* user, const char* password);
+void KTerm_Net_Disconnect(KTerm* term, KTermSession* session);
+void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
 
 #ifdef __cplusplus
 }
@@ -50,20 +69,6 @@ void KTerm_Net_Process(KTerm* term);
     #define IS_VALID_SOCKET(s) ((s) >= 0)
     #define INVALID_SOCKET -1
 #endif
-
-// --- Networking Context & State ---
-
-typedef enum {
-    KTERM_NET_STATE_DISCONNECTED = 0,
-    KTERM_NET_STATE_RESOLVING,
-    KTERM_NET_STATE_CONNECTING,
-    KTERM_NET_STATE_HANDSHAKE,
-    KTERM_NET_STATE_AUTH,
-    KTERM_NET_STATE_CONNECTED,
-    KTERM_NET_STATE_ERROR
-} KTermNetState;
-
-#define NET_BUFFER_SIZE 16384
 
 typedef struct {
     KTermNetState state;
@@ -145,11 +150,10 @@ static void KTerm_Net_Log(KTerm* term, int session_idx, const char* msg) {
 }
 
 // --- Output Sink (Term -> Net) ---
-static void KTerm_Net_Sink(void* user_data, const char* data, size_t len) {
+static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* data, size_t len) {
     KTerm* term = (KTerm*)user_data;
-    if (!term) return;
+    if (!term || !session) return;
 
-    KTermSession* session = &term->sessions[term->active_session];
     KTermNetSession* net = KTerm_Net_GetContext(session);
 
     if (net && (net->state == KTERM_NET_STATE_CONNECTED || net->state == KTERM_NET_STATE_AUTH)) {
@@ -160,95 +164,67 @@ static void KTerm_Net_Sink(void* user_data, const char* data, size_t len) {
                 net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE; // Drop oldest
             }
         }
+    } else {
+        // Fallback to response_callback if not connected
+        if (term->response_callback) {
+            term->response_callback(term, data, (int)len);
+        }
     }
 }
 
-// --- Gateway Handler ---
+// --- API Implementation ---
 
-static void KTerm_Net_GatewayHandler(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
-    if (!args) return;
+void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int port, const char* user, const char* password) {
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return;
 
-    char buffer[512];
-    strncpy(buffer, args, sizeof(buffer)-1);
-    buffer[sizeof(buffer)-1] = '\0';
-
-    char* cmd = strtok(buffer, ";");
-    if (!cmd) return;
-
-    if (strcmp(cmd, "connect") == 0) {
-        char* target = strtok(NULL, ";");
-        if (target) {
-            KTermNetSession* net = KTerm_Net_CreateContext(session);
-            if (!net) {
-                if (respond) respond(term, session, "ERR;OOM");
-                return;
-            }
-
-            // Clean previous state
-            if (IS_VALID_SOCKET(net->socket_fd)) { CLOSE_SOCKET(net->socket_fd); net->socket_fd = INVALID_SOCKET; }
+    // Clean previous state
+    if (IS_VALID_SOCKET(net->socket_fd)) { CLOSE_SOCKET(net->socket_fd); net->socket_fd = INVALID_SOCKET; }
 #ifdef KTERM_USE_LIBSSH
-            if (net->ssh_channel) { ssh_channel_free(net->ssh_channel); net->ssh_channel = NULL; }
-            if (net->ssh_session) { ssh_free(net->ssh_session); net->ssh_session = NULL; }
+    if (net->ssh_channel) { ssh_channel_free(net->ssh_channel); net->ssh_channel = NULL; }
+    if (net->ssh_session) { ssh_free(net->ssh_session); net->ssh_session = NULL; }
 #endif
 
-            // Parse user@host:port
-            char* at = strchr(target, '@');
-            char* colon = strchr(target, ':');
+    strncpy(net->user, user ? user : "root", sizeof(net->user)-1);
+    net->port = (port > 0) ? port : 22;
+    strncpy(net->host, host, sizeof(net->host)-1);
 
-            if (at) {
-                *at = '\0';
-                strncpy(net->user, target, sizeof(net->user)-1);
-                target = at + 1;
-            } else {
-                strcpy(net->user, "root");
-            }
+    // Optional password storage (simplified)
+    if (password) strncpy(net->password, password, sizeof(net->password)-1);
+    else net->password[0] = '\0';
 
-            if (colon) {
-                *colon = '\0';
-                net->port = atoi(colon + 1);
-            } else {
-                net->port = 22;
-            }
+    net->state = KTERM_NET_STATE_RESOLVING;
+    net->tx_head = 0;
+    net->tx_tail = 0;
+}
 
-            strncpy(net->host, target, sizeof(net->host)-1);
-            net->state = KTERM_NET_STATE_RESOLVING;
-            net->tx_head = 0;
-            net->tx_tail = 0;
+void KTerm_Net_Disconnect(KTerm* term, KTermSession* session) {
+    KTerm_Net_DestroyContext(session);
+}
 
-            if (respond) respond(term, session, "OK;CONNECTING");
-        } else {
-            if (respond) respond(term, session, "ERR;MISSING_TARGET");
+void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    const char* state_str = "DISCONNECTED";
+    if (net) {
+        switch(net->state) {
+            case KTERM_NET_STATE_RESOLVING: state_str = "RESOLVING"; break;
+            case KTERM_NET_STATE_CONNECTING: state_str = "CONNECTING"; break;
+            case KTERM_NET_STATE_HANDSHAKE: state_str = "HANDSHAKE"; break;
+            case KTERM_NET_STATE_AUTH: state_str = "AUTH"; break;
+            case KTERM_NET_STATE_CONNECTED: state_str = "CONNECTED"; break;
+            case KTERM_NET_STATE_ERROR: state_str = "ERROR"; break;
+            default: break;
         }
-    } else if (strcmp(cmd, "disconnect") == 0) {
-        KTerm_Net_DestroyContext(session);
-        if (respond) respond(term, session, "OK;DISCONNECTED");
-    } else if (strcmp(cmd, "status") == 0) {
-        KTermNetSession* net = KTerm_Net_GetContext(session);
-        char status[64];
-        const char* state_str = "DISCONNECTED";
-        if (net) {
-            switch(net->state) {
-                case KTERM_NET_STATE_RESOLVING: state_str = "RESOLVING"; break;
-                case KTERM_NET_STATE_CONNECTING: state_str = "CONNECTING"; break;
-                case KTERM_NET_STATE_HANDSHAKE: state_str = "HANDSHAKE"; break;
-                case KTERM_NET_STATE_AUTH: state_str = "AUTH"; break;
-                case KTERM_NET_STATE_CONNECTED: state_str = "CONNECTED"; break;
-                case KTERM_NET_STATE_ERROR: state_str = "ERROR"; break;
-                default: break;
-            }
-        }
-        snprintf(status, sizeof(status), "OK;STATE=%s", state_str);
-        if (respond) respond(term, session, status);
-    } else {
-        if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
     }
+    snprintf(buffer, max_len, "STATE=%s", state_str);
 }
 
 // --- Initialization ---
 
 void KTerm_Net_Init(KTerm* term) {
     if (!term) return;
-    KTerm_RegisterGatewayExtension(term, "ssh", KTerm_Net_GatewayHandler);
+    // Note: We do NOT register the gateway extension here anymore.
+    // That is now handled by kt_gateway.h using KTerm_Net_* API.
     KTerm_SetOutputSink(term, KTerm_Net_Sink, term);
 
 #ifdef _WIN32

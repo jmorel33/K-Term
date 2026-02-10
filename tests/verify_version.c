@@ -14,7 +14,7 @@ int main() {
     printf("KTerm Version String: %s\n", KTERM_VERSION_STRING);
 #endif
 
-    if (KTERM_VERSION_MAJOR == 2 && KTERM_VERSION_MINOR == 5 && KTERM_VERSION_PATCH == 0) {
+    if (KTERM_VERSION_MAJOR == 2 && KTERM_VERSION_MINOR == 5 && KTERM_VERSION_PATCH == 2) {
         return 0;
     }
     return 1;

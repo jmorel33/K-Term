@@ -13,6 +13,10 @@ extern "C" {
 // But this module is designed to be embedded.
 #endif
 
+// Include Networking API if available (via KTERM_NET_IMPLEMENTATION macro or similar)
+// We rely on kt_net.h being included before or with kterm.h
+#include "kt_net.h"
+
 // Gateway Protocol Entry Point
 // Parses and executes Gateway commands (DCS GATE ...)
 // Format: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
@@ -1434,6 +1438,61 @@ static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char
     if (respond) respond(term, session, "OK");
 }
 
+static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    if (!args) return;
+
+    char buffer[512];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char* cmd = strtok(buffer, ";");
+    if (!cmd) return;
+
+    if (strcmp(cmd, "connect") == 0) {
+        char* target = strtok(NULL, ";");
+        if (target) {
+            char user[64] = "root";
+            char host[256] = {0};
+            int port = 22;
+
+            // Parse user@host:port
+            char* at = strchr(target, '@');
+            char* colon = strchr(target, ':');
+
+            if (at) {
+                *at = '\0';
+                strncpy(user, target, sizeof(user)-1);
+                target = at + 1;
+            }
+
+            if (colon) {
+                *colon = '\0';
+                port = atoi(colon + 1);
+            }
+
+            strncpy(host, target, sizeof(host)-1);
+
+            KTerm_Net_Connect(term, session, host, port, user, NULL);
+            if (respond) respond(term, session, "OK;CONNECTING");
+        } else {
+            if (respond) respond(term, session, "ERR;MISSING_TARGET");
+        }
+    } else if (strcmp(cmd, "disconnect") == 0) {
+        KTerm_Net_Disconnect(term, session);
+        if (respond) respond(term, session, "OK;DISCONNECTED");
+    } else if (strcmp(cmd, "status") == 0) {
+        char status[64];
+        KTerm_Net_GetStatus(term, session, status, sizeof(status));
+        if (respond) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "OK;%s", status);
+            respond(term, session, msg);
+        }
+    } else {
+        if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
+    }
+}
+
 static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
 
@@ -2112,6 +2171,7 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "direct", KTerm_Ext_DirectInput);
     KTerm_RegisterGatewayExtension(term, "rawdump", KTerm_Ext_RawDump);
     KTerm_RegisterGatewayExtension(term, "grid", KTerm_Ext_Grid);
+    KTerm_RegisterGatewayExtension(term, "ssh", KTerm_Ext_SSH);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
