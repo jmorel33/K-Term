@@ -5,9 +5,10 @@ The `kt_net.h` module provides a lightweight, single-header networking abstracti
 ## Features
 
 - **Client Mode:** Connect to remote TCP servers or SSH hosts.
+- **Server Mode:** Accept incoming connections (`KTerm_Net_Listen`) with optional authentication.
 - **Non-Blocking Architecture:** Connection attempts and I/O are non-blocking to prevent UI freezes.
-- **Event-Driven:** Callbacks for connection status (`on_connect`, `on_disconnect`) and data reception.
-- **Security Hooks:** Interface for plugging in TLS/SSL (e.g., OpenSSL, mbedTLS) or custom encryption.
+- **Event-Driven:** Callbacks for connection status (`on_connect`, `on_disconnect`), data reception, and errors.
+- **Security Hooks:** Interface for plugging in TLS/SSL (e.g., OpenSSL, mbedTLS) or custom encryption (SSH).
 - **Protocol Support:**
     - `KTERM_NET_PROTO_RAW`: Raw byte stream.
     - `KTERM_NET_PROTO_FRAMED`: Binary framing for multiplexing resizing, gateway commands, and data.
@@ -48,7 +49,9 @@ KTermNetCallbacks callbacks = {
     .on_data = my_data,
     .on_error = my_error,
     // Optional: Handle Telnet Negotiation
-    .on_telnet_command = my_telnet_negotiation
+    .on_telnet_command = my_telnet_negotiation,
+    // Optional: Handle Telnet Subnegotiation (SB)
+    .on_telnet_sb = my_telnet_sb_handler
 };
 
 KTerm_Net_SetCallbacks(term, session, callbacks);
@@ -78,24 +81,47 @@ KTerm_Net_Connect(term, session, "192.168.1.50", 23, "user", "password");
 DCS GATE;KTERM;1;EXT;net;connect;192.168.1.50:23 ST
 ```
 
-### 5. SSH Support
+### 5. Server Mode
 
-To enable SSH, define `KTERM_USE_LIBSSH` before including `kt_net.h` and link against `libssh`.
+Enable listening for incoming connections:
 
 ```c
-#define KTERM_USE_LIBSSH
-#define KTERM_NET_IMPLEMENTATION
-#include "kt_net.h"
+// Callback to verify credentials
+bool my_auth(KTerm* term, KTermSession* session, const char* user, const char* pass) {
+    return (strcmp(user, "admin") == 0 && strcmp(pass, "secret") == 0);
+}
+
+KTermNetCallbacks cbs = { .on_connect = my_on_client, .on_auth = my_auth };
+KTerm_Net_SetCallbacks(term, session, cbs);
+
+// Start Server
+KTerm_Net_Listen(term, session, 2323);
 ```
 
-### 6. Security Hooks (TLS/SSL)
+### 6. SSH Support (Custom Implementation)
 
-You can provide custom read/write/handshake functions to integrate TLS libraries like OpenSSL without modifying KTerm core.
+You can implement a custom SSH transport using the `KTermNetSecurity` interface without linking `libssh`. This allows full control over the handshake and crypto.
+
+```c
+// See example/ssh_skeleton.c for full state machine implementation
+KTermNetSecurity ssh_sec = {
+    .ctx = my_ssh_context,
+    .handshake = my_ssh_handshake, // Returns KTERM_SEC_OK, AGAIN, or ERROR
+    .read = my_ssh_read,           // Decrypts and handles SSH packets
+    .write = my_ssh_write,         // Encrypts and frames data
+    .close = my_ssh_close
+};
+KTerm_Net_SetSecurity(term, session, ssh_sec);
+```
+
+### 7. Security Hooks (TLS/SSL)
+
+Similar to SSH, you can wrap TLS libraries like OpenSSL:
 
 ```c
 KTermNetSecurity sec = {
     .ctx = my_ssl_context,
-    .handshake = my_ssl_handshake, // Returns KTERM_SEC_OK, AGAIN, or ERROR
+    .handshake = my_ssl_handshake,
     .read = my_ssl_read,
     .write = my_ssl_write,
     .close = my_ssl_close
@@ -103,7 +129,7 @@ KTermNetSecurity sec = {
 KTerm_Net_SetSecurity(term, session, sec);
 ```
 
-### 7. Telnet Protocol Support
+### 8. Telnet Protocol Support
 
 To enable Telnet support (RFC 854 processing), set the protocol to `KTERM_NET_PROTO_TELNET`. This automatically filters IAC sequences and triggers callbacks for negotiation.
 
@@ -124,7 +150,7 @@ bool my_telnet_handler(KTerm* term, KTermSession* session, unsigned char cmd, un
 }
 ```
 
-### 8. Protocol Framing (Custom)
+### 9. Protocol Framing (Custom)
 
 The `KTERM_NET_PROTO_FRAMED` mode supports multiplexed events.
 

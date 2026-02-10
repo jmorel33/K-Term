@@ -626,7 +626,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         hints.ai_socktype = SOCK_STREAM;
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", net->port);
-        if (getaddrinfo(net->host, port_str, &hints, &res) != 0) { KTerm_Net_TriggerError(term, session, net, "DNS Failed"); return; }
+        int gai_err = getaddrinfo(net->host, port_str, &hints, &res);
+        if (gai_err != 0) {
+            char err_buf[256];
+            snprintf(err_buf, sizeof(err_buf), "DNS Failed: %s", gai_strerror(gai_err));
+            KTerm_Net_TriggerError(term, session, net, err_buf); return;
+        }
         net->socket_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
         if (!IS_VALID_SOCKET(net->socket_fd)) { KTerm_Net_TriggerError(term, session, net, "Socket Failed"); freeaddrinfo(res); return; }
 #ifdef _WIN32

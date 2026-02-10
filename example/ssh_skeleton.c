@@ -309,6 +309,10 @@ void on_term_connect(KTerm* term, KTermSession* session) {
     printf("Callback: Session Connected!\n");
 }
 
+void on_term_error(KTerm* term, KTermSession* session, const char* msg) {
+    printf("Callback: Session Error: %s\n", msg);
+}
+
 int main() {
     KTermConfig config = {0};
     config.width = 80;
@@ -330,11 +334,12 @@ int main() {
 
     KTermNetCallbacks cbs = {0};
     cbs.on_connect = on_term_connect;
+    cbs.on_error = on_term_error;
     KTerm_Net_SetCallbacks(term, session, cbs);
 
-    printf("Simulating Gateway Command: connect;bob:secret@localhost:2222\n");
+    printf("Simulating Gateway Command: connect;bob:secret@127.0.0.1:2222\n");
 
-    KTerm_GatewayProcess(term, session, "KTERM", "1", "EXT", "ssh;connect;bob:secret@localhost:2222");
+    KTerm_GatewayProcess(term, session, "KTERM", "1", "EXT", "ssh;connect;bob:secret@127.0.0.1:2222");
 
     // Run Loop (simulate a few frames)
     for (int i=0; i<50; i++) {
