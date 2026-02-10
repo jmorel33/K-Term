@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.5.9] - SSH & Gateway Hardening
+- **Gateway Parsing Fix:** Corrected parsing logic for SSH connection strings in `kt_gateway.h`. It now correctly handles passwords containing colons (e.g., `user:pass@host:port`) and IPv6 addresses.
+- **Networking Diagnostics:** Enhanced `kt_net.h` to report detailed `getaddrinfo` errors (DNS failures) via the `on_error` callback, improving debugging for connectivity issues.
+- **SSH Skeleton:** Refined `example/ssh_skeleton.c` to use explicit `127.0.0.1` for local tests and integrated error callbacks.
+- **Testing:** Added `tests/mock_ssh_server.py` to validate SSH handshakes and protocol quirks.
+- **Documentation:** Expanded `doc/kt_net.md` with sections on Server Mode (`KTerm_Net_Listen`) and custom SSH implementation strategies.
+
 ## [v2.5.8] - SSH Integration & Networking Hardening
 - **SSH Skeleton:** Added `example/ssh_skeleton.c` as a comprehensive reference for implementing a custom SSH transport layer, including packet framing, re-keying, and authentication state management.
 - **Custom Security Hooks:** The `KTermNetSecurity` interface now supports stateful handshake handling (e.g., SSH key exchange) with direct access to session credentials via `KTerm_Net_GetCredentials`.

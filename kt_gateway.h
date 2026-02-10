@@ -1480,22 +1480,29 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
 
             // Parse user@host:port
             char* at = strchr(target, '@');
-            char* colon = strchr(target, ':');
 
             if (at) {
                 *at = '\0';
                 strncpy(user, target, sizeof(user)-1);
-                target = at + 1;
+                target = at + 1; // Host part starts after @
+
+                // Extract password from user:pass
+                char* user_pass_sep = strchr(user, ':');
+                if (user_pass_sep) {
+                    *user_pass_sep = '\0';
+                    password = user_pass_sep + 1;
+                }
             }
 
-            // Check if password was embedded in target (user:pass@host)
-            // But standard user:pass@host is tricky with strtok on colon if port is also there
-            // Let's stick to separate arg OR user:pass@host if possible.
-            // Simplified: Handle user:pass@host logic
-            char* user_pass_sep = strchr(user, ':');
-            if (user_pass_sep) {
-                *user_pass_sep = '\0';
-                password = user_pass_sep + 1;
+            // Parse host:port (handle [ipv6]:port by finding last colon)
+            char* colon = strrchr(target, ':');
+            if (colon) {
+                // If using brackets, ensure colon is outside
+                char* bracket_close = strrchr(target, ']');
+                if (bracket_close && colon < bracket_close) {
+                    // Colon is inside brackets (e.g. [::1]), no port
+                    colon = NULL;
+                }
             }
 
             if (colon) {
@@ -1504,6 +1511,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
             }
 
             strncpy(host, target, sizeof(host)-1);
+
+            #if KTERM_ENABLE_DEBUG_OUTPUT
+            fprintf(stderr, "[Gateway] SSH Connect: User='%s' Host='%s' Port=%d\n", user, host, port);
+            #endif
 
             KTerm_Net_Connect(term, session, host, port, user, password);
             if (respond) respond(term, session, "OK;CONNECTING");
