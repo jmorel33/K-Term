@@ -139,6 +139,7 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
 
 #ifdef KTERM_USE_LIBSSH
 #include <libssh/libssh.h>
@@ -229,6 +230,10 @@ typedef struct {
 
     int target_session_index;
 
+    // Hardening: Timeouts & Retries
+    time_t connect_start_time;
+    int retry_count;
+
 } KTermNetSession;
 
 // --- Helper Functions ---
@@ -283,6 +288,20 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
     if (IS_VALID_SOCKET(net->listener_fd)) {
         CLOSE_SOCKET(net->listener_fd);
     }
+
+    // Secure Cleanup: Wipe credentials
+    volatile char* p_pass = (volatile char*)net->password;
+    while(*p_pass) *p_pass++ = 0;
+
+    volatile char* p_user = (volatile char*)net->user;
+    while(*p_user) *p_user++ = 0;
+
+    volatile char* p_auth = (volatile char*)net->auth_input_buf;
+    while(*p_auth) *p_auth++ = 0;
+
+    volatile char* p_tmp = (volatile char*)net->auth_user_temp;
+    while(*p_tmp) *p_tmp++ = 0;
+
     free(net);
     session->user_data = NULL;
 }
@@ -297,6 +316,23 @@ static void KTerm_Net_Log(KTerm* term, int session_idx, const char* msg) {
 
 static void KTerm_Net_TriggerError(KTerm* term, KTermSession* session, KTermNetSession* net, const char* msg) {
     KTerm_Net_Log(term, (int)(session - term->sessions), msg);
+
+    // Retry Logic for Connection Errors
+    if (net->state == KTERM_NET_STATE_CONNECTING || net->state == KTERM_NET_STATE_RESOLVING) {
+        if (net->retry_count < 3) {
+            net->retry_count++;
+            net->state = KTERM_NET_STATE_RESOLVING;
+            if (IS_VALID_SOCKET(net->socket_fd)) {
+                CLOSE_SOCKET(net->socket_fd);
+                net->socket_fd = INVALID_SOCKET;
+            }
+            KTerm_Net_Log(term, (int)(session - term->sessions), "Retrying...");
+            // Reset start time to give retry a fresh window
+            net->connect_start_time = time(NULL);
+            return;
+        }
+    }
+
     net->state = KTERM_NET_STATE_ERROR;
     if (net->callbacks.on_error) {
         net->callbacks.on_error(term, session, msg);
@@ -427,6 +463,10 @@ void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int
     net->rx_len = 0; net->expected_frame_len = 0;
     net->telnet_state = TELNET_STATE_NORMAL;
     net->target_session_index = (int)(session - term->sessions);
+
+    // Hardening Init
+    net->connect_start_time = time(NULL);
+    net->retry_count = 0;
 }
 
 void KTerm_Net_Listen(KTerm* term, KTermSession* session, int port) {
@@ -661,6 +701,15 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
 #endif
     }
     else if (net->state == KTERM_NET_STATE_CONNECTING) {
+
+        // Timeout check
+        if (time(NULL) - net->connect_start_time > 10) {
+             KTerm_Net_TriggerError(term, session, net, "Connection Timeout");
+             CLOSE_SOCKET(net->socket_fd);
+             net->socket_fd = INVALID_SOCKET;
+             return;
+        }
+
         fd_set wfds; struct timeval tv = {0, 0}; FD_ZERO(&wfds); FD_SET(net->socket_fd, &wfds);
         if (select(net->socket_fd + 1, NULL, &wfds, NULL, &tv) > 0) {
             int opt = 0; socklen_t len = sizeof(opt);

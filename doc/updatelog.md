@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.5.10] - Networking Completeness & SSH Pubkey
+- **SSH Pubkey Auth:** Implemented a complete Public Key Authentication flow (Probe -> PK_OK -> Sign -> Success) in the `ssh_skeleton` example, providing a robust template for secure custom integrations.
+- **Networking Hardening:** Added secure memory clearing for credentials, 10-second connection timeouts, and automatic retry logic (3 attempts) to `kt_net.h`.
+- **Skeleton Robustness:** Enhanced `example/ssh_skeleton.c` with proper SSH binary packet framing (handling lengths and padding correctly) and improved error handling.
+- **Testing:** Updated `tests/mock_ssh_server.py` to support the full Pubkey Authentication exchange sequence.
+
 ## [v2.5.9] - SSH & Gateway Hardening
 - **Gateway Parsing Fix:** Corrected parsing logic for SSH connection strings in `kt_gateway.h`. It now correctly handles passwords containing colons (e.g., `user:pass@host:port`) and IPv6 addresses.
 - **Networking Diagnostics:** Enhanced `kt_net.h` to report detailed `getaddrinfo` errors (DNS failures) via the `on_error` callback, improving debugging for connectivity issues.
