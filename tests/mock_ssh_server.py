@@ -4,110 +4,123 @@ import struct
 import time
 
 def handle_client(conn, addr):
-    print(f"[Server] Connection from {addr}")
+    try:
+        print(f"[Server] Connection from {addr}")
 
-    # 1. Version Exchange
-    # Read Client Version
-    client_ver = b""
-    while not client_ver.endswith(b"\r\n"):
-        chunk = conn.recv(1)
-        if not chunk: return
-        client_ver += chunk
-    print(f"[Server] Client Version: {client_ver.strip().decode()}")
-
-    # Send Server Version
-    server_ver = b"SSH-2.0-MockServer_1.0\r\n"
-    conn.sendall(server_ver)
-
-    # 2. Handshake Loop (Packet Processing)
-    while True:
-        # Read Packet Header (4 byte len, 1 byte pad_len)
-        header = b""
-        while len(header) < 5:
-            chunk = conn.recv(5 - len(header))
+        # 1. Version Exchange
+        client_ver = b""
+        while not client_ver.endswith(b"\r\n"):
+            chunk = conn.recv(1)
             if not chunk: return
-            header += chunk
+            client_ver += chunk
+        print(f"[Server] Client Version: {client_ver.strip().decode()}")
 
-        pkt_len = struct.unpack(">I", header[0:4])[0]
-        pad_len = header[4]
+        # Send Server Version
+        server_ver = b"SSH-2.0-MockServer_1.0\r\n"
+        conn.sendall(server_ver)
 
-        # Read Payload + Padding
-        remaining = pkt_len
-        body = b""
-        while len(body) < remaining:
-            chunk = conn.recv(remaining - len(body))
-            if not chunk: return
-            body += chunk
+        # 2. Handshake Loop (Packet Processing)
+        while True:
+            # Read Packet Header (4 byte len, 1 byte pad_len)
+            header = b""
+            while len(header) < 5:
+                chunk = conn.recv(5 - len(header))
+                if not chunk: return
+                header += chunk
 
-        # Extract Type
-        msg_type = body[0]
-        payload = body[1:len(body)-pad_len] # Strip padding
+            pkt_len_field = struct.unpack(">I", header[0:4])[0]
+            pad_len = header[4]
 
-        print(f"[Server] Received Msg Type: {msg_type}")
+            # Read Payload + Padding (packet_len includes pad_len byte, which we read)
+            remaining = pkt_len_field - 1
+            body = b""
+            while len(body) < remaining:
+                chunk = conn.recv(remaining - len(body))
+                if not chunk: return
+                body += chunk
 
-        if msg_type == 20: # SSH_MSG_KEXINIT
-            # Respond with KEXINIT (Dummy)
-            # Just send same packet back for mock?
-            # Or send minimal valid structure.
-            # Skeleton doesn't parse it deeply, so send dummy KEXINIT
-            print("[Server] Sending SSH_MSG_KEXINIT")
-            send_packet(conn, 20, b"\x00"*16 + b"\x00"*100) # Cookie + empty lists
+            # Extract Type
+            msg_type = body[0]
+            payload = body[1:len(body)-pad_len] # Strip padding
 
-            # Expect NEWKEYS next?
-            # Skeleton sends NEWKEYS immediately after receiving KEXINIT? No, it sends KEXINIT then waits.
-            # Client State: KEX_INIT -> sends KEXINIT -> waits for KEXINIT -> sends NEWKEYS
+            print(f"[Server] Received Msg Type: {msg_type}")
 
-        elif msg_type == 21: # SSH_MSG_NEWKEYS
-            print("[Server] Sending SSH_MSG_NEWKEYS")
-            send_packet(conn, 21, b"")
+            if msg_type == 20: # SSH_MSG_KEXINIT
+                print("[Server] Sending SSH_MSG_KEXINIT")
+                # Dummy KEXINIT: Cookie (16) + Lists (empty strings logic)
+                # Client skeleton ignores content, so just send bytes
+                # Cookie (16) + kex_algo (4+0) + hostkey (4+0) ...
+                # Actually let's send just enough zero bytes to not crash generic parser if any
+                send_packet(conn, 20, b"\x00"*16 + b"\x00"*100)
 
-        elif msg_type == 5: # SSH_MSG_SERVICE_REQUEST
-            print("[Server] Sending SSH_MSG_SERVICE_ACCEPT")
-            # Payload: string service_name
-            svc = payload[4:] # skip length prefix (4 bytes) - wait, string is [len:4][data]
-            # Skeleton sends "ssh-userauth"
-            send_packet(conn, 6, b"\x00\x00\x00\x0c" + b"ssh-userauth")
+            elif msg_type == 21: # SSH_MSG_NEWKEYS
+                print("[Server] Sending SSH_MSG_NEWKEYS")
+                send_packet(conn, 21, b"")
 
-        elif msg_type == 50: # SSH_MSG_USERAUTH_REQUEST
-            print("[Server] Sending SSH_MSG_USERAUTH_SUCCESS")
-            send_packet(conn, 52, b"") # SUCCESS
+            elif msg_type == 5: # SSH_MSG_SERVICE_REQUEST
+                print("[Server] Sending SSH_MSG_SERVICE_ACCEPT")
+                svc = payload[4:]
+                # 6 = SERVICE_ACCEPT
+                # Payload: string service_name
+                # string "ssh-userauth" = \x00\x00\x00\x0c ssh-userauth
+                send_packet(conn, 6, b"\x00\x00\x00\x0c" + b"ssh-userauth")
 
-        elif msg_type == 90: # SSH_MSG_CHANNEL_OPEN
-            print("[Server] Sending SSH_MSG_CHANNEL_OPEN_CONFIRMATION")
-            # uint32 recipient channel, uint32 sender channel, uint32 init window, uint32 max packet
-            # Skeleton sends "session"
-            # Response: 91
-            resp = struct.pack(">IIII", 0, 0, 32768, 32768)
-            send_packet(conn, 91, resp)
+            elif msg_type == 50: # SSH_MSG_USERAUTH_REQUEST
+                # Check probe vs sign
+                if b"dummy_pubkey_probe" in payload:
+                    print("[Server] Sending SSH_MSG_USERAUTH_PK_OK")
+                    # 60 = PK_OK
+                    # Payload: string algo, string blob
+                    # Mock: algo="ssh-ed25519", blob=""
+                    send_packet(conn, 60, b"\x00\x00\x00\x0bssh-ed25519" + b"\x00\x00\x00\x00")
+                elif b"dummy_signed_request" in payload:
+                    print("[Server] Sending SSH_MSG_USERAUTH_SUCCESS")
+                    send_packet(conn, 52, b"") # SUCCESS
+                else:
+                    print(f"[Server] Unknown Auth Request Payload: {payload}")
+                    # Default to Success to not block other tests? No, explicit fail
+                    # send_packet(conn, 51, b"") # FAILURE
 
-        elif msg_type == 98: # SSH_MSG_CHANNEL_REQUEST (e.g. PTY, SHELL)
-            # Skeleton sends PTY then SHELL
-            # We just say OK
-            print("[Server] Sending SSH_MSG_CHANNEL_SUCCESS")
-            # uint32 recipient channel
-            resp = struct.pack(">I", 0)
-            send_packet(conn, 99, resp) # SUCCESS
+            elif msg_type == 90: # SSH_MSG_CHANNEL_OPEN
+                print("[Server] Sending SSH_MSG_CHANNEL_OPEN_CONFIRMATION")
+                # 91 = OPEN_CONFIRMATION
+                # uint32 recipient channel, uint32 sender channel, uint32 init window, uint32 max packet
+                resp = struct.pack(">IIII", 0, 0, 32768, 32768)
+                send_packet(conn, 91, resp)
 
-        elif msg_type == 94: # SSH_MSG_CHANNEL_DATA
-            # Echo data back
-            # uint32 recipient, string data
-            data_len = struct.unpack(">I", payload[4:8])[0]
-            data = payload[8:8+data_len]
-            print(f"[Server] Echoing Data: {data}")
+            elif msg_type == 98: # SSH_MSG_CHANNEL_REQUEST (e.g. PTY, SHELL)
+                print("[Server] Sending SSH_MSG_CHANNEL_SUCCESS")
+                # 99 = SUCCESS
+                # uint32 recipient channel
+                resp = struct.pack(">I", 0)
+                send_packet(conn, 99, resp)
 
-            # Send back
-            resp = struct.pack(">I", 0) + struct.pack(">I", len(data)) + data
-            send_packet(conn, 94, resp)
+            elif msg_type == 94: # SSH_MSG_CHANNEL_DATA
+                # Echo data back
+                data = payload[4:] # Skip recipient channel (4 bytes)
+                print(f"[Server] Echoing Data: {data}")
+                # 94 = DATA
+                # uint32 recipient, string data
+                resp = struct.pack(">I", 0) + struct.pack(">I", len(data)) + data
+                send_packet(conn, 94, resp)
+
+            elif msg_type == 1: # DISCONNECT
+                print("[Server] Client Disconnected")
+                return
+
+    except Exception as e:
+        print(f"[Server] Error: {e}")
+    finally:
+        conn.close()
 
 def send_packet(conn, msg_type, payload):
     pad_len = 4
-    total_len = 1 + len(payload) + pad_len + 1 # len(1) + type(1) + payload + pad_len(1) + pad
-    # RFC: packet_len = len(pad_len_byte + payload + padding)
-    #      packet_len does NOT include packet_len field itself (4 bytes)
-
+    # packet_len = len(pad_len_byte + msg_type_byte + payload + padding)
+    #            = 1 + 1 + len(payload) + pad_len
     pkt_len = 1 + 1 + len(payload) + pad_len
 
     header = struct.pack(">IB", pkt_len, pad_len)
+    # msg_type is byte
     msg = header + bytes([msg_type]) + payload + (b"\x00" * pad_len)
     conn.sendall(msg)
 
