@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.4
+# K-Term Emulation Library v2.5.5
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -185,6 +185,7 @@ The library processes a stream of input characters (typically from a host applic
 -   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
 -   **Multi-Session Support:** Independent terminal sessions (up to 4) with split-screen compositing and dynamic pane layouts (tmux-style).
 -   **Gateway Protocol:** Runtime introspection and configuration via `DCS GATE` sequences (hardened in v2.3.24).
+-   **Networking Module (`kt_net.h`):** Lightweight TCP/SSH client support with non-blocking I/O, TLS hooks, and Telnet protocol negotiation.
 -   **Vector Graphics Engine:** GPU-accelerated Tektronix 4010/4014 and ReGIS graphics support with "storage tube" phosphor glow simulation.
 -   **Sixel Graphics:** Full implementation including HLS color support.
 -   **Kitty Graphics Protocol:** Complete support for animations, transparency, z-index layering, and pane clipping.

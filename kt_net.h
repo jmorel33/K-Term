@@ -29,6 +29,8 @@ typedef struct {
     void (*on_disconnect)(KTerm* term, KTermSession* session);
     void (*on_data)(KTerm* term, KTermSession* session, const char* data, size_t len);
     void (*on_error)(KTerm* term, KTermSession* session, const char* msg);
+    // Telnet Negotiation Callback (Return true to handle, false for default rejection)
+    bool (*on_telnet_command)(KTerm* term, KTermSession* session, unsigned char command, unsigned char option);
     void* user_data;
 } KTermNetCallbacks;
 
@@ -54,7 +56,8 @@ typedef struct {
 // Protocol Mode
 typedef enum {
     KTERM_NET_PROTO_RAW = 0,
-    KTERM_NET_PROTO_FRAMED = 1
+    KTERM_NET_PROTO_FRAMED = 1,
+    KTERM_NET_PROTO_TELNET = 2
 } KTermNetProtocol;
 
 // Packet Types for Framed Mode
@@ -62,6 +65,24 @@ typedef enum {
 #define KTERM_PKT_RESIZE  0x02 // Payload: [Width:4][Height:4] (Big Endian)
 #define KTERM_PKT_GATEWAY 0x03 // Payload: Gateway Command String
 #define KTERM_PKT_ATTACH  0x04 // Payload: [SessionID:1]
+
+// Telnet Commands (RFC 854)
+#define KTERM_TELNET_SE   240
+#define KTERM_TELNET_NOP  241
+#define KTERM_TELNET_DM   242
+#define KTERM_TELNET_BRK  243
+#define KTERM_TELNET_IP   244
+#define KTERM_TELNET_AO   245
+#define KTERM_TELNET_AYT  246
+#define KTERM_TELNET_EC   247
+#define KTERM_TELNET_EL   248
+#define KTERM_TELNET_GA   249
+#define KTERM_TELNET_SB   250
+#define KTERM_TELNET_WILL 251
+#define KTERM_TELNET_WONT 252
+#define KTERM_TELNET_DO   253
+#define KTERM_TELNET_DONT 254
+#define KTERM_TELNET_IAC  255
 
 // Initialization
 void KTerm_Net_Init(KTerm* term);
@@ -83,6 +104,9 @@ void KTerm_Net_SetTargetSession(KTerm* term, KTermSession* session, int target_i
 
 // Send Framed Packet (Helper)
 void KTerm_Net_SendPacket(KTerm* term, KTermSession* session, uint8_t type, const void* payload, size_t len);
+
+// Send Telnet Command (Helper)
+void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t command, uint8_t option);
 
 #ifdef __cplusplus
 }
@@ -122,6 +146,18 @@ void KTerm_Net_SendPacket(KTerm* term, KTermSession* session, uint8_t type, cons
     #define INVALID_SOCKET -1
 #endif
 
+// Telnet Parse State
+typedef enum {
+    TELNET_STATE_NORMAL = 0,
+    TELNET_STATE_IAC,
+    TELNET_STATE_WILL,
+    TELNET_STATE_WONT,
+    TELNET_STATE_DO,
+    TELNET_STATE_DONT,
+    TELNET_STATE_SB,
+    TELNET_STATE_SB_IAC
+} TelnetParseState;
+
 typedef struct {
     KTermNetState state;
     char host[256];
@@ -156,6 +192,10 @@ typedef struct {
 
     // Protocol Mode
     KTermNetProtocol protocol;
+
+    // Telnet State
+    TelnetParseState telnet_state;
+    // Simple SB buffer if needed later, currently we just skip SB content
 
     // Target Routing
     int target_session_index; // Default: owner session index
@@ -277,6 +317,23 @@ static void KTerm_Net_ProcessFrame(KTerm* term, KTermSession* session, KTermNetS
     }
 }
 
+// --- Telnet Output Helper ---
+void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t command, uint8_t option) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net) return;
+
+    char buf[3];
+    buf[0] = (char)KTERM_TELNET_IAC;
+    buf[1] = (char)command;
+    buf[2] = (char)option;
+
+    for(int i=0; i<3; i++) {
+        net->tx_buffer[net->tx_head] = buf[i];
+        net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE;
+        if(net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
+    }
+}
+
 // --- Output Sink (Term -> Net) ---
 static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* data, size_t len) {
     KTerm* term = (KTerm*)user_data;
@@ -299,6 +356,21 @@ static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* d
                 net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE;
                 if(net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
             }
+        }
+        else if (net->protocol == KTERM_NET_PROTO_TELNET) {
+            // Telnet: Escape IAC (255) as IAC IAC
+            for (size_t i = 0; i < len; i++) {
+                net->tx_buffer[net->tx_head] = data[i];
+                net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE;
+                if (net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
+
+                if ((unsigned char)data[i] == KTERM_TELNET_IAC) {
+                    net->tx_buffer[net->tx_head] = (char)KTERM_TELNET_IAC;
+                    net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE;
+                    if (net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
+                }
+            }
+            return; // Handled
         }
 
         for (size_t i = 0; i < len; i++) {
@@ -339,6 +411,7 @@ void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int
     net->tx_tail = 0;
     net->rx_len = 0;
     net->expected_frame_len = 0;
+    net->telnet_state = TELNET_STATE_NORMAL;
     net->target_session_index = (int)(session - term->sessions); // Default to self
 }
 
@@ -560,8 +633,39 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
             net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
         }
         if (chunk_len > 0) {
-            if (net->security.write) net->security.write(net->security.ctx, net->socket_fd, chunk, chunk_len);
-            else send(net->socket_fd, chunk, chunk_len, 0);
+            // Note: send can write less than requested, handle partial writes?
+            // For now, assume sockets can take 1k chunks. Real robust implementation needs write offset.
+            // Wait, we just pulled from circular buffer, if send fails, bytes are lost.
+            // Ideally peek then advance tail.
+            // For robustness:
+            ssize_t sent = -1;
+            if (net->security.write) {
+                sent = net->security.write(net->security.ctx, net->socket_fd, chunk, chunk_len);
+            } else {
+                sent = send(net->socket_fd, chunk, chunk_len, 0);
+            }
+
+            if (sent < 0) {
+                // EAGAIN/EWOULDBLOCK - Rewind tail?
+#ifdef _WIN32
+                if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+#endif
+                {
+                    // Rewind tail
+                    net->tx_tail = (net->tx_tail - chunk_len + NET_BUFFER_SIZE) % NET_BUFFER_SIZE;
+                } else {
+                    // Fatal Error
+                    KTerm_Net_TriggerError(term, session, net, "Write Failed");
+                    CLOSE_SOCKET(net->socket_fd);
+                    net->socket_fd = INVALID_SOCKET;
+                }
+            } else if (sent < chunk_len) {
+                // Partial write, rewind partial
+                int unsent = chunk_len - (int)sent;
+                net->tx_tail = (net->tx_tail - unsent + NET_BUFFER_SIZE) % NET_BUFFER_SIZE;
+            }
         }
 
         // 2. Read RX
@@ -614,6 +718,88 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                         }
                     }
                 }
+            } else if (net->protocol == KTERM_NET_PROTO_TELNET) {
+                // Telnet State Machine
+                if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
+                int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
+
+                for (int i = 0; i < nbytes; i++) {
+                    unsigned char c = (unsigned char)rx[i];
+
+                    switch (net->telnet_state) {
+                        case TELNET_STATE_NORMAL:
+                            if (c == KTERM_TELNET_IAC) {
+                                net->telnet_state = TELNET_STATE_IAC;
+                            } else {
+                                KTerm_WriteCharToSession(term, target, c);
+                            }
+                            break;
+
+                        case TELNET_STATE_IAC:
+                            if (c == KTERM_TELNET_IAC) { // Escaped IAC
+                                KTerm_WriteCharToSession(term, target, c);
+                                net->telnet_state = TELNET_STATE_NORMAL;
+                            } else if (c == KTERM_TELNET_WILL) {
+                                net->telnet_state = TELNET_STATE_WILL;
+                            } else if (c == KTERM_TELNET_WONT) {
+                                net->telnet_state = TELNET_STATE_WONT;
+                            } else if (c == KTERM_TELNET_DO) {
+                                net->telnet_state = TELNET_STATE_DO;
+                            } else if (c == KTERM_TELNET_DONT) {
+                                net->telnet_state = TELNET_STATE_DONT;
+                            } else if (c == KTERM_TELNET_SB) {
+                                net->telnet_state = TELNET_STATE_SB;
+                            } else {
+                                // Other commands (NOP, GA, etc.) - Ignore for now
+                                net->telnet_state = TELNET_STATE_NORMAL;
+                            }
+                            break;
+
+                        case TELNET_STATE_WILL:
+                            if (!net->callbacks.on_telnet_command || !net->callbacks.on_telnet_command(term, session, KTERM_TELNET_WILL, c)) {
+                                // Default: Reject (DONT)
+                                KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_DONT, c);
+                            }
+                            net->telnet_state = TELNET_STATE_NORMAL;
+                            break;
+
+                        case TELNET_STATE_WONT:
+                            if (net->callbacks.on_telnet_command) net->callbacks.on_telnet_command(term, session, KTERM_TELNET_WONT, c);
+                            // Confirm (DONT) but usually silent unless state mismatch
+                            net->telnet_state = TELNET_STATE_NORMAL;
+                            break;
+
+                        case TELNET_STATE_DO:
+                            if (!net->callbacks.on_telnet_command || !net->callbacks.on_telnet_command(term, session, KTERM_TELNET_DO, c)) {
+                                // Default: Reject (WONT)
+                                KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_WONT, c);
+                            }
+                            net->telnet_state = TELNET_STATE_NORMAL;
+                            break;
+
+                        case TELNET_STATE_DONT:
+                            if (net->callbacks.on_telnet_command) net->callbacks.on_telnet_command(term, session, KTERM_TELNET_DONT, c);
+                            // Confirm (WONT)
+                            net->telnet_state = TELNET_STATE_NORMAL;
+                            break;
+
+                        case TELNET_STATE_SB:
+                            if (c == KTERM_TELNET_IAC) {
+                                net->telnet_state = TELNET_STATE_SB_IAC;
+                            }
+                            // Else: consuming sub-negotiation data (ignored for now)
+                            break;
+
+                        case TELNET_STATE_SB_IAC:
+                            if (c == KTERM_TELNET_SE) {
+                                net->telnet_state = TELNET_STATE_NORMAL;
+                            } else {
+                                // Was not SE, back to consuming SB
+                                net->telnet_state = TELNET_STATE_SB;
+                            }
+                            break;
+                    }
+                }
             } else {
                 if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
                 int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
@@ -627,6 +813,18 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
             if (net->callbacks.on_disconnect) net->callbacks.on_disconnect(term, session);
             CLOSE_SOCKET(net->socket_fd);
             net->socket_fd = INVALID_SOCKET;
+        } else if (nbytes < 0) {
+            // Check error
+#ifdef _WIN32
+             if (WSAGetLastError() != WSAEWOULDBLOCK)
+#else
+             if (errno != EAGAIN && errno != EWOULDBLOCK)
+#endif
+             {
+                 KTerm_Net_TriggerError(term, session, net, "Read Error");
+                 CLOSE_SOCKET(net->socket_fd);
+                 net->socket_fd = INVALID_SOCKET;
+             }
         }
 #endif
     }

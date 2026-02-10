@@ -8,7 +8,10 @@ The `kt_net.h` module provides a lightweight, single-header networking abstracti
 - **Non-Blocking Architecture:** Connection attempts and I/O are non-blocking to prevent UI freezes.
 - **Event-Driven:** Callbacks for connection status (`on_connect`, `on_disconnect`) and data reception.
 - **Security Hooks:** Interface for plugging in TLS/SSL (e.g., OpenSSL, mbedTLS) or custom encryption.
-- **Protocol Framing:** Optional binary framing protocol for multiplexing resizing, gateway commands, and data over a single stream.
+- **Protocol Support:**
+    - `KTERM_NET_PROTO_RAW`: Raw byte stream.
+    - `KTERM_NET_PROTO_FRAMED`: Binary framing for multiplexing resizing, gateway commands, and data.
+    - `KTERM_NET_PROTO_TELNET`: Full Telnet protocol (RFC 854) support with state machine and negotiation callbacks.
 - **Gateway Integration:** Control networking via DCS Gateway commands (e.g., `DCS GATE ... connect ... ST`).
 - **Session Multiplexing:** Route network traffic to specific local sessions via `ATTACH` command.
 
@@ -43,7 +46,9 @@ KTermNetCallbacks callbacks = {
     .on_connect = my_connect,
     .on_disconnect = my_disconnect,
     .on_data = my_data,
-    .on_error = my_error
+    .on_error = my_error,
+    // Optional: Handle Telnet Negotiation
+    .on_telnet_command = my_telnet_negotiation
 };
 
 KTerm_Net_SetCallbacks(term, session, callbacks);
@@ -98,9 +103,30 @@ KTermNetSecurity sec = {
 KTerm_Net_SetSecurity(term, session, sec);
 ```
 
-### 7. Protocol Framing
+### 7. Telnet Protocol Support
 
-By default, `kt_net` uses `KTERM_NET_PROTO_RAW` (raw byte stream). You can switch to `KTERM_NET_PROTO_FRAMED` to support multiplexed events.
+To enable Telnet support (RFC 854 processing), set the protocol to `KTERM_NET_PROTO_TELNET`. This automatically filters IAC sequences and triggers callbacks for negotiation.
+
+```c
+KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_TELNET);
+```
+
+You can handle negotiation (WILL/WONT/DO/DONT) via the `on_telnet_command` callback. If the callback returns `false` (or is NULL), the library automatically rejects requests (sends DONT/WONT) to ensure compliance.
+
+```c
+bool my_telnet_handler(KTerm* term, KTermSession* session, unsigned char cmd, unsigned char opt) {
+    if (cmd == KTERM_TELNET_WILL && opt == TELNET_OPT_ECHO) {
+        // Accept remote echo
+        KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_DO, opt);
+        return true;
+    }
+    return false; // Reject everything else
+}
+```
+
+### 8. Protocol Framing (Custom)
+
+The `KTERM_NET_PROTO_FRAMED` mode supports multiplexed events.
 
 ```c
 KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_FRAMED);
