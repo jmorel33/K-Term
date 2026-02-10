@@ -131,7 +131,10 @@ void my_on_connect(KTerm* term, KTermSession* session) {
 }
 
 int main() {
-    printf("Starting K-Term Telnet Server on port 8023...\n");
+    char ip[64] = "0.0.0.0";
+    KTerm_Net_GetLocalIP(ip, sizeof(ip));
+    printf("Starting K-Term Telnet Server on %s:8023...\n", ip);
+    fflush(stdout);
 
     KTermConfig config;
     memset(&config, 0, sizeof(config));

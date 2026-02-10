@@ -1532,6 +1532,23 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
             snprintf(msg, sizeof(msg), "OK;%s", status);
             respond(term, session, msg);
         }
+    } else if (strcmp(cmd, "ping") == 0) {
+        char* host = strtok(NULL, ";");
+        if (host) {
+             char output[1024];
+             KTerm_Net_Ping(host, output, sizeof(output));
+             // Sanitize output (replace newlines with | to fit in single response frame)
+             for(int i=0; output[i]; i++) {
+                 if(output[i] == '\n' || output[i] == '\r') output[i] = '|';
+             }
+             if (respond) respond(term, session, output);
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
+    } else if (strcmp(cmd, "myip") == 0) {
+        char ip[64];
+        KTerm_Net_GetLocalIP(ip, sizeof(ip));
+        if (respond) respond(term, session, ip);
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
     }

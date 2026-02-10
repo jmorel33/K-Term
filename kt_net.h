@@ -129,6 +129,10 @@ void KTerm_Net_SendPacket(KTerm* term, KTermSession* session, uint8_t type, cons
 // Send Telnet Command (Helper)
 void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t command, uint8_t option);
 
+// Utilities
+void KTerm_Net_GetLocalIP(char* buffer, size_t max_len);
+void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
+
 #ifdef __cplusplus
 }
 #endif
@@ -1052,6 +1056,74 @@ void KTerm_Net_Process(KTerm* term) {
     for (int i = 0; i < 4; i++) {
         KTerm_Net_ProcessSession(term, i);
     }
+}
+
+// --- Utilities Implementation ---
+
+void KTerm_Net_GetLocalIP(char* buffer, size_t max_len) {
+    if (!buffer || max_len == 0) return;
+    buffer[0] = '\0';
+
+    socket_t sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (!IS_VALID_SOCKET(sock)) {
+         snprintf(buffer, max_len, "ERR;SOCKET");
+         return;
+    }
+
+    struct sockaddr_in serv;
+    memset(&serv, 0, sizeof(serv));
+    serv.sin_family = AF_INET;
+    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Google DNS (any routed IP works)
+    serv.sin_port = htons(53);
+
+    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) != -1) {
+         struct sockaddr_in name;
+         socklen_t namelen = sizeof(name);
+         if (getsockname(sock, (struct sockaddr*)&name, &namelen) != -1) {
+             inet_ntop(AF_INET, &name.sin_addr, buffer, max_len);
+         } else {
+             snprintf(buffer, max_len, "ERR;GETSOCKNAME");
+         }
+    } else {
+         snprintf(buffer, max_len, "ERR;CONNECT");
+    }
+    CLOSE_SOCKET(sock);
+}
+
+void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
+    if (!host || !output || max_len == 0) return;
+    output[0] = '\0';
+
+    // Validation: Allow only alphanumeric, dots, colons, and dashes
+    for (int i=0; host[i]; i++) {
+        char c = host[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == ':' || c == '-')) {
+             snprintf(output, max_len, "ERR;INVALID_HOST");
+             return;
+        }
+    }
+
+    char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "ping -n 1 %s", host);
+    #define KT_POPEN _popen
+    #define KT_PCLOSE _pclose
+#else
+    snprintf(cmd, sizeof(cmd), "ping -c 1 %s", host);
+    #define KT_POPEN popen
+    #define KT_PCLOSE pclose
+#endif
+
+    FILE* fp = KT_POPEN(cmd, "r");
+    if (fp) {
+        size_t n = fread(output, 1, max_len - 1, fp);
+        output[n] = '\0';
+        KT_PCLOSE(fp);
+    } else {
+        snprintf(output, max_len, "ERR;POPEN_FAILED");
+    }
+#undef KT_POPEN
+#undef KT_PCLOSE
 }
 
 #endif // KTERM_NET_IMPLEMENTATION_GUARD
