@@ -1,5 +1,13 @@
 # K-Term Update Log
 
+## [v2.5.12] - Gateway Network Enhancements & Security
+- **Gateway Expansion**: Added `PING` and `MYIP` commands to the `EXT;net` (or `ssh`) gateway extension.
+    - `MYIP`: Returns the local IP address used for internet routing (via UDP connection check to 8.8.8.8).
+    - `PING`: Performs a system ping (count 1) to a target host and returns the output.
+- **Security Hardening**: The `PING` implementation in `kt_net.h` includes strict host sanitization (alphanumeric, dots, colons, dashes only) to prevent command injection vulnerabilities.
+- **Networking API**: Added `KTerm_Net_GetLocalIP` and `KTerm_Net_Ping` utility functions to `kt_net.h`.
+- **Examples**: Updated `example/net_server.c` to display the actual listening IP address on startup using the new API.
+
 ## [v2.5.11] - Production-Ready Remoting & Hardening
 - **SSH Skeleton Upgrade**: Refactored `example/ssh_skeleton.c` to implement a complete RFC 4252 Public Key Authentication state machine (Probe -> Sign). Added hardened packet framing helpers to prevent buffer overflows.
 - **Telnet Server**: Upgraded `example/net_server.c` to a fully functional Telnet server using the `KTerm_Net_Listen` API. It now handles RFC 854 negotiation (WILL ECHO, WILL SGA, DO NAWS), client resizing, and includes a basic command shell.
