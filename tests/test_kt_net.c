@@ -1,9 +1,7 @@
 #define KTERM_IMPLEMENTATION
-#define KTERM_NET_IMPLEMENTATION
 #define KTERM_TESTING
 
 #include "../kterm.h"
-#include "../kt_net.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -99,8 +97,6 @@ int main() {
     config.response_callback = MockResponseCallback;
     KTerm* term = KTerm_Create(config);
     if (!term) return 1;
-
-    KTerm_Net_Init(term);
 
     // 3. Connect via Gateway
     char connect_cmd[128];

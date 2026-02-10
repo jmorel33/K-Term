@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 5
-#define KTERM_VERSION_PATCH 1
+#define KTERM_VERSION_PATCH 2
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.5.1"
+#define KTERM_VERSION_STRING "2.5.2"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -69,6 +69,7 @@
 #include "kt_render_sit.h"
 #include "kt_layout.h"
 #include "font_data.h"
+#include "kt_net.h"
 
 
 // Safe Allocation Wrappers
@@ -171,7 +172,7 @@ typedef void (*PrinterCallback)(KTerm* term, const char* data, size_t length);  
 typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
 typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
-typedef void (*KTermOutputSink)(void* user_data, const char* data, size_t len); // Direct Output Sink
+typedef void (*KTermOutputSink)(void* user_data, KTermSession* session, const char* data, size_t len); // Direct Output Sink
 #ifdef KTERM_ENABLE_GATEWAY
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 // Gateway Extensions
@@ -3196,6 +3197,8 @@ bool KTerm_Init(KTerm* term) {
     KTerm_RegisterBuiltinExtensions(term);
 #endif
 
+    KTerm_Net_Init(term);
+
     return true;
 }
 
@@ -4115,7 +4118,7 @@ void ExecuteDECRARA(KTerm* term, KTermSession* session) {
 
     if (session->param_count <= 4) return; // No attributes
 
-    
+
         uint32_t attr_xor_mask = 0;
 
         for (int i = 4; i < session->param_count; i++) {
@@ -4583,7 +4586,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
     KTERM_DEBUG_PRINT("  - char_width: %d\n", term->char_width);
     KTERM_DEBUG_PRINT("  - char_height: %d\n", term->char_height);
     fflush(stderr);
-    
+
     if (term->font_texture.generation != 0) {
         KTerm_DestroyTexture(&term->font_texture);
     }
@@ -4598,7 +4601,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
             fflush(stderr);
             return;
         }
-        KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] Allocated font_atlas_pixels: %p (%dx%d = %d bytes)\n", 
+        KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] Allocated font_atlas_pixels: %p (%dx%d = %d bytes)\n",
                 (void*)term->font_atlas_pixels, term->atlas_width, term->atlas_height, term->atlas_width * term->atlas_height * 4);
         fflush(stderr);
         term->next_atlas_index = 256; // Start dynamic allocation after base set
@@ -4612,20 +4615,20 @@ void KTerm_CreateFontTexture(KTerm* term) {
     // Use font_data dimensions for atlas layout
     int data_w = term->font_data_width;
     int data_h = term->font_data_height;
-    
+
     // Cell dimensions for rendering (includes padding)
     int cell_w = term->char_width;
     int cell_h = term->char_height;
-    
+
     if (GET_SESSION(term)->soft_font.active) {
         data_w = GET_SESSION(term)->soft_font.char_width;
         data_h = GET_SESSION(term)->soft_font.char_height;
         cell_w = GET_SESSION(term)->soft_font.char_width;
         cell_h = GET_SESSION(term)->soft_font.char_height;
     }
-    
+
     int dynamic_chars_per_row = term->atlas_width / data_w;
-    
+
     // Update atlas_cols to match actual layout
     term->atlas_cols = dynamic_chars_per_row;
 
@@ -4681,10 +4684,10 @@ void KTerm_CreateFontTexture(KTerm* term) {
     for (int i = 0; i < term->atlas_width * term->atlas_height * 4; i++) {
         if (pixels[i] != 0) total_non_zero++;
     }
-    KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] After rendering: %d non-zero bytes (out of %d total)\n", 
+    KTERM_DEBUG_PRINT("[KTerm_CreateFontTexture] After rendering: %d non-zero bytes (out of %d total)\n",
             total_non_zero, term->atlas_width * term->atlas_height * 4);
     fflush(stderr);
-    
+
     // Create GPU Texture
     KTermImage img = {0};
     img.width = term->atlas_width;
@@ -4698,14 +4701,14 @@ void KTerm_CreateFontTexture(KTerm* term) {
     fprintf(stderr, "[KTerm_CreateFontTexture] Passing flags: 0x%x (COMPUTE_SAMPLED=0x%x, TRANSFER_DST=0x%x)\n",
             font_flags, SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED, SITUATION_TEXTURE_USAGE_TRANSFER_DST);
     KTerm_CreateTextureEx(img, false, font_flags, &term->font_texture);
-    
+
     // Debug: Verify texture creation and descriptor
     fprintf(stderr, "[KTerm_CreateFontTexture] Font texture created:\n");
     fprintf(stderr, "  - slot_index: %u\n", term->font_texture.slot_index);
     fprintf(stderr, "  - generation: %u\n", term->font_texture.generation);
     fprintf(stderr, "  - width: %d, height: %d\n", term->atlas_width, term->atlas_height);
     fprintf(stderr, "  - atlas_cols: %d\n", term->atlas_cols);
-    
+
     // Verify descriptor set was created (Vulkan)
     #if defined(SITUATION_USE_VULKAN)
     extern _SituationTextureSlot* _SitGetTextureSlot(SituationTexture handle);
@@ -4719,7 +4722,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
         fprintf(stderr, "  - ERROR: Could not get texture slot!\n");
     }
     #endif
-    
+
     // Sample first few pixels to verify data
     unsigned char* px = term->font_atlas_pixels;
     int non_zero_count = 0;
@@ -4728,7 +4731,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
     }
     fprintf(stderr, "  - First 1024 bytes: %d non-zero pixels\n", non_zero_count);
     fflush(stderr);
-    
+
     // Don't unload image data as it points to persistent buffer
 }
 
@@ -5087,7 +5090,7 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
         // Iterate cyclically starting from atlas_clock_hand.
         // We look for an entry that wasn't used THIS frame.
         // If all were used this frame, we just pick the one at the hand (FIFO fallback).
-        
+
         uint32_t lru_index = 0;
         uint32_t start_hand = term->atlas_clock_hand;
         if (start_hand < 256) start_hand = 256; // Ensure range
@@ -5098,11 +5101,11 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
                  lru_index = term->atlas_clock_hand;
                  break;
              }
-             
+
              // Move hand
              term->atlas_clock_hand++;
              if (term->atlas_clock_hand >= capacity) term->atlas_clock_hand = 256;
-             
+
              // Full circle?
              if (term->atlas_clock_hand == start_hand) {
                  // All used this frame! Force eviction at current hand.
@@ -5110,7 +5113,7 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
                  break;
              }
         }
-        
+
         // Move hand forward for next time
         term->atlas_clock_hand = lru_index + 1;
         if (term->atlas_clock_hand >= capacity) term->atlas_clock_hand = 256;
@@ -5448,7 +5451,7 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
     (void)term;
 
      if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
-    
+
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
     if (top == 0 && bottom == term->height - 1 &&
@@ -5514,7 +5517,7 @@ static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, 
     (void)term;
 
     if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
-    
+
     for (int i = 0; i < lines; i++) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
@@ -5550,7 +5553,7 @@ static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int
     }
 
     if (IsRegionProtected(session, row, session->scroll_bottom, session->left_margin, session->right_margin)) return;
-    
+
     // Move existing lines down
     for (int y = session->scroll_bottom; y >= row + count; y--) {
         if (y - count >= row) {
@@ -5610,7 +5613,7 @@ void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c) {
 void KTerm_MarkRegionDirty(KTerm* term, KTermRect rect) {
     if (!term) return;
     KTermSession* session = GET_SESSION(term);
-    
+
     // Clamp to viewport
     int top = rect.y;
     int bottom = rect.y + rect.h - 1;
@@ -5660,7 +5663,7 @@ static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session
     (void)term;
 
     if (IsRegionProtected(session, row, row, col, session->right_margin)) return;
-    
+
     // Shift existing characters right
     for (int x = session->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
@@ -5684,7 +5687,7 @@ static void KTerm_DeleteCharactersAt_Internal(KTerm* term, KTermSession* session
     (void)term;
 
     if (IsRegionProtected(session, row, row, col, session->right_margin)) return;
-    
+
     // Shift remaining characters left
     for (int x = col; x <= session->right_margin - count; x++) {
         *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x + count);
@@ -5721,7 +5724,7 @@ static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* se
         // Insert mode: shift existing characters right
         // If line is protected, ignore typing completely (VT520)
         if (IsRegionProtected(session, session->cursor.y, session->cursor.y, session->cursor.x, session->right_margin)) return;
-        
+
         if (storage_width > 0) {
             KTerm_InsertCharactersAt(term, session->cursor.y, session->cursor.x, storage_width);
         }
@@ -5778,7 +5781,7 @@ static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* se
         fill_char.fg_color = session->current_fg;
         fill_char.bg_color = session->current_bg;
         fill_char.flags = 0;
-        
+
         KTermRect r = {session->cursor.x + 1, session->cursor.y, 1, 1};
         KTerm_QueueFillRect(session, r, fill_char);
     }
@@ -6316,18 +6319,18 @@ void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx) {
         if (sink) {
             // New Sink
             if (tail > head) {
-                sink(ctx, &session->response_ring.data[head], tail - head);
+                sink(ctx, session, &session->response_ring.data[head], tail - head);
             } else {
-                sink(ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
-                if (tail > 0) sink(ctx, &session->response_ring.data[0], tail);
+                sink(ctx, session, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                if (tail > 0) sink(ctx, session, &session->response_ring.data[0], tail);
             }
         } else if (term->output_sink) {
              // Old Sink (Flush before removing)
             if (tail > head) {
-                term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], tail - head);
+                term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[head], tail - head);
             } else {
-                term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
-                if (tail > 0) term->output_sink(term->output_sink_ctx, &session->response_ring.data[0], tail);
+                term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                if (tail > 0) term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[0], tail);
             }
         } else if (term->response_callback) {
              // Old Callback (Flush before mode switch if any)
@@ -10067,21 +10070,21 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
              while(scanner.pos < scanner.len && Stream_Peek(&scanner) != ';') Stream_Consume(&scanner);
         } else {
              // Parse Hex String
-             // Use a dynamic buffer or temp buffer? 
+             // Use a dynamic buffer or temp buffer?
              // We can just iterate and decode directly using Stream_ReadHex (which reads int, but we need 2 digits).
              // Actually, the previous implementation scanned first. Let's do robust scanning.
-             
-             // We'll use a temporary buffer. 
+
+             // We'll use a temporary buffer.
              // Since we don't know the length, we can't malloc easily without scanning.
              // But we can decode in place if we don't need the source anymore (we do, const char).
-             
+
              // Two-pass approach: Scan length, then decode.
              size_t start_pos = scanner.pos;
              while(scanner.pos < scanner.len && isxdigit((unsigned char)Stream_Peek(&scanner))) {
                  Stream_Consume(&scanner);
              }
              size_t hex_len = scanner.pos - start_pos;
-             
+
              if (hex_len % 2 != 0) {
                   KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK (odd length)");
              } else if (hex_len > 0) {
@@ -10510,7 +10513,7 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
         }
         Stream_Consume(&scanner);
     }
-    
+
     // Data starts here
     const char* data_start = scanner.ptr + scanner.pos;
     size_t data_len = scanner.len - scanner.pos;
@@ -10638,16 +10641,16 @@ void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
             break;
         }
     }
-    
+
     // Now look at what follows params
     char next = Stream_Peek(&scanner);
-    
+
     if (next == '{') {
         // DECDLD (Soft Font)
         ProcessSoftFontDownload(term, session, session->escape_buffer);
         return;
     }
-    
+
     if (next == '|') {
         // DECUDK (User Defined Keys)
         // Or DECDLD variant "2;1|"
@@ -10657,21 +10660,21 @@ void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
         bool has_p1 = Stream_ReadInt(&p_scan, &p1);
         Stream_Expect(&p_scan, ';');
         bool has_p2 = Stream_ReadInt(&p_scan, &p2);
-        
+
         if (has_p1 && p1 == 2 && has_p2 && p2 == 1 && Stream_Expect(&p_scan, '|')) {
              ProcessSoftFontDownload(term, session, session->escape_buffer);
              return;
         }
-        
+
         // Otherwise DECUDK
         // Check clear flag (p1)
         if (has_p1 && p1 == 0) ClearUserDefinedKeys(term, session);
-        
+
         // Pass the FULL string to helper as it re-parses
         ProcessUserDefinedKeys(term, session, session->escape_buffer);
         return;
     }
-    
+
     if (next == '!' && scanner.pos + 1 < scanner.len && scanner.ptr[scanner.pos+1] == 'z') {
         // DECDMAC (Macro)
         ProcessMacroDefinition(term, session, session->escape_buffer);
@@ -13146,6 +13149,8 @@ void KTerm_EnableDebug(KTerm* term, bool enable) {
  * @see KTerm_QueueResponse(term) for response queuing.
  */
 void KTerm_Update(KTerm* term) {
+    KTerm_Net_Process(term);
+
     term->pending_session_switch = -1; // Reset pending switch
     int saved_session = term->active_session;
 
@@ -13214,13 +13219,13 @@ void KTerm_Update(KTerm* term) {
             if (term->output_sink) {
                 // Determine contiguous chunk
                 if (tail > head) {
-                    term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], tail - head);
+                    term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[head], tail - head);
                     head = tail;
                 } else {
                     // Wrapped
-                    term->output_sink(term->output_sink_ctx, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
+                    term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[head], KTERM_OUTPUT_PIPELINE_SIZE - head);
                     if (tail > 0) {
-                        term->output_sink(term->output_sink_ctx, &session->response_ring.data[0], tail);
+                        term->output_sink(term->output_sink_ctx, session, &session->response_ring.data[0], tail);
                     }
                     head = tail;
                 }
@@ -14011,7 +14016,7 @@ size_t KTerm_InputQueue_Pop(KTermInputQueue* queue, void* buffer, size_t max_len
 static void KTerm_ApplyResizeOp(KTerm* term, KTermSession* session, KTermOp* op) {
     int cols = op->u.resize.new_width;
     int rows = op->u.resize.new_height;
-    
+
     // Only resize if dimensions changed
     if (session->cols == cols && session->rows == rows) {
         return;
@@ -14257,13 +14262,13 @@ static void KTerm_ApplyFillRectMaskedOp(KTermSession* session, KTermOp* op) {
                     // We just overwrite and ensure DIRTY is set later.
                     cell->flags = fill.flags;
                 }
-                
+
                 cell->flags |= KTERM_FLAG_DIRTY;
             }
         }
         if (y >= 0 && y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
-    
+
     // Update Dirty Rect
     if (session->dirty_rect.w == 0) {
         session->dirty_rect = op->u.fill_masked.rect;
@@ -15797,6 +15802,9 @@ bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event) {
 #include "kt_gateway.h"
 #undef KTERM_GATEWAY_IMPLEMENTATION
 #endif
+
+#define KTERM_NET_IMPLEMENTATION
+#include "kt_net.h"
 
 #define KTERM_COMPOSITE_IMPLEMENTATION
 #include "kt_composite_sit.h"
