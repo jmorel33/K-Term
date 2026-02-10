@@ -10,7 +10,7 @@
 
 // Include stb_truetype for font support
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "../stb_truetype.h"
+#include "stb_truetype.h"
 
 // Types
 typedef int SituationError;
