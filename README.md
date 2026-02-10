@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.5
+# K-Term Emulation Library v2.5.6
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -501,6 +501,53 @@ if (term->session) {
     KTerm_MarkRegionDirty(term, rect);
 }
 ```
+
+### 4.10. Networking & Telnet
+
+The `kt_net.h` module provides a lightweight, non-blocking networking stack for building remote clients (Telnet, Raw TCP) or integrating with custom protocols.
+
+**Features:**
+*   **Async Callbacks:** `on_connect`, `on_disconnect`, `on_data`, `on_error`.
+*   **Telnet State Machine:** Built-in RFC 854/857/858 negotiation handling via `on_telnet_command`.
+*   **Security Hooks:** Interfaces for TLS/SSL integration (`KTermNetSecurity`).
+*   **Resilience:** TCP Keep-Alive support.
+
+**Example Usage:**
+See `example/telnet_client.c` for a complete graphical Telnet client implementation.
+
+```c
+// 1. Initialize Network Module
+KTerm_Net_Init(term);
+
+// 2. Define Callbacks
+bool on_telnet(KTerm* term, KTermSession* s, unsigned char cmd, unsigned char opt) {
+    if (cmd == KTERM_TELNET_WILL && opt == 1) { // ECHO
+        KTerm_Net_SendTelnetCommand(term, s, KTERM_TELNET_DO, 1);
+        return true; // Handled
+    }
+    return false; // Use default rejection
+}
+
+KTermNetCallbacks callbacks = {
+    .on_connect = my_connect_handler,
+    .on_data = my_data_handler, // Optional: term handles display automatically
+    .on_telnet_command = on_telnet
+};
+KTerm_Net_SetCallbacks(term, session, callbacks);
+
+// 3. Configure Protocol & Resilience
+KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_TELNET);
+KTerm_Net_SetKeepAlive(term, session, true, 60); // Enable SO_KEEPALIVE
+
+// 4. Connect
+KTerm_Net_Connect(term, session, "towel.blinkenlights.nl", 23, NULL, NULL);
+```
+
+**Core Functions:**
+*   `KTerm_Net_Init(term)`: Initializes the network subsystem (Winsock on Windows) and registers the output sink.
+*   `KTerm_Net_Connect(...)`: Initiates a non-blocking connection.
+*   `KTerm_Net_Process(term)`: Polling function (call in your update loop) to handle socket I/O.
+*   `KTerm_Net_SetProtocol(...)`: Switches between `KTERM_NET_PROTO_RAW`, `FRAMED` (binary packet), or `TELNET`.
 
 ## Configuration Constants & Macros
 

@@ -97,6 +97,7 @@ void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_
 void KTerm_Net_SetCallbacks(KTerm* term, KTermSession* session, KTermNetCallbacks callbacks);
 void KTerm_Net_SetSecurity(KTerm* term, KTermSession* session, KTermNetSecurity security);
 void KTerm_Net_SetProtocol(KTerm* term, KTermSession* session, KTermNetProtocol protocol);
+void KTerm_Net_SetKeepAlive(KTerm* term, KTermSession* session, bool enable, int idle_sec);
 intptr_t KTerm_Net_GetSocket(KTerm* term, KTermSession* session); // Returns socket_fd or -1
 
 // Session Control
@@ -192,6 +193,10 @@ typedef struct {
 
     // Protocol Mode
     KTermNetProtocol protocol;
+
+    // Resilience
+    bool keep_alive;
+    int keep_alive_idle;
 
     // Telnet State
     TelnetParseState telnet_state;
@@ -457,6 +462,14 @@ void KTerm_Net_SetProtocol(KTerm* term, KTermSession* session, KTermNetProtocol 
     if (net) net->protocol = protocol;
 }
 
+void KTerm_Net_SetKeepAlive(KTerm* term, KTermSession* session, bool enable, int idle_sec) {
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (net) {
+        net->keep_alive = enable;
+        net->keep_alive_idle = idle_sec;
+    }
+}
+
 intptr_t KTerm_Net_GetSocket(KTerm* term, KTermSession* session) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
     if (!net) return -1;
@@ -551,6 +564,18 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
 #else
         fcntl(net->socket_fd, F_SETFL, fcntl(net->socket_fd, F_GETFL, 0) | O_NONBLOCK);
 #endif
+        // Apply Keep-Alive if requested
+        if (net->keep_alive) {
+            int opt = 1;
+            setsockopt(net->socket_fd, SOL_SOCKET, SO_KEEPALIVE, (char*)&opt, sizeof(opt));
+#ifdef TCP_KEEPIDLE
+            if (net->keep_alive_idle > 0) {
+                int idle = net->keep_alive_idle;
+                setsockopt(net->socket_fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+            }
+#endif
+        }
+
         if (connect(net->socket_fd, res->ai_addr, res->ai_addrlen) == 0) {
             if (net->security.handshake) { net->state = KTERM_NET_STATE_HANDSHAKE; }
             else { net->state = KTERM_NET_STATE_CONNECTED; if (net->callbacks.on_connect) net->callbacks.on_connect(term, session); }
