@@ -6,16 +6,31 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+// Include stb_truetype for font support
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "../stb_truetype.h"
 
 // Types
+typedef int SituationError;
 typedef struct { uint64_t id; } SituationComputePipeline;
 typedef struct { uint64_t id; } SituationBuffer;
-typedef struct { uint64_t id; uint32_t width; uint32_t height; uint32_t generation; } SituationTexture;
+typedef struct { uint64_t id; uint32_t width; uint32_t height; uint32_t generation; uint32_t slot_index; } SituationTexture;
 typedef struct { int width; int height; int channels; unsigned char* data; } SituationImage;
 typedef struct { uint64_t id; } SituationCommandBuffer;
 
-typedef struct { float v[2]; } Vector2;
+typedef struct Vector2 {
+    union {
+        struct { float x, y; };
+        float v[2];
+    };
+} Vector2;
+
 typedef struct { unsigned char r, g, b, a; } Color;
+
+typedef int SituationTextureUsageFlags;
+typedef int SituationRendererType;
 
 // Constants
 #define SITUATION_SUCCESS 0
@@ -24,8 +39,10 @@ typedef struct { unsigned char r, g, b, a; } Color;
 #define SITUATION_TEXTURE_USAGE_STORAGE 2
 #define SITUATION_TEXTURE_USAGE_TRANSFER_SRC 4
 #define SITUATION_TEXTURE_USAGE_TRANSFER_DST 8
+#define SITUATION_TEXTURE_USAGE_COMPUTE_SAMPLED 16
 #define SITUATION_BUFFER_USAGE_STORAGE_BUFFER 1
 #define SITUATION_BUFFER_USAGE_TRANSFER_DST 2
+#define SITUATION_BUFFER_USAGE_STORAGE_COMPUTE 4
 #define SITUATION_BARRIER_COMPUTE_SHADER_WRITE 1
 #define SITUATION_BARRIER_COMPUTE_SHADER_READ 2
 #define SITUATION_BARRIER_TRANSFER_READ 4
@@ -35,6 +52,9 @@ typedef struct { unsigned char r, g, b, a; } Color;
 #define SITUATION_SCALING_INTEGER 0
 #define SITUATION_BLEND_ALPHA 0
 #define SITUATION_WINDOW_STATE_RESIZABLE 1
+
+#define SIT_RENDERER_OPENGL 0
+#define SIT_RENDERER_VULKAN 1
 
 // Globals for tests
 static char last_clipboard_text[1024 * 1024]; // 1MB buffer for test
@@ -75,13 +95,13 @@ static inline void SituationUnloadImage(SituationImage image) {
 }
 
 static inline int SituationCreateTexture(SituationImage image, bool mipmaps, SituationTexture* texture) {
-    texture->id = 1; texture->width = image.width; texture->height = image.height; texture->generation = 1;
+    texture->id = 1; texture->width = image.width; texture->height = image.height; texture->generation = 1; texture->slot_index = 1;
     return SITUATION_SUCCESS;
 }
 static inline int SituationCreateTextureEx(SituationImage image, bool mipmaps, int usage, SituationTexture* texture) {
     return SituationCreateTexture(image, mipmaps, texture);
 }
-static inline void SituationDestroyTexture(SituationTexture* texture) { texture->id = 0; }
+static inline void SituationDestroyTexture(SituationTexture* texture) { texture->id = 0; texture->slot_index = 0; }
 static inline uint64_t SituationGetTextureHandle(SituationTexture texture) { return texture.id; }
 
 // Corrected signature
@@ -103,6 +123,7 @@ static inline void SituationCmdSetPushConstant(SituationCommandBuffer cmd, int o
 static inline void SituationCmdDispatch(SituationCommandBuffer cmd, int x, int y, int z) {}
 static inline void SituationCmdPipelineBarrier(SituationCommandBuffer cmd, int src, int dst) {}
 static inline int SituationCmdPresent(SituationCommandBuffer cmd, SituationTexture texture) { return SITUATION_SUCCESS; }
+static inline int SituationCmdBindComputeBuffer(SituationCommandBuffer cmd, int binding, SituationBuffer buffer) { return SITUATION_SUCCESS; }
 
 static inline bool SituationTimerGetOscillatorState(int slot) { return true; }
 static inline double SituationTimerGetTime() { return mock_time; }
@@ -135,6 +156,9 @@ static inline int SituationGetClipboardText(const char** text) {
     return SITUATION_SUCCESS;
 }
 static inline void SituationFreeString(char* str) { free(str); }
+
+static inline SituationRendererType SituationGetRendererType() { return SIT_RENDERER_OPENGL; }
+static inline void SituationGetLastErrorMsg(char** msg) { *msg = NULL; }
 
 // Stubs for others
 static inline void SituationRestoreWindow() {}
