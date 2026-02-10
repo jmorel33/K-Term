@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.5.8] - SSH Integration & Networking Hardening
+- **SSH Skeleton:** Added `example/ssh_skeleton.c` as a comprehensive reference for implementing a custom SSH transport layer, including packet framing, re-keying, and authentication state management.
+- **Custom Security Hooks:** The `KTermNetSecurity` interface now supports stateful handshake handling (e.g., SSH key exchange) with direct access to session credentials via `KTerm_Net_GetCredentials`.
+- **Gateway Credential Parsing:** The `EXT;ssh;connect` command now supports password passing via arguments or URI syntax (`user:pass@host`), streamlining automated connections.
+- **Hardening:** Added implementation guards to single-header libraries (`kt_net.h`, `kt_gateway.h`) to prevent redefinition errors in complex builds.
+- **Examples:** Refactored `example/ssh_skeleton.c` to use proper SSH binary packet framing (Length + Padding + Payload) and handle protocol quirks like Ignore/Debug messages and Window Adjustment.
+
 ## [v2.5.7] - Networking Hardening
 - **Server Mode:** Added `KTerm_Net_Listen` to allow K-Term to function as a TCP server, accepting incoming Telnet/Raw connections.
 - **Authentication:** Implemented `on_auth` callback hook for server-side username/password verification.

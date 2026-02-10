@@ -34,6 +34,8 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term);
 #endif // KT_GATEWAY_H
 
 #ifdef KTERM_GATEWAY_IMPLEMENTATION
+#ifndef KTERM_GATEWAY_IMPLEMENTATION_GUARD
+#define KTERM_GATEWAY_IMPLEMENTATION_GUARD
 
 // Extern Font Data (Usually provided by kterm.h/font_data.h)
 extern const uint8_t ibm_font_8x8[256 * 8];
@@ -1469,6 +1471,8 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
 
     if (strcmp(cmd, "connect") == 0) {
         char* target = strtok(NULL, ";");
+        char* password = strtok(NULL, ";"); // Optional Password
+
         if (target) {
             char user[64] = "root";
             char host[256] = {0};
@@ -1484,6 +1488,16 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
                 target = at + 1;
             }
 
+            // Check if password was embedded in target (user:pass@host)
+            // But standard user:pass@host is tricky with strtok on colon if port is also there
+            // Let's stick to separate arg OR user:pass@host if possible.
+            // Simplified: Handle user:pass@host logic
+            char* user_pass_sep = strchr(user, ':');
+            if (user_pass_sep) {
+                *user_pass_sep = '\0';
+                password = user_pass_sep + 1;
+            }
+
             if (colon) {
                 *colon = '\0';
                 port = atoi(colon + 1);
@@ -1491,7 +1505,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
 
             strncpy(host, target, sizeof(host)-1);
 
-            KTerm_Net_Connect(term, session, host, port, user, NULL);
+            KTerm_Net_Connect(term, session, host, port, user, password);
             if (respond) respond(term, session, "OK;CONNECTING");
         } else {
             if (respond) respond(term, session, "ERR;MISSING_TARGET");
@@ -2227,4 +2241,5 @@ call_user_callback:
     }
 }
 
+#endif // KTERM_GATEWAY_IMPLEMENTATION_GUARD
 #endif // KTERM_GATEWAY_IMPLEMENTATION

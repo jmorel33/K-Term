@@ -52,7 +52,7 @@ typedef enum {
 
 typedef struct {
     // Perform handshake (called repeatedly until OK or ERROR)
-    KTermSecResult (*handshake)(void* ctx, int socket_fd);
+    KTermSecResult (*handshake)(void* ctx, KTermSession* session, int socket_fd);
     // Read decrypted data (returns bytes read, or -1/AGAIN)
     int (*read)(void* ctx, int socket_fd, char* buf, size_t len);
     // Write encrypted data (returns bytes written, or -1/AGAIN)
@@ -102,6 +102,7 @@ void KTerm_Net_Process(KTerm* term);
 void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int port, const char* user, const char* password);
 void KTerm_Net_Disconnect(KTerm* term, KTermSession* session);
 void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
+void KTerm_Net_GetCredentials(KTerm* term, KTermSession* session, char* user_out, size_t user_max, char* pass_out, size_t pass_max);
 
 // Server API
 void KTerm_Net_Listen(KTerm* term, KTermSession* session, int port);
@@ -129,6 +130,8 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
 #endif // KT_NET_H
 
 #ifdef KTERM_NET_IMPLEMENTATION
+#ifndef KTERM_NET_IMPLEMENTATION_GUARD
+#define KTERM_NET_IMPLEMENTATION_GUARD
 
 #include <stdio.h>
 #include <string.h>
@@ -509,6 +512,20 @@ void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_
     snprintf(buffer, max_len, "STATE=%s", state_str);
 }
 
+void KTerm_Net_GetCredentials(KTerm* term, KTermSession* session, char* user_out, size_t user_max, char* pass_out, size_t pass_max) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (net) {
+        if (user_out && user_max > 0) {
+            strncpy(user_out, net->user, user_max - 1);
+            user_out[user_max - 1] = '\0';
+        }
+        if (pass_out && pass_max > 0) {
+            strncpy(pass_out, net->password, pass_max - 1);
+            pass_out[pass_max - 1] = '\0';
+        }
+    }
+}
+
 void KTerm_Net_SetCallbacks(KTerm* term, KTermSession* session, KTermNetCallbacks callbacks) {
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (net) net->callbacks = callbacks;
@@ -690,7 +707,7 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
     }
     else if (net->state == KTERM_NET_STATE_HANDSHAKE) {
         if (net->security.handshake) {
-            KTermSecResult res = net->security.handshake(net->security.ctx, net->socket_fd);
+            KTermSecResult res = net->security.handshake(net->security.ctx, session, net->socket_fd);
             if (res == KTERM_SEC_OK) {
                 net->state = KTERM_NET_STATE_CONNECTED;
                 if (net->callbacks.on_connect) net->callbacks.on_connect(term, session);
@@ -971,4 +988,5 @@ void KTerm_Net_Process(KTerm* term) {
     }
 }
 
+#endif // KTERM_NET_IMPLEMENTATION_GUARD
 #endif // KTERM_NET_IMPLEMENTATION
