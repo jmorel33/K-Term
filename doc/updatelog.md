@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.5.11] - Production-Ready Remoting & Hardening
+- **SSH Skeleton Upgrade**: Refactored `example/ssh_skeleton.c` to implement a complete RFC 4252 Public Key Authentication state machine (Probe -> Sign). Added hardened packet framing helpers to prevent buffer overflows.
+- **Telnet Server**: Upgraded `example/net_server.c` to a fully functional Telnet server using the `KTerm_Net_Listen` API. It now handles RFC 854 negotiation (WILL ECHO, WILL SGA, DO NAWS), client resizing, and includes a basic command shell.
+- **Networking API**: hardened `kt_net.h` by implementing `KTerm_Net_Listen` and `KTerm_Net_SetProtocol` for server mode support, and adding Telnet option constants (`NAWS`, `ENVIRON`).
+- **Safety**: Hardened Telnet subnegotiation (SB) buffer handling in `kt_net.h` to prevent overflows when parsing long option strings.
+
 ## [v2.5.10] - Networking Completeness & SSH Pubkey
 - **SSH Pubkey Auth:** Implemented a complete Public Key Authentication flow (Probe -> PK_OK -> Sign -> Success) in the `ssh_skeleton` example, providing a robust template for secure custom integrations.
 - **Networking Hardening:** Added secure memory clearing for credentials, 10-second connection timeouts, and automatic retry logic (3 attempts) to `kt_net.h`.
