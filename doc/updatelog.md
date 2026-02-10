@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.5.6]
+
+- **Networking**: Added `KTerm_Net_SetKeepAlive` API to `kt_net.h` for enabling TCP Keep-Alive (`SO_KEEPALIVE`) and configuring idle timeouts (`TCP_KEEPIDLE`).
+- **Resilience**: Enhanced network session stability against idle disconnects.
+- **Example**: Updated `example/telnet_client.c` to be a full graphical Telnet client using the Situation framework, featuring a complete render loop and input handling.
+- **Documentation**: Added "Networking & Telnet" section to `README.md` detailing the usage of `kt_net.h`, async callbacks, and Telnet negotiation.
+
 ## [v2.5.5]
 
 - **Networking**: Added full Telnet protocol support (`KTERM_NET_PROTO_TELNET`) to `kt_net.h`.
