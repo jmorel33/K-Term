@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.5.3] - Networking Maturity
+- **Non-Blocking I/O:** Refactored `kt_net.h` to use a non-blocking connection state machine, eliminating UI freezes during connection attempts.
+- **Documentation:** Added `doc/kt_net.md` providing comprehensive usage guides, architecture details, and integration examples for the networking module.
+- **Server Example:** Added `example/net_server.c` demonstrating a minimal non-blocking TCP server integration that pipes data to KTerm.
+- **Cleanup:** Removed binary artifacts (`test_kt_net`) from the repository.
+
 ## [v2.5.2] - Networking & Architecture Fixes
 - **Networking Integration:** Fully integrated `kt_net` as a core module with clean API separation.
 - **Gateway Refactor:** Moved SSH command parsing to `kt_gateway.h`, consuming the `kt_net` API.

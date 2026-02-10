@@ -304,28 +304,71 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
             return;
         }
 
-        // Blocking connect for simplicity in this iteration (can use non-blocking + select)
+        // Non-blocking Connect
         KTerm_Net_Log(term, session_idx, "Connecting (TCP)...");
-        if (connect(net->socket_fd, res->ai_addr, res->ai_addrlen) == -1) {
-            KTerm_Net_Log(term, session_idx, "Connection Failed");
-            perror("[KT_NET] Connection Failed");
-            CLOSE_SOCKET(net->socket_fd);
-            net->socket_fd = INVALID_SOCKET;
-            net->state = KTERM_NET_STATE_ERROR;
-        } else {
-            KTerm_Net_Log(term, session_idx, "Connected (TCP)");
-            net->state = KTERM_NET_STATE_CONNECTED; // TCP has no Auth phase here
 
-            // Set Non-Blocking
+        // Set Non-Blocking immediately
 #ifdef _WIN32
-            u_long mode = 1;
-            ioctlsocket(net->socket_fd, FIONBIO, &mode);
+        u_long mode = 1;
+        ioctlsocket(net->socket_fd, FIONBIO, &mode);
 #else
-            int flags = fcntl(net->socket_fd, F_GETFL, 0);
-            fcntl(net->socket_fd, F_SETFL, flags | O_NONBLOCK);
+        int flags = fcntl(net->socket_fd, F_GETFL, 0);
+        fcntl(net->socket_fd, F_SETFL, flags | O_NONBLOCK);
 #endif
+
+        int connect_res = connect(net->socket_fd, res->ai_addr, res->ai_addrlen);
+        if (connect_res == 0) {
+            KTerm_Net_Log(term, session_idx, "Connected (TCP)");
+            net->state = KTERM_NET_STATE_CONNECTED;
+        } else {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK) {
+#else
+            if (errno == EINPROGRESS) {
+#endif
+                net->state = KTERM_NET_STATE_CONNECTING;
+            } else {
+                KTerm_Net_Log(term, session_idx, "Connection Failed");
+                perror("[KT_NET] Connection Failed");
+                CLOSE_SOCKET(net->socket_fd);
+                net->socket_fd = INVALID_SOCKET;
+                net->state = KTERM_NET_STATE_ERROR;
+            }
         }
         freeaddrinfo(res);
+#endif
+    }
+
+    else if (net->state == KTERM_NET_STATE_CONNECTING) {
+#ifndef KTERM_USE_LIBSSH
+        fd_set wfds;
+        struct timeval tv = {0, 0}; // Immediate poll
+        FD_ZERO(&wfds);
+        FD_SET(net->socket_fd, &wfds);
+
+        int res = select(net->socket_fd + 1, NULL, &wfds, NULL, &tv);
+        if (res > 0) {
+            // Check for SO_ERROR
+            int optval = 0;
+            socklen_t optlen = sizeof(optval);
+            if (getsockopt(net->socket_fd, SOL_SOCKET, SO_ERROR, (char*)&optval, &optlen) == 0 && optval == 0) {
+                KTerm_Net_Log(term, session_idx, "Connected (TCP)");
+                net->state = KTERM_NET_STATE_CONNECTED;
+            } else {
+                KTerm_Net_Log(term, session_idx, "Connection Failed (Async)");
+                CLOSE_SOCKET(net->socket_fd);
+                net->socket_fd = INVALID_SOCKET;
+                net->state = KTERM_NET_STATE_ERROR;
+            }
+        } else if (res < 0) {
+            // Select error
+             KTerm_Net_Log(term, session_idx, "Connection Select Error");
+             CLOSE_SOCKET(net->socket_fd);
+             net->socket_fd = INVALID_SOCKET;
+             net->state = KTERM_NET_STATE_ERROR;
+        }
+        // If res == 0, still connecting
 #endif
     }
 
