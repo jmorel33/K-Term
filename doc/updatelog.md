@@ -6,7 +6,7 @@
 - **Protocol**: Implemented RFC 854 state machine for handling IAC sequences (DO/DONT/WILL/WONT/SB).
 - **API**: Introduced `on_telnet_command` callback for negotiation handling and `KTerm_Net_SendTelnetCommand` helper.
 - **Example**: Added `example/telnet_client.c` demonstrating a functional Telnet client with option negotiation.
-- 
+
 ## [v2.5.4] - Networking Hardening
 - **Async API:** Enhanced `kt_net.h` with an event-driven callback system (`on_connect`, `on_data`, `on_error`) for robust non-blocking integration.
 - **Security Hooks:** Added `KTermNetSecurity` interface to support TLS/SSL integration (e.g., OpenSSL) without modifying core library code.
