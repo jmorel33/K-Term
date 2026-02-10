@@ -1,12 +1,12 @@
 # Update Log
 
-
-## v2.5.5
+## [v2.5.5]
 
 - **Networking**: Added full Telnet protocol support (`KTERM_NET_PROTO_TELNET`) to `kt_net.h`.
 - **Protocol**: Implemented RFC 854 state machine for handling IAC sequences (DO/DONT/WILL/WONT/SB).
 - **API**: Introduced `on_telnet_command` callback for negotiation handling and `KTerm_Net_SendTelnetCommand` helper.
 - **Example**: Added `example/telnet_client.c` demonstrating a functional Telnet client with option negotiation.
+- 
 ## [v2.5.4] - Networking Hardening
 - **Async API:** Enhanced `kt_net.h` with an event-driven callback system (`on_connect`, `on_data`, `on_error`) for robust non-blocking integration.
 - **Security Hooks:** Added `KTermNetSecurity` interface to support TLS/SSL integration (e.g., OpenSSL) without modifying core library code.
@@ -1065,9 +1065,3 @@ This completes the multi-version refactor arc (started v2.3.40) — grid is now 
 
 - **Major Update**: Rendering engine rewritten to use a Compute Shader pipeline via Shader Storage Buffer Objects (SSBO).
 - **Integration**: Full integration with the KTerm Platform for robust resource management and windowing.
-
-## v2.5.5
-
-- **Networking**: Added full Telnet protocol support (`KTERM_NET_PROTO_TELNET`) to `kt_net.h`.
-- **Protocol**: Implemented RFC 854 state machine for handling IAC sequences (DO/DONT/WILL/WONT/SB).
-- **API**: Introduced `on_telnet_command` callback for negotiation handling and `KTerm_Net_SendTelnetCommand` helper.
