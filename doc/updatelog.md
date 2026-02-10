@@ -1,5 +1,26 @@
 # Update Log
 
+## [v2.5.1] - SSH Gateway Module & Real Networking
+
+This maintenance release introduces the long-awaited SSH Gateway Module (`kt_net.h`), transforming K-Term into a capable network client.
+
+### Major Features
+- **SSH Gateway Module (`kt_net.h`):** A new single-header library integrating networking capabilities directly into the K-Term ecosystem via the Gateway Protocol.
+    - **Session Subsystem:** Implemented as a per-session subsystem attached to `session->user_data`, allowing multiple independent connections (e.g., in split panes).
+    - **Gateway Commands:**
+        - `EXT;ssh;connect;user@host:port`: Initiates a connection.
+        - `EXT;ssh;disconnect`: Closes the active connection.
+        - `EXT;ssh;status`: Reports current connection state.
+    - **Real Networking:**
+        - Implements a robust TCP client fallback using standard sockets (`sys/socket.h`, `winsock2.h`) for immediate connectivity testing (Telnet-style) without external dependencies.
+        - Performs real DNS resolution (`getaddrinfo`) and non-blocking connection establishment.
+        - Pipes data transparently between the network socket and the terminal session.
+    - **LibSSH Integration:** Includes structural support and guards (`KTERM_USE_LIBSSH`) for full secure shell integration using `libssh`.
+
+### Infrastructure
+- **Tests:** Added `tests/test_kt_net.c` which spins up a real local TCP echo server to verify round-trip data transmission and session isolation.
+- **Mock Update:** Updated `tests/mock_situation.h` to include missing type definitions required for compiling against the latest K-Term v2.5.0 graphics headers.
+
 ## [v2.5.0] - Feature Consolidation & Stabilization
 
 This major release consolidates the extensive feature set introduced throughout the v2.4.x development cycle, delivering a production-ready, high-performance terminal emulation engine. It marks the complete integration with the Situation framework and finalizes the advanced Gateway Grid system.
