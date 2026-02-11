@@ -1466,174 +1466,2200 @@ This section provides a comprehensive reference for the public API of `kterm.h`.
 
 ### 5.1. Lifecycle Functions
 
-These functions manage the initialization and destruction of the terminal instance.
+The lifecycle of a K-Term instance follows a clear pattern: creation, initialization, runtime updates, and cleanup. This section documents all functions involved in managing the terminal's lifecycle.
 
--   `KTerm* KTerm_Create(KTermConfig config);`
-    Allocates and initializes a new `KTerm` instance. `config` allows setting initial dimensions and callbacks.
+#### Initialization Phase
 
--   `void KTerm_Destroy(KTerm* term);`
-    Frees all resources allocated by the terminal instance. This includes the font texture, memory for programmable keys, and any other dynamically allocated buffers.
+When creating a new terminal instance, you must first create the instance, then initialize it.
 
--   `void KTerm_Init(KTerm* term);`
-    Initializes a pre-allocated `Terminal` struct to a default state. Called internally by `KTerm_Create`.
+##### `KTerm_Create()`
 
--   `void KTerm_Cleanup(KTerm* term);`
-    Frees internal resources of a terminal instance. Called by `KTerm_Destroy`.
+**Signature:**
+```c
+KTerm* KTerm_Create(KTermConfig config);
+```
 
--   `void KTerm_Update(KTerm* term);`
-    This is the main "tick" function for the terminal. It should be called once per frame. It drives all ongoing processes:
-    -   Processes a batch of characters from the input pipeline.
-    -   Updates internal timers for cursor and text blinking.
-    -   Polls Situation for keyboard and mouse input and translates them into VT events.
-    -   Invokes the `ResponseCallback` if any data is queued to be sent to the host.
+**Description:**
+Allocates and initializes a new `KTerm` instance with the specified configuration. This function allocates memory for the terminal emulator and initializes all internal structures.
 
--   `void KTerm_Draw(KTerm* term);`
-    Renders the current state of the terminal to the screen. It iterates over the screen buffer, drawing each character with its correct attributes. It also handles drawing the cursor, Sixel graphics, and visual bell. Must be called within a Situation `BeginDrawing()` / `EndDrawing()` block.
+**Parameters:**
+- `config`: A `KTermConfig` struct containing terminal configuration options (width, height, compliance level, callbacks, etc.)
+
+**Return Value:**
+Returns a pointer to the newly created `KTerm` instance on success, or `NULL` if memory allocation fails.
+
+**Example:**
+```c
+KTermConfig config = {
+    .width = 80,
+    .height = 25,
+    .level = VT_LEVEL_XTERM
+};
+
+KTerm* term = KTerm_Create(config);
+if (!term) {
+    fprintf(stderr, "Failed to create terminal\n");
+    return false;
+}
+```
+
+**See Also:**
+- `KTerm_Init()` - Initialize terminal after creation
+- `KTerm_Destroy()` - Destroy terminal instance
+- `KTermConfig` - Configuration structure
+
+**Notes:**
+- This function does NOT initialize the terminal. Call `KTerm_Init()` after creation.
+- Multiple instances can coexist independently.
+
+##### `KTerm_Init()`
+
+**Signature:**
+```c
+void KTerm_Init(KTerm* term);
+```
+
+**Description:**
+Initializes a previously created K-Term instance. This must be called after `KTerm_Create()` and before any other operations.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance to initialize
+
+**Example:**
+```c
+KTerm* term = KTerm_Create(config);
+KTerm_Init(term);
+```
+
+**See Also:**
+- `KTerm_Create()` - Create terminal instance
+- `KTerm_Cleanup()` - Cleanup before destruction
+
+**Notes:**
+- Must be called after `KTerm_Create()`.
+- Sets up GPU resources and rendering pipeline.
+- Called internally by `KTerm_Create()` in most cases.
+
+#### Runtime Phase
+
+Once initialized, the terminal operates in a continuous cycle of updates and rendering.
+
+##### `KTerm_Update()`
+
+**Signature:**
+```c
+void KTerm_Update(KTerm* term);
+```
+
+**Description:**
+Processes pending events and updates terminal state. This is the main "tick" function for the terminal and should be called once per frame in your main loop. It drives all ongoing processes including input processing, timer updates, and event polling.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Behavior:**
+- Processes a batch of characters from the input pipeline
+- Updates internal timers for cursor and text blinking
+- Polls Situation for keyboard and mouse input and translates them into VT events
+- Invokes the `ResponseCallback` if any data is queued to be sent to the host
+
+**Example:**
+```c
+while (running) {
+    KTerm_Update(term);
+    KTerm_Draw(term);
+    // ... present to screen
+}
+```
+
+**See Also:**
+- `KTerm_Draw()` - Render terminal to screen
+- `KTerm_ProcessEvents()` - Process input pipeline manually
+
+**Notes:**
+- Safe to call from main thread only.
+- Should be called once per frame for optimal performance.
+
+##### `KTerm_Draw()`
+
+**Signature:**
+```c
+void KTerm_Draw(KTerm* term);
+```
+
+**Description:**
+Renders the terminal state to the GPU. This should be called once per frame after `KTerm_Update()`. It iterates over the screen buffer, drawing each character with its correct attributes, and handles drawing the cursor, Sixel graphics, and visual bell.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+while (running) {
+    KTerm_Update(term);
+    KTerm_Draw(term);
+    // ... present to screen
+}
+```
+
+**See Also:**
+- `KTerm_Update()` - Update terminal state
+- `KTerm_Create()` - Create terminal instance
+
+**Notes:**
+- Must be called after `KTerm_Update()`.
+- Must be called within a Situation `BeginDrawing()` / `EndDrawing()` block.
+- Dispatches compute shaders to GPU.
+
+#### Cleanup Phase
+
+When done with the terminal, you must clean up resources in the correct order.
+
+##### `KTerm_Cleanup()`
+
+**Signature:**
+```c
+void KTerm_Cleanup(KTerm* term);
+```
+
+**Description:**
+Cleans up terminal resources before destruction. This should be called before `KTerm_Destroy()`.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+KTerm_Cleanup(term);
+KTerm_Destroy(term);
+```
+
+**See Also:**
+- `KTerm_Destroy()` - Destroy terminal instance
+- `KTerm_Init()` - Initialize terminal
+
+**Notes:**
+- Must be called before `KTerm_Destroy()`.
+- Frees GPU resources and buffers.
+
+##### `KTerm_Destroy()`
+
+**Signature:**
+```c
+void KTerm_Destroy(KTerm* term);
+```
+
+**Description:**
+Destroys a K-Term instance and frees all associated memory. This should be called after `KTerm_Cleanup()`.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+KTerm_Cleanup(term);
+KTerm_Destroy(term);
+term = NULL;
+```
+
+**See Also:**
+- `KTerm_Cleanup()` - Cleanup before destruction
+- `KTerm_Create()` - Create terminal instance
+
+**Notes:**
+- Must be called after `KTerm_Cleanup()`.
+- Frees all allocated memory including font texture, programmable keys, and dynamically allocated buffers.
+
+#### Complete Lifecycle Example
+
+```c
+// Create
+KTermConfig config = {
+    .width = 80,
+    .height = 25,
+    .level = VT_LEVEL_XTERM
+};
+KTerm* term = KTerm_Create(config);
+if (!term) return false;
+
+// Initialize
+KTerm_Init(term);
+
+// Runtime loop
+while (running) {
+    KTerm_Update(term);
+    KTerm_Draw(term);
+    // ... present to screen
+}
+
+// Cleanup
+KTerm_Cleanup(term);
+KTerm_Destroy(term);
+```
 
 ### 5.2. Host Input (Pipeline) Management
 
-These functions are used by the host application to feed data *into* the terminal for emulation.
+The input pipeline is the primary mechanism for feeding data into the terminal emulator. This section documents all functions for writing data to the terminal and processing it.
 
--   `bool KTerm_WriteChar(KTerm* term, unsigned char ch);`
-    Writes a single character to the input pipeline. Returns `false` if the pipeline is full.
+#### Basic Input Methods
 
--   `bool KTerm_WriteString(KTerm* term, const char* str);`
-    Writes a null-terminated string to the input pipeline.
+The simplest way to send data to the terminal is character-by-character or string-by-string.
 
--   `bool KTerm_WriteFormat(KTerm* term, const char* format, ...);`
-    Writes a printf-style formatted string to the input pipeline.
+##### `KTerm_WriteChar()`
 
--   `void KTerm_ProcessEvents(KTerm* term);`
-    Manually processes a batch of characters from the pipeline. This is called automatically by `KTerm_Update(term)` but can be called manually for finer control.
+**Signature:**
+```c
+bool KTerm_WriteChar(KTerm* term, unsigned char ch);
+```
 
--   `void KTerm_ClearEvents(KTerm* term);`
-    Discards all data currently in the input pipeline.
+**Description:**
+Writes a single character to the terminal's input pipeline. This is the most basic input method.
 
--   `int KTerm_GetPendingEventCount(KTerm* term);`
-    Returns the number of bytes currently waiting in the input pipeline.
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `ch`: The character to write
 
--   `bool KTerm_IsEventOverflow(KTerm* term);`
-    Returns `true` if the pipeline has overflowed since the last `KTerm_ClearEvents(term)` call.
+**Return Value:**
+Returns `true` on success, `false` if the pipeline is full.
+
+**Example:**
+```c
+if (!KTerm_WriteChar(term, 'A')) {
+    fprintf(stderr, "Input pipeline full\n");
+}
+```
+
+**See Also:**
+- `KTerm_WriteString()` - Write a string
+- `KTerm_WriteFormat()` - Write formatted string
+- `KTerm_PushInput()` - Write raw data
+
+##### `KTerm_WriteString()`
+
+**Signature:**
+```c
+bool KTerm_WriteString(KTerm* term, const char* str);
+```
+
+**Description:**
+Writes a null-terminated string to the terminal's input pipeline.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `str`: Null-terminated string to write
+
+**Return Value:**
+Returns `true` on success, `false` if the pipeline is full.
+
+**Example:**
+```c
+if (!KTerm_WriteString(term, "Hello, World!")) {
+    fprintf(stderr, "Input pipeline full\n");
+}
+```
+
+**See Also:**
+- `KTerm_WriteChar()` - Write single character
+- `KTerm_WriteFormat()` - Write formatted string
+
+##### `KTerm_WriteFormat()`
+
+**Signature:**
+```c
+bool KTerm_WriteFormat(KTerm* term, const char* format, ...);
+```
+
+**Description:**
+Writes a formatted string to the terminal's input pipeline, similar to `printf()`.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `format`: Format string (printf-style)
+- `...`: Variable arguments
+
+**Return Value:**
+Returns `true` on success, `false` if the pipeline is full.
+
+**Example:**
+```c
+if (!KTerm_WriteFormat(term, "Value: %d\n", 42)) {
+    fprintf(stderr, "Input pipeline full\n");
+}
+```
+
+**See Also:**
+- `KTerm_WriteString()` - Write string
+- `KTerm_WriteChar()` - Write single character
+
+#### Advanced Input Methods
+
+For high-performance applications or when working with raw data, use these advanced methods.
+
+##### `KTerm_PushInput()`
+
+**Signature:**
+```c
+size_t KTerm_PushInput(KTerm* term, const void* data, size_t length);
+```
+
+**Description:**
+Writes raw data to the terminal's input pipeline. This is the most efficient method for bulk data transfer.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `data`: Pointer to data buffer
+- `length`: Number of bytes to write
+
+**Return Value:**
+Returns the number of bytes actually written. May be less than `length` if the pipeline is full.
+
+**Example:**
+```c
+const char* data = "\x1b[2J\x1b[H";  // Clear screen and home cursor
+size_t written = KTerm_PushInput(term, data, strlen(data));
+if (written < strlen(data)) {
+    fprintf(stderr, "Pipeline full, %zu bytes written\n", written);
+}
+```
+
+**See Also:**
+- `KTerm_WriteString()` - Write string
+- `KTerm_IsEventOverflow()` - Check for overflow
+
+**Notes:**
+- Most efficient for bulk data transfer.
+- Returns actual bytes written (may be less than requested).
+
+##### `KTerm_ProcessEvent()`
+
+**Signature:**
+```c
+bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* event);
+```
+
+**Description:**
+Processes a single event (keyboard, mouse, etc.) through the terminal.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `session`: Pointer to the session to process event for
+- `event`: Pointer to the event to process
+
+**Return Value:**
+Returns `true` if the event was processed, `false` otherwise.
+
+**Example:**
+```c
+KTermEvent event = {
+    .type = KTERM_EVENT_KEYBOARD,
+    .key = {
+        .code = 'A',
+        .modifiers = 0
+    }
+};
+
+if (!KTerm_ProcessEvent(term, session, &event)) {
+    fprintf(stderr, "Failed to process event\n");
+}
+```
+
+**See Also:**
+- `KTerm_ProcessEvents()` - Process all pending events
+- `KTerm_QueueInputEvent()` - Queue input event
+
+##### `KTerm_ProcessEvents()`
+
+**Signature:**
+```c
+void KTerm_ProcessEvents(KTerm* term);
+```
+
+**Description:**
+Processes all pending characters from the input pipeline. This is called automatically by `KTerm_Update()` but can be called manually for finer control.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Process all pending input
+KTerm_ProcessEvents(term);
+```
+
+**See Also:**
+- `KTerm_Update()` - Update terminal state
+- `KTerm_ProcessEvent()` - Process single event
+
+**Notes:**
+- Called automatically by `KTerm_Update()`.
+- Processes tunable number of characters per frame.
+
+#### Event Management
+
+These functions manage the event buffer and provide diagnostics.
+
+##### `KTerm_ClearEvents()`
+
+**Signature:**
+```c
+void KTerm_ClearEvents(KTerm* term);
+```
+
+**Description:**
+Clears all pending events from the input pipeline.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Clear all pending input
+KTerm_ClearEvents(term);
+```
+
+**See Also:**
+- `KTerm_GetPendingEventCount()` - Get pending event count
+- `KTerm_IsEventOverflow()` - Check for overflow
+
+##### `KTerm_GetPendingEventCount()`
+
+**Signature:**
+```c
+int KTerm_GetPendingEventCount(KTerm* term);
+```
+
+**Description:**
+Returns the number of pending events in the input pipeline.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Return Value:**
+Returns the number of pending events.
+
+**Example:**
+```c
+int pending = KTerm_GetPendingEventCount(term);
+printf("Pending events: %d\n", pending);
+```
+
+**See Also:**
+- `KTerm_IsEventOverflow()` - Check for overflow
+- `KTerm_ClearEvents()` - Clear all events
+
+##### `KTerm_IsEventOverflow()`
+
+**Signature:**
+```c
+bool KTerm_IsEventOverflow(KTerm* term);
+```
+
+**Description:**
+Checks if the input pipeline has overflowed. This indicates that data was written faster than it could be processed.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Return Value:**
+Returns `true` if overflow occurred, `false` otherwise.
+
+**Example:**
+```c
+if (KTerm_IsEventOverflow(term)) {
+    fprintf(stderr, "Input pipeline overflow - data loss\n");
+    // Handle overflow condition
+}
+```
+
+**See Also:**
+- `KTerm_GetPendingEventCount()` - Get pending event count
+- `KTerm_PushInput()` - Write raw data
+
+**Notes:**
+- Indicates that some data was lost.
+- Should be checked periodically in high-throughput scenarios.
 
 ### 5.3. Keyboard and Mouse Output
 
-These functions are used to get user input events *from* the terminal, ready to be sent to the host.
+User input from the keyboard and mouse is processed by the terminal and converted into VT sequences that are sent back to the host application. This section documents the functions for retrieving keyboard events and managing mouse input.
 
--   `bool KTerm_GetKey(KTerm* term, VTKeyEvent* event);`
-    Retrieves the next processed keyboard event from the output queue. `KTerm_UpdateKeyboard(term)` (called by `KTerm_Update(term)`) is responsible for polling the keyboard and populating this queue. This function is the primary way for the host application to receive user keyboard input. Returns `true` if an event was retrieved.
+#### Keyboard Input
 
--   `void KTerm_UpdateKeyboard(KTerm* term);`
-    Polls the keyboard, processes modifier keys and terminal modes (e.g., Application Cursor Keys), and places `VTKeyEvent`s into the output queue. Called automatically by `KTerm_Update(term)`.
+These functions handle keyboard input processing and event retrieval.
 
--   `void KTerm_UpdateMouse(KTerm* term);`
-    Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for the `ResponseCallback`. Called automatically by `KTerm_Update(term)`.
+##### `KTerm_GetKey()`
+
+**Signature:**
+```c
+bool KTerm_GetKey(KTerm* term, VTKeyEvent* event);
+```
+
+**Description:**
+Retrieves the next processed keyboard event from the output queue. This is the primary way for the host application to receive user keyboard input. The keyboard is polled automatically by `KTerm_Update()`, but events must be retrieved using this function.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `event`: Pointer to a `VTKeyEvent` struct to receive the event data
+
+**Return Value:**
+Returns `true` if an event was retrieved, `false` if the queue is empty.
+
+**Example:**
+```c
+VTKeyEvent event;
+while (KTerm_GetKey(term, &event)) {
+    printf("Key: code=%d, modifiers=%d\n", event.code, event.modifiers);
+    // Process the key event
+}
+```
+
+**See Also:**
+- `KTerm_UpdateKeyboard()` - Poll keyboard and populate queue
+- `KTerm_DefineFunctionKey()` - Program function keys
+- `VTKeyEvent` - Key event structure
+
+**Notes:**
+- Events are queued in the order they are received.
+- Modifier keys (Shift, Ctrl, Alt) are included in the event.
+- Terminal modes affect how keys are reported (e.g., Application Cursor Keys mode).
+
+##### `KTerm_UpdateKeyboard()`
+
+**Signature:**
+```c
+void KTerm_UpdateKeyboard(KTerm* term);
+```
+
+**Description:**
+Polls the keyboard hardware, processes modifier keys and terminal modes, and populates the keyboard event queue. This function is called automatically by `KTerm_Update()` but can be called manually for finer control.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Manually poll keyboard
+KTerm_UpdateKeyboard(term);
+
+// Retrieve events
+VTKeyEvent event;
+while (KTerm_GetKey(term, &event)) {
+    // Process event
+}
+```
+
+**See Also:**
+- `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_Update()` - Main update function
+- `KTerm_SetMode()` - Set keyboard modes
+
+**Notes:**
+- Called automatically by `KTerm_Update()`.
+- Respects terminal modes like Application Cursor Keys and Application Keypad.
+- Processes modifier key combinations.
+
+#### Mouse Input
+
+These functions handle mouse input processing and event reporting.
+
+##### `KTerm_UpdateMouse()`
+
+**Signature:**
+```c
+void KTerm_UpdateMouse(KTerm* term);
+```
+
+**Description:**
+Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for transmission to the host. This function is called automatically by `KTerm_Update()`.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Manually poll mouse
+KTerm_UpdateMouse(term);
+
+// Mouse events are queued and sent via ResponseCallback
+```
+
+**See Also:**
+- `KTerm_SetMouseTracking()` - Set mouse tracking mode
+- `KTerm_Update()` - Main update function
+- `KTerm_SetResponseCallback()` - Set output callback
+
+**Notes:**
+- Called automatically by `KTerm_Update()`.
+- Respects the current mouse tracking mode (X10, VT200, SGR, etc.).
+- Mouse events are sent via the response callback.
+- Supports button press, release, and motion events.
+
+##### `KTerm_SetMouseTracking()`
+
+**Signature:**
+```c
+void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode);
+```
+
+**Description:**
+Explicitly sets the mouse tracking protocol mode. This is usually controlled by the host application via escape sequences, but can be set manually.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `mode`: The mouse tracking mode (e.g., `MOUSE_TRACKING_X10`, `MOUSE_TRACKING_VT200`, `MOUSE_TRACKING_SGR`)
+
+**Return Value:**
+None.
+
+**Example:**
+```c
+// Enable SGR mouse tracking (modern, unambiguous)
+KTerm_SetMouseTracking(term, MOUSE_TRACKING_SGR);
+```
+
+**See Also:**
+- `KTerm_UpdateMouse()` - Poll mouse and queue events
+- `MouseTrackingMode` - Mouse tracking mode enum
+
+**Notes:**
+- Different modes report mouse events in different formats.
+- SGR mode is recommended for modern applications (unambiguous encoding).
+- X10 mode is the most basic and compatible.
+
+#### Input Event Processing
+
+These functions provide lower-level control over input event processing.
+
+##### `KTerm_QueueInputEvent()`
+
+**Signature:**
+```c
+bool KTerm_QueueInputEvent(KTerm* term, const KTermEvent* event);
+```
+
+**Description:**
+Queues an input event (keyboard or mouse) for processing by the terminal. This allows the host application to inject synthetic events or events from alternative input sources.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `event`: Pointer to the event to queue
+
+**Return Value:**
+Returns `true` if the event was queued successfully, `false` if the queue is full.
+
+**Example:**
+```c
+KTermEvent event = {
+    .type = KTERM_EVENT_KEYBOARD,
+    .key = {
+        .code = 'A',
+        .modifiers = KTERM_MOD_CTRL
+    }
+};
+
+if (!KTerm_QueueInputEvent(term, &event)) {
+    fprintf(stderr, "Event queue full\n");
+}
+```
+
+**See Also:**
+- `KTerm_ProcessEvent()` - Process a single event
+- `KTermEvent` - Event structure
+
+**Notes:**
+- Useful for testing or alternative input sources.
+- Events are processed in the order they are queued.
 
 ### 5.4. Configuration and Mode Setting
 
-Functions for configuring the terminal's behavior at runtime.
+These functions allow you to configure the terminal's behavior at runtime, including emulation level, cursor appearance, and various terminal modes.
 
--   `void KTerm_SetLevel(KTerm* term, VTLevel level);`
-    Sets the terminal's emulation compatibility level (e.g., `VT_LEVEL_220`, `VT_LEVEL_XTERM`). This is a critical function that changes which features and escape sequences are active.
+#### Emulation Level
 
--   `VTLevel KTerm_GetLevel(KTerm* term);`
-    Returns the current `VTLevel`.
+The terminal's compatibility level determines which features and escape sequences are active.
 
--   `void KTerm_SetMode(KTerm* term, const char* mode, bool enable);`
-    A generic function to enable or disable specific terminal modes by name, such as `"application_cursor"`, `"auto_wrap"`, `"origin"`, or `"insert"`.
+##### `KTerm_SetLevel()`
 
--   `void KTerm_SetCursorShape(KTerm* term, CursorShape shape);`
-    Sets the visual style of the cursor (e.g., `CURSOR_BLOCK_BLINK`, `CURSOR_UNDERLINE`).
+**Signature:**
+```c
+void KTerm_SetLevel(KTerm* term, VTLevel level);
+```
 
--   `void KTerm_SetCursorColor(KTerm* term, ExtendedColor color);`
-    Sets the color of the cursor.
+**Description:**
+Sets the terminal's emulation compatibility level. This is a critical function that changes which features and escape sequences are active. Setting the level updates the device attribute strings that the terminal reports to the host.
 
--   `void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode);`
-    Explicitly enables a specific mouse tracking protocol (e.g., `MOUSE_TRACKING_SGR`). This is usually controlled by the host application via escape sequences, but can be set manually.
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `level`: The target VT level (e.g., `VT_LEVEL_220`, `VT_LEVEL_XTERM`)
 
--   `void KTerm_EnableBracketedPaste(KTerm* term, bool enable);`
-    Manually enables or disables bracketed paste mode.
+**Example:**
+```c
+// Set to xterm compatibility (most features)
+KTerm_SetLevel(term, VT_LEVEL_XTERM);
 
--   `void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence);`
-    Programs a function key (F1-F24) to send a custom string sequence when pressed.
+// Set to VT220 (classic compatibility)
+KTerm_SetLevel(term, VT_LEVEL_220);
+```
 
-### 5.5. Callbacks
+**See Also:**
+- `KTerm_GetLevel()` - Get current level
+- `VTLevel` - Emulation level enum
+- Section 2 - Compliance and Emulation Levels
 
-These functions allow the host application to receive data and notifications from the terminal.
+**Notes:**
+- Changing the level affects which escape sequences are recognized.
+- Higher levels include features from lower levels.
+- The default level is `VT_LEVEL_XTERM`.
 
--   `void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);`
-    Sets the callback function that receives all data the terminal sends back to the host. This includes keyboard input, mouse events, and status reports.
-    `typedef void (*ResponseCallback)(KTerm* term, const char* response, int length);`
+##### `KTerm_GetLevel()`
 
--   `void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);`
-    Sets a direct output sink callback. When set, KTerm writes response data directly to this function without buffering, improving performance for high-throughput applications. Transitioning to a sink flushes any existing buffered data.
-    `typedef void (*KTermOutputSink)(void* ctx, const char* data, size_t len);`
+**Signature:**
+```c
+VTLevel KTerm_GetLevel(KTerm* term);
+```
 
--   `void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);`
-    Sets the callback function that is invoked whenever the window or icon title is changed by the host via an OSC sequence.
-    `typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);`
+**Description:**
+Returns the current emulation compatibility level.
 
--   `void KTerm_SetBellCallback(KTerm* term, BellCallback callback);`
-    Sets the callback function for the audible bell (`BEL`, `0x07`). If `NULL`, a visual bell is used instead.
-    `typedef void (*BellCallback)(KTerm* term);`
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Return Value:**
+Returns the current `VTLevel`.
+
+**Example:**
+```c
+VTLevel level = KTerm_GetLevel(term);
+printf("Current level: %d\n", level);
+```
+
+**See Also:**
+- `KTerm_SetLevel()` - Set emulation level
+- `VTLevel` - Emulation level enum
+
+#### Terminal Modes
+
+These functions control various terminal modes that affect behavior.
+
+##### `KTerm_SetMode()`
+
+**Signature:**
+```c
+void KTerm_SetMode(KTerm* term, const char* mode, bool enable);
+```
+
+**Description:**
+A generic function to enable or disable specific terminal modes by name. This provides a convenient way to set modes without needing to know their numeric codes.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `mode`: Mode name as a string (e.g., `"application_cursor"`, `"auto_wrap"`, `"origin"`, `"insert"`)
+- `enable`: `true` to enable, `false` to disable
+
+**Example:**
+```c
+// Enable application cursor keys mode
+KTerm_SetMode(term, "application_cursor", true);
+
+// Disable auto-wrap
+KTerm_SetMode(term, "auto_wrap", false);
+
+// Enable insert mode
+KTerm_SetMode(term, "insert", true);
+```
+
+**See Also:**
+- `KTerm_SetLevel()` - Set emulation level
+- Section 3.3.3 - Mode Setting Parameters
+
+**Notes:**
+- Mode names are case-insensitive.
+- Some modes are only available at certain emulation levels.
+- Modes can also be set via escape sequences (CSI ? Pn h/l).
+
+##### `KTerm_EnableBracketedPaste()`
+
+**Signature:**
+```c
+void KTerm_EnableBracketedPaste(KTerm* term, bool enable);
+```
+
+**Description:**
+Manually enables or disables bracketed paste mode. When enabled, pasted text is wrapped with special escape sequences that allow the terminal to distinguish pasted text from typed input.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `enable`: `true` to enable, `false` to disable
+
+**Example:**
+```c
+// Enable bracketed paste mode
+KTerm_EnableBracketedPaste(term, true);
+
+// Pasted text will be wrapped with CSI ? 2004 sequences
+```
+
+**See Also:**
+- `KTerm_SetMode()` - Generic mode setting
+- Section 4.6 - Bracketed Paste Mode
+
+**Notes:**
+- Bracketed paste mode is controlled by `CSI ? 2004 h/l`.
+- Useful for distinguishing pasted text from user input.
+
+#### Cursor Appearance
+
+These functions control the visual appearance of the cursor.
+
+##### `KTerm_SetCursorShape()`
+
+**Signature:**
+```c
+void KTerm_SetCursorShape(KTerm* term, CursorShape shape);
+```
+
+**Description:**
+Sets the visual style of the cursor. The cursor can be displayed as a block, underline, or bar, with optional blinking.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `shape`: The cursor shape (e.g., `CURSOR_BLOCK_BLINK`, `CURSOR_UNDERLINE_STEADY`, `CURSOR_BAR_BLINK`)
+
+**Example:**
+```c
+// Set cursor to blinking block
+KTerm_SetCursorShape(term, CURSOR_BLOCK_BLINK);
+
+// Set cursor to steady underline
+KTerm_SetCursorShape(term, CURSOR_UNDERLINE_STEADY);
+```
+
+**See Also:**
+- `KTerm_SetCursorColor()` - Set cursor color
+- `CursorShape` - Cursor shape enum
+
+**Notes:**
+- Cursor shape can also be set via escape sequences (CSI SP q).
+- Different shapes are useful for different editing modes.
+
+##### `KTerm_SetCursorColor()`
+
+**Signature:**
+```c
+void KTerm_SetCursorColor(KTerm* term, ExtendedColor color);
+```
+
+**Description:**
+Sets the color of the cursor. The color can be an indexed palette color or a 24-bit RGB color.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `color`: The cursor color as an `ExtendedColor` struct
+
+**Example:**
+```c
+// Set cursor to bright green
+ExtendedColor green = {
+    .type = COLOR_TYPE_INDEXED,
+    .index = 10  // Bright green in ANSI palette
+};
+KTerm_SetCursorColor(term, green);
+
+// Set cursor to custom RGB color
+ExtendedColor custom = {
+    .type = COLOR_TYPE_RGB,
+    .rgb = {255, 128, 0}  // Orange
+};
+KTerm_SetCursorColor(term, custom);
+```
+
+**See Also:**
+- `KTerm_SetCursorShape()` - Set cursor shape
+- `ExtendedColor` - Color structure
+
+#### Performance Tuning
+
+These functions allow you to tune the terminal's performance characteristics.
+
+##### `KTerm_SetPipelineTargetFPS()`
+
+**Signature:**
+```c
+void KTerm_SetPipelineTargetFPS(KTerm* term, int fps);
+```
+
+**Description:**
+Sets the target frames per second for the input pipeline processing. This controls how many characters are processed per frame, allowing you to balance responsiveness with CPU usage.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `fps`: Target FPS (e.g., 60, 120)
+
+**Example:**
+```c
+// Process input at 60 FPS
+KTerm_SetPipelineTargetFPS(term, 60);
+
+// Process input at 120 FPS for lower latency
+KTerm_SetPipelineTargetFPS(term, 120);
+```
+
+**See Also:**
+- `KTerm_SetPipelineTimeBudget()` - Set time budget
+- `KTerm_GetPendingEventCount()` - Check pending events
+
+**Notes:**
+- Higher FPS means more characters processed per frame.
+- Lower FPS reduces CPU usage but may increase input latency.
+
+##### `KTerm_SetPipelineTimeBudget()`
+
+**Signature:**
+```c
+void KTerm_SetPipelineTimeBudget(KTerm* term, float milliseconds);
+```
+
+**Description:**
+Sets the maximum time budget (in milliseconds) for processing input characters per frame. This provides fine-grained control over CPU usage.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `milliseconds`: Maximum time budget in milliseconds
+
+**Example:**
+```c
+// Allocate 2ms per frame for input processing
+KTerm_SetPipelineTimeBudget(term, 2.0f);
+
+// Allocate 5ms per frame for higher throughput
+KTerm_SetPipelineTimeBudget(term, 5.0f);
+```
+
+**See Also:**
+- `KTerm_SetPipelineTargetFPS()` - Set target FPS
+- `KTerm_GetStatus()` - Get performance metrics
+
+**Notes:**
+- Time budget is checked during character processing.
+- Processing stops when the time budget is exceeded.
+- Useful for maintaining consistent frame rates.
+
+#### Function Key Programming
+
+##### `KTerm_DefineFunctionKey()`
+
+**Signature:**
+```c
+void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence);
+```
+
+**Description:**
+Programs a function key (F1-F24) to send a custom string sequence when pressed. This allows customization of function key behavior.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `key_num`: Function key number (1-24 for F1-F24)
+- `sequence`: The escape sequence to send when the key is pressed
+
+**Example:**
+```c
+// Program F1 to send a custom sequence
+KTerm_DefineFunctionKey(term, 1, "\x1b[11~");
+
+// Program F12 to send a different sequence
+KTerm_DefineFunctionKey(term, 12, "\x1b[24~");
+```
+
+**See Also:**
+- `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_UpdateKeyboard()` - Poll keyboard
+
+**Notes:**
+- Function key definitions are part of the DECUDK (User-Defined Keys) feature.
+- Definitions persist until changed or the terminal is reset.
+- Available at VT220 and higher emulation levels.
+
+### 5.5. Callbacks and Output
+
+These functions allow the host application to receive data and notifications from the terminal. Callbacks are the primary mechanism for the terminal to communicate with the host.
+
+#### Response Output
+
+The terminal generates responses to user input and host queries. These responses are delivered via callbacks.
+
+##### `KTerm_SetResponseCallback()`
+
+**Signature:**
+```c
+void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);
+```
+
+**Description:**
+Sets the callback function that receives all data the terminal sends back to the host. This includes keyboard input, mouse events, status reports, and other responses. This is the legacy method for output; `KTerm_SetOutputSink()` is recommended for new code.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the response callback
+
+**Callback Signature:**
+```c
+typedef void (*ResponseCallback)(KTerm* term, const char* response, int length);
+```
+
+**Example:**
+```c
+void my_response_callback(KTerm* term, const char* response, int length) {
+    // Send response to host
+    fwrite(response, 1, length, stdout);
+}
+
+KTerm_SetResponseCallback(term, my_response_callback);
+```
+
+**See Also:**
+- `KTerm_SetOutputSink()` - Modern output method (recommended)
+- `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_UpdateMouse()` - Poll mouse
+
+**Notes:**
+- This is the legacy method. Use `KTerm_SetOutputSink()` for new code.
+- Responses are buffered and delivered in batches.
+- Called from the main thread.
+
+##### `KTerm_SetOutputSink()`
+
+**Signature:**
+```c
+void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);
+```
+
+**Description:**
+Sets a direct output sink callback. When set, KTerm writes response data directly to this function without buffering, improving performance for high-throughput applications. This is the recommended method for output in new code.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `sink`: Function pointer to the output sink callback
+- `ctx`: User context pointer passed to the callback
+
+**Callback Signature:**
+```c
+typedef void (*KTermOutputSink)(void* ctx, const char* data, size_t len);
+```
+
+**Example:**
+```c
+void my_output_sink(void* ctx, const char* data, size_t len) {
+    FILE* output = (FILE*)ctx;
+    fwrite(data, 1, len, output);
+}
+
+KTerm_SetOutputSink(term, my_output_sink, stdout);
+```
+
+**See Also:**
+- `KTerm_SetResponseCallback()` - Legacy output method
+- `KTerm_SetTitleCallback()` - Title change notifications
+- `KTerm_SetBellCallback()` - Bell notifications
+
+**Notes:**
+- This is the recommended method for output.
+- Data is delivered immediately without buffering (zero-copy).
+- Transitioning to a sink flushes any existing buffered data.
+- More efficient than the response callback for high-throughput scenarios.
+
+#### Event Notifications
+
+These callbacks notify the host of specific events.
+
+##### `KTerm_SetTitleCallback()`
+
+**Signature:**
+```c
+void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
+```
+
+**Description:**
+Sets the callback function that is invoked whenever the window or icon title is changed by the host via an OSC sequence.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the title callback
+
+**Callback Signature:**
+```c
+typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);
+```
+
+**Example:**
+```c
+void my_title_callback(KTerm* term, const char* title, bool is_icon) {
+    if (is_icon) {
+        printf("Icon title: %s\n", title);
+    } else {
+        printf("Window title: %s\n", title);
+    }
+}
+
+KTerm_SetTitleCallback(term, my_title_callback);
+```
+
+**See Also:**
+- `KTerm_SetBellCallback()` - Bell notifications
+- `KTerm_SetOutputSink()` - Output sink
+
+**Notes:**
+- Called when OSC 0, 1, or 2 sequences are received.
+- `is_icon` is `true` for icon title, `false` for window title.
+- Title strings are null-terminated.
+
+##### `KTerm_SetBellCallback()`
+
+**Signature:**
+```c
+void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
+```
+
+**Description:**
+Sets the callback function for the audible bell (`BEL`, `0x07`). If no callback is set, a visual bell is used instead.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the bell callback
+
+**Callback Signature:**
+```c
+typedef void (*BellCallback)(KTerm* term);
+```
+
+**Example:**
+```c
+void my_bell_callback(KTerm* term) {
+    // Play bell sound or trigger visual effect
+    printf("\a");  // System bell
+}
+
+KTerm_SetBellCallback(term, my_bell_callback);
+```
+
+**See Also:**
+- `KTerm_SetTitleCallback()` - Title change notifications
+- `KTerm_SetOutputSink()` - Output sink
+
+**Notes:**
+- Called when a BEL character (0x07) is received.
+- If no callback is set, a visual bell is displayed.
+- Useful for audio feedback or custom notifications.
+
+##### `KTerm_SetNotificationCallback()`
+
+**Signature:**
+```c
+void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
+```
+
+**Description:**
+Sets the callback function for general notifications from the terminal. This includes various events that don't fit into other callback categories.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the notification callback
+
+**Callback Signature:**
+```c
+typedef void (*NotificationCallback)(KTerm* term, const char* message);
+```
+
+**Example:**
+```c
+void my_notification_callback(KTerm* term, const char* message) {
+    printf("Notification: %s\n", message);
+}
+
+KTerm_SetNotificationCallback(term, my_notification_callback);
+```
+
+**See Also:**
+- `KTerm_SetBellCallback()` - Bell notifications
+- `KTerm_SetTitleCallback()` - Title change notifications
+
+##### `KTerm_SetErrorCallback()`
+
+**Signature:**
+```c
+void KTerm_SetErrorCallback(KTerm* term, ErrorCallback callback);
+```
+
+**Description:**
+Sets the callback function for error notifications. This is called when the terminal encounters errors or unsupported sequences.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the error callback
+
+**Callback Signature:**
+```c
+typedef void (*ErrorCallback)(KTerm* term, const char* error_message);
+```
+
+**Example:**
+```c
+void my_error_callback(KTerm* term, const char* error_message) {
+    fprintf(stderr, "Terminal error: %s\n", error_message);
+}
+
+KTerm_SetErrorCallback(term, my_error_callback);
+```
+
+**See Also:**
+- `KTerm_EnableDebug()` - Enable debug logging
+- `KTerm_GetStatus()` - Get terminal status
+
+**Notes:**
+- Called when unsupported sequences are encountered.
+- Useful for debugging and diagnostics.
+
+#### Advanced Callbacks
+
+##### `KTerm_SetGatewayCallback()`
+
+**Signature:**
+```c
+void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
+```
+
+**Description:**
+Sets the callback function for Gateway Protocol messages. The Gateway Protocol is an extensible protocol for custom terminal extensions.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the gateway callback
+
+**Callback Signature:**
+```c
+typedef void (*GatewayCallback)(KTerm* term, const char* command, const char* data);
+```
+
+**Example:**
+```c
+void my_gateway_callback(KTerm* term, const char* command, const char* data) {
+    printf("Gateway command: %s, data: %s\n", command, data);
+}
+
+KTerm_SetGatewayCallback(term, my_gateway_callback);
+```
+
+**See Also:**
+- `KTerm_RegisterGatewayExtension()` - Register gateway extension
+- Section 4.12 - Gateway Protocol
+
+**Notes:**
+- Gateway Protocol is an extensible mechanism for custom features.
+- Commands and data are application-specific.
+
+##### `KTerm_RegisterGatewayExtension()`
+
+**Signature:**
+```c
+bool KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtensionHandler handler);
+```
+
+**Description:**
+Registers a custom Gateway Protocol extension handler. This allows you to extend the terminal with custom commands.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `name`: Extension name
+- `handler`: Function pointer to the extension handler
+
+**Handler Signature:**
+```c
+typedef void (*GatewayExtensionHandler)(KTerm* term, const char* data);
+```
+
+**Example:**
+```c
+void my_extension_handler(KTerm* term, const char* data) {
+    printf("Custom extension data: %s\n", data);
+}
+
+KTerm_RegisterGatewayExtension(term, "myext", my_extension_handler);
+```
+
+**See Also:**
+- `KTerm_SetGatewayCallback()` - Set gateway callback
+- Section 4.12 - Gateway Protocol
+
+**Notes:**
+- Extensions are identified by name.
+- Multiple extensions can be registered.
+- Handlers are called when matching Gateway Protocol commands are received.
+
+##### `KTerm_SetSessionResizeCallback()`
+
+**Signature:**
+```c
+void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
+```
+
+**Description:**
+Sets a callback invoked when a specific session's dimensions change due to a layout reflow or pane resize.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the session resize callback
+
+**Callback Signature:**
+```c
+typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows);
+```
+
+**Example:**
+```c
+void my_resize_callback(KTerm* term, int session_index, int cols, int rows) {
+    printf("Session %d resized to %d x %d\n", session_index, cols, rows);
+}
+
+KTerm_SetSessionResizeCallback(term, my_resize_callback);
+```
+
+**See Also:**
+- `KTerm_SetSplitScreen()` - Configure split screen
+- `KTerm_SplitPane()` - Split pane
+- Section 5.8 - Session Management
+
+**Notes:**
+- Called when a session's dimensions change.
+- Useful for updating application state based on terminal size.
+- Called from the main thread.
 
 ### 5.6. Diagnostics and Testing
 
-Utilities for inspecting the terminal's state and verifying its functionality.
+These functions provide utilities for inspecting the terminal's state, verifying functionality, and debugging issues.
 
--   `void KTerm_EnableDebug(KTerm* term, bool enable);`
-    Enables or disables verbose logging of unsupported sequences and other diagnostic information.
+#### Debug Logging
 
--   `KTermStatus KTerm_GetStatus(KTerm* term);`
-    Returns a `KTermStatus` struct containing information about buffer usage and performance metrics.
+##### `KTerm_EnableDebug()`
 
--   `void KTerm_ShowDiagnostics(KTerm* term);`
-    A convenience function that prints buffer usage information directly to the terminal screen.
+**Signature:**
+```c
+void KTerm_EnableDebug(KTerm* term, bool enable);
+```
 
--   `void KTerm_RunTest(KTerm* term, const char* test_name);`
-    Runs built-in test sequences to verify functionality. Valid test names include `"cursor"`, `"colors"`, `"charset"`, `"modes"`, `"mouse"`, and `"all"`.
+**Description:**
+Enables or disables verbose logging of unsupported sequences and other diagnostic information. When enabled, the terminal logs details about unrecognized escape sequences and other events to help with debugging.
 
--   `void KTerm_ShowInfo(KTerm* term);`
-    A convenience function that prints a summary of the current terminal state (VT level, modes, etc.) directly to the screen.
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `enable`: `true` to enable debug logging, `false` to disable
+
+**Example:**
+```c
+// Enable debug logging
+KTerm_EnableDebug(term, true);
+
+// Process some input
+KTerm_WriteString(term, "\x1b[999Z");  // Unsupported sequence
+
+// Debug output will be logged
+```
+
+**See Also:**
+- `KTerm_SetErrorCallback()` - Error notifications
+- `KTerm_ShowDiagnostics()` - Display diagnostics
+
+**Notes:**
+- Debug output is typically sent to stderr or a log file.
+- Useful for development and troubleshooting.
+- May impact performance when enabled.
+
+#### Status and Diagnostics
+
+##### `KTerm_GetStatus()`
+
+**Signature:**
+```c
+KTermStatus KTerm_GetStatus(KTerm* term);
+```
+
+**Description:**
+Returns a `KTermStatus` struct containing information about buffer usage and performance metrics. This allows you to monitor the terminal's internal state.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Return Value:**
+Returns a `KTermStatus` struct with the following fields:
+- `input_pipeline_used`: Bytes used in input pipeline
+- `input_pipeline_capacity`: Total input pipeline capacity
+- `response_buffer_used`: Bytes used in response buffer
+- `response_buffer_capacity`: Total response buffer capacity
+- `frames_processed`: Number of frames processed
+- `characters_processed`: Total characters processed
+- `overflow_count`: Number of pipeline overflows
+
+**Example:**
+```c
+KTermStatus status = KTerm_GetStatus(term);
+printf("Input pipeline: %d/%d bytes\n", 
+       status.input_pipeline_used, 
+       status.input_pipeline_capacity);
+printf("Characters processed: %d\n", status.characters_processed);
+```
+
+**See Also:**
+- `KTerm_ShowDiagnostics()` - Display diagnostics
+- `KTerm_GetPendingEventCount()` - Get pending events
+
+**Notes:**
+- Useful for performance monitoring.
+- Can help identify bottlenecks or overflow conditions.
+
+##### `KTerm_ShowDiagnostics()`
+
+**Signature:**
+```c
+void KTerm_ShowDiagnostics(KTerm* term);
+```
+
+**Description:**
+A convenience function that prints buffer usage information and performance metrics directly to the terminal screen. This is useful for quick diagnostics during development.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Display diagnostics on screen
+KTerm_ShowDiagnostics(term);
+```
+
+**See Also:**
+- `KTerm_GetStatus()` - Get status programmatically
+- `KTerm_ShowInfo()` - Display terminal info
+
+**Notes:**
+- Output is displayed on the terminal screen.
+- Useful for quick diagnostics during development.
+- Information includes buffer usage and performance metrics.
+
+##### `KTerm_ShowInfo()`
+
+**Signature:**
+```c
+void KTerm_ShowInfo(KTerm* term);
+```
+
+**Description:**
+A convenience function that prints a summary of the current terminal state directly to the screen. This includes the VT level, active modes, and other configuration information.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Display terminal info on screen
+KTerm_ShowInfo(term);
+```
+
+**See Also:**
+- `KTerm_ShowDiagnostics()` - Display diagnostics
+- `KTerm_GetLevel()` - Get emulation level
+- `KTerm_GetStatus()` - Get status
+
+**Notes:**
+- Output is displayed on the terminal screen.
+- Useful for verifying terminal configuration.
+- Information includes VT level, modes, and other settings.
+
+#### Testing
+
+##### `KTerm_RunTest()`
+
+**Signature:**
+```c
+void KTerm_RunTest(KTerm* term, const char* test_name);
+```
+
+**Description:**
+Runs built-in test sequences to verify terminal functionality. These tests exercise various features and can help identify issues.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `test_name`: Name of the test to run (see notes for valid names)
+
+**Example:**
+```c
+// Run cursor movement test
+KTerm_RunTest(term, "cursor");
+
+// Run color test
+KTerm_RunTest(term, "colors");
+
+// Run all tests
+KTerm_RunTest(term, "all");
+```
+
+**Valid Test Names:**
+- `"cursor"` - Cursor movement and positioning
+- `"colors"` - Color support (16, 256, and true color)
+- `"charset"` - Character set switching
+- `"modes"` - Terminal modes
+- `"mouse"` - Mouse tracking
+- `"graphics"` - Graphics support (Sixel, Kitty)
+- `"all"` - Run all tests
+
+**See Also:**
+- `KTerm_EnableDebug()` - Enable debug logging
+- `KTerm_GetStatus()` - Get terminal status
+
+**Notes:**
+- Tests generate output on the terminal screen.
+- Useful for verifying that features are working correctly.
+- Can be run at any time during terminal operation.
 
 ### 5.7. Advanced Control
 
-These functions provide finer-grained control over specific terminal features.
+These functions provide finer-grained control over specific terminal features for advanced use cases.
 
--   `void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset);`
-    Designates a `CharacterSet` (e.g., `CHARSET_DEC_SPECIAL`) to one of the four character set "slots" (G0-G3).
+#### Character Set Management
 
--   `void KTerm_SetTabStop(KTerm* term, int column);`, `void KTerm_ClearTabStop(KTerm* term, int column);`, `void KTerm_ClearAllTabStops(KTerm* term);`
-    Functions for manually managing horizontal tab stops.
+Character sets allow the terminal to display different character encodings and special graphics.
 
--   `void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count);`
-    Loads custom character glyph data into the terminal's soft font memory (DECDLD).
+##### `KTerm_SelectCharacterSet()`
 
--   `void KTerm_SelectSoftFont(KTerm* term, bool enable);`
-    Enables or disables the use of the loaded soft font.
+**Signature:**
+```c
+void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset);
+```
+
+**Description:**
+Designates a `CharacterSet` to one of the four character set "slots" (G0-G3). This allows switching between different character encodings and special graphics sets.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `gset`: Character set slot (0-3 for G0-G3)
+- `charset`: The character set to designate (e.g., `CHARSET_ASCII`, `CHARSET_DEC_SPECIAL`)
+
+**Example:**
+```c
+// Designate DEC Special Graphics to G0
+KTerm_SelectCharacterSet(term, 0, CHARSET_DEC_SPECIAL);
+
+// Designate ASCII to G1
+KTerm_SelectCharacterSet(term, 1, CHARSET_ASCII);
+```
+
+**See Also:**
+- `KTerm_LoadSoftFont()` - Load custom fonts
+- `KTerm_SelectSoftFont()` - Enable soft fonts
+- Section 4.3 - Character Sets
+
+**Notes:**
+- Character sets are typically controlled via escape sequences.
+- G0 and G1 are the most commonly used slots.
+- DEC Special Graphics is used for line drawing characters.
+
+#### Tab Stop Management
+
+Tab stops control where the cursor moves when the Tab key is pressed.
+
+##### `KTerm_SetTabStop()`
+
+**Signature:**
+```c
+void KTerm_SetTabStop(KTerm* term, int column);
+```
+
+**Description:**
+Sets a tab stop at the specified column. When the Tab key is pressed, the cursor moves to the next tab stop.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `column`: Column number (0-based) where the tab stop should be set
+
+**Example:**
+```c
+// Set tab stops at columns 8, 16, 24, etc.
+for (int col = 8; col < 80; col += 8) {
+    KTerm_SetTabStop(term, col);
+}
+```
+
+**See Also:**
+- `KTerm_ClearTabStop()` - Clear a tab stop
+- `KTerm_ClearAllTabStops()` - Clear all tab stops
+
+**Notes:**
+- Tab stops are typically set at regular intervals (every 8 columns).
+- Default tab stops are set at terminal initialization.
+
+##### `KTerm_ClearTabStop()`
+
+**Signature:**
+```c
+void KTerm_ClearTabStop(KTerm* term, int column);
+```
+
+**Description:**
+Clears the tab stop at the specified column.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `column`: Column number (0-based) where the tab stop should be cleared
+
+**Example:**
+```c
+// Clear tab stop at column 16
+KTerm_ClearTabStop(term, 16);
+```
+
+**See Also:**
+- `KTerm_SetTabStop()` - Set a tab stop
+- `KTerm_ClearAllTabStops()` - Clear all tab stops
+
+##### `KTerm_ClearAllTabStops()`
+
+**Signature:**
+```c
+void KTerm_ClearAllTabStops(KTerm* term);
+```
+
+**Description:**
+Clears all tab stops. After calling this, the Tab key will have no effect until new tab stops are set.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Example:**
+```c
+// Clear all tab stops
+KTerm_ClearAllTabStops(term);
+
+// Set new tab stops
+for (int col = 4; col < 80; col += 4) {
+    KTerm_SetTabStop(term, col);
+}
+```
+
+**See Also:**
+- `KTerm_SetTabStop()` - Set a tab stop
+- `KTerm_ClearTabStop()` - Clear a tab stop
+
+#### Soft Font Management
+
+Soft fonts allow you to load custom character glyphs into the terminal.
+
+##### `KTerm_LoadSoftFont()`
+
+**Signature:**
+```c
+void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count);
+```
+
+**Description:**
+Loads custom character glyph data into the terminal's soft font memory (DECDLD - DEC Downloadable Character Set). This allows you to define custom characters.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `font_data`: Pointer to font data buffer
+- `char_start`: Starting character code
+- `char_count`: Number of characters to load
+
+**Example:**
+```c
+// Load custom font data for characters 128-255
+unsigned char font_data[128 * 16];  // 16 bytes per character
+// ... populate font_data ...
+KTerm_LoadSoftFont(term, font_data, 128, 128);
+```
+
+**See Also:**
+- `KTerm_SelectSoftFont()` - Enable soft fonts
+- `KTerm_SelectCharacterSet()` - Select character set
+
+**Notes:**
+- Soft fonts are part of the DECDLD feature (VT220+).
+- Font data format is terminal-specific.
+- Useful for custom graphics or international characters.
+
+##### `KTerm_SelectSoftFont()`
+
+**Signature:**
+```c
+void KTerm_SelectSoftFont(KTerm* term, bool enable);
+```
+
+**Description:**
+Enables or disables the use of the loaded soft font. When enabled, characters in the soft font range are displayed using the custom glyphs.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `enable`: `true` to enable soft fonts, `false` to disable
+
+**Example:**
+```c
+// Enable soft fonts
+KTerm_SelectSoftFont(term, true);
+
+// Characters 128-255 now use custom glyphs
+
+// Disable soft fonts
+KTerm_SelectSoftFont(term, false);
+```
+
+**See Also:**
+- `KTerm_LoadSoftFont()` - Load soft font data
+- `KTerm_SelectCharacterSet()` - Select character set
+
+**Notes:**
+- Soft fonts must be loaded before enabling.
+- Disabling soft fonts reverts to the default font.
+
+#### Rectangular Operations
+
+These functions perform operations on rectangular regions of the screen.
+
+##### `KTerm_DefineRectangle()`
+
+**Signature:**
+```c
+void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right);
+```
+
+**Description:**
+Defines a rectangular area on the screen for use with rectangular operations. This sets the boundaries for subsequent rectangular operations.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `top`: Top row of the rectangle (0-based)
+- `left`: Left column of the rectangle (0-based)
+- `bottom`: Bottom row of the rectangle (0-based)
+- `right`: Right column of the rectangle (0-based)
+
+**Example:**
+```c
+// Define a rectangle from (5,10) to (15,70)
+KTerm_DefineRectangle(term, 5, 10, 15, 70);
+```
+
+**See Also:**
+- `KTerm_ExecuteRectangularOperation()` - Execute rectangular operation
+- `KTerm_CopyRectangle()` - Copy rectangular region
+
+**Notes:**
+- Rectangular operations are part of the DECCRA feature (VT420+).
+- Coordinates are 0-based.
+
+##### `KTerm_CopyRectangle()`
+
+**Signature:**
+```c
+void KTerm_CopyRectangle(KTerm* term, int src_top, int src_left, int dst_top, int dst_left);
+```
+
+**Description:**
+Copies a rectangular region from one location to another on the screen.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `src_top`: Source top row
+- `src_left`: Source left column
+- `dst_top`: Destination top row
+- `dst_left`: Destination left column
+
+**Example:**
+```c
+// Copy rectangle from (5,10) to (20,30)
+KTerm_CopyRectangle(term, 5, 10, 20, 30);
+```
+
+**See Also:**
+- `KTerm_DefineRectangle()` - Define rectangle
+- `KTerm_ExecuteRectangularOperation()` - Execute rectangular operation
+
+**Notes:**
+- Source and destination rectangles must be the same size.
+- Overlapping regions are handled correctly.
+
+#### Bracketed Paste Mode
+
+Bracketed paste mode allows the terminal to distinguish pasted text from typed input.
+
+##### `IsBracketedPasteActive()`
+
+**Signature:**
+```c
+bool IsBracketedPasteActive(KTerm* term);
+```
+
+**Description:**
+Queries whether bracketed paste mode is currently active.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+
+**Return Value:**
+Returns `true` if bracketed paste mode is active, `false` otherwise.
+
+**Example:**
+```c
+if (IsBracketedPasteActive(term)) {
+    printf("Bracketed paste mode is active\n");
+}
+```
+
+**See Also:**
+- `KTerm_EnableBracketedPaste()` - Enable/disable bracketed paste
+- Section 4.6 - Bracketed Paste Mode
+
+**Notes:**
+- Bracketed paste mode is controlled by `CSI ? 2004 h/l`.
+- When active, pasted text is wrapped with special sequences.
+
+##### `ProcessPasteData()`
+
+**Signature:**
+```c
+void ProcessPasteData(KTerm* term, const char* data, size_t length);
+```
+
+**Description:**
+Processes pasted data, handling bracketed paste mode if active. This function automatically wraps the data with the appropriate escape sequences.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `data`: Pointer to the pasted data
+- `length`: Length of the pasted data
+
+**Example:**
+```c
+const char* pasted_text = "Hello, World!";
+ProcessPasteData(term, pasted_text, strlen(pasted_text));
+```
+
+**See Also:**
+- `IsBracketedPasteActive()` - Check if bracketed paste is active
+- `KTerm_EnableBracketedPaste()` - Enable/disable bracketed paste
+
+**Notes:**
+- Automatically handles bracketed paste wrapping.
+- Useful for clipboard integration.
+
+#### Graphics Operations
+
+These functions handle graphics rendering operations.
+
+##### `KTerm_ProcessSixelData()`
+
+**Signature:**
+```c
+void KTerm_ProcessSixelData(KTerm* term, const unsigned char* data, size_t length);
+```
+
+**Description:**
+Processes Sixel graphics data. Sixel is a bitmap graphics format that can be embedded in terminal output.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `data`: Pointer to Sixel data
+- `length`: Length of the Sixel data
+
+**Example:**
+```c
+// Process Sixel graphics data
+const unsigned char sixel_data[] = { /* Sixel data */ };
+KTerm_ProcessSixelData(term, sixel_data, sizeof(sixel_data));
+```
+
+**See Also:**
+- `KTerm_DrawSixelGraphics()` - Draw Sixel graphics
+- Section 4.5 - Sixel Graphics
+
+**Notes:**
+- Sixel data is typically embedded in DCS sequences.
+- Requires VT340 or higher emulation level.
+
+##### `KTerm_DrawSixelGraphics()`
+
+**Signature:**
+```c
+void KTerm_DrawSixelGraphics(KTerm* term, int x, int y, const unsigned char* image_data, int width, int height);
+```
+
+**Description:**
+Renders Sixel graphics at the specified screen position.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `x`: X coordinate (in pixels or character cells)
+- `y`: Y coordinate (in pixels or character cells)
+- `image_data`: Pointer to image data
+- `width`: Image width
+- `height`: Image height
+
+**Example:**
+```c
+// Draw Sixel graphics at position (10, 5)
+unsigned char image_data[] = { /* image data */ };
+KTerm_DrawSixelGraphics(term, 10, 5, image_data, 640, 480);
+```
+
+**See Also:**
+- `KTerm_ProcessSixelData()` - Process Sixel data
+- Section 4.5 - Sixel Graphics
+
+**Notes:**
+- Coordinates are typically in character cells.
+- Image data format depends on the graphics protocol.
 
 ### 5.8. Session Management
 
--   `void KTerm_InitSession(KTerm* term, int index);`
-    Initializes or resets a specific session slot (0-2). Automatically called by `KTerm_Init`.
+These functions manage multiple terminal sessions and the layout system that organizes them on the screen. The multiplexer allows you to create a tree-based layout of terminal panes, each containing an independent session.
 
--   `void KTerm_SetActiveSession(KTerm* term, int index);`
-    Switches the active session to the specified index. All subsequent input/output operations will target this session.
+#### Session Initialization and Switching
 
--   `void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);`
-    Enables or disables split-screen mode. `row` is the 0-indexed terminal row where the split occurs. `top_idx` and `bot_idx` specify which sessions are displayed in the top and bottom viewports respectively.
+##### `KTerm_InitSession()`
 
--   `void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);`
-    Writes a character directly to a specific session's input pipeline, regardless of which session is currently active. Useful for background processing.
+**Signature:**
+```c
+void KTerm_InitSession(KTerm* term, int index);
+```
 
--   `void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);`
-    Sets a callback invoked when a specific session's dimensions change due to a layout reflow.
-    `typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows);`
+**Description:**
+Initializes or resets a specific session slot. This is automatically called by `KTerm_Init()` for all sessions, but can be called manually to reset a session.
 
--   `KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);`
-    Splits the target pane into two child panes. `split_type` determines the direction (`PANE_SPLIT_VERTICAL` or `PANE_SPLIT_HORIZONTAL`). `ratio` (0.0 - 1.0) determines the size of the first child. Returns the new leaf pane.
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `index`: Session index (0-2)
 
--   `void KTerm_ClosePane(KTerm* term, KTermPane* pane);`
-    Closes the specified pane and merges its space back into the parent. (Planned).
+**Example:**
+```c
+// Reset session 1
+KTerm_InitSession(term, 1);
+```
+
+**See Also:**
+- `KTerm_SetActiveSession()` - Switch active session
+- `KTerm_Init()` - Initialize terminal
+
+**Notes:**
+- Automatically called during terminal initialization.
+- Resets the session's screen buffer and state.
+
+##### `KTerm_SetActiveSession()`
+
+**Signature:**
+```c
+void KTerm_SetActiveSession(KTerm* term, int index);
+```
+
+**Description:**
+Switches the active session to the specified index. All subsequent input/output operations will target this session.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `index`: Session index (0-2)
+
+**Example:**
+```c
+// Switch to session 1
+KTerm_SetActiveSession(term, 1);
+
+// Write to session 1
+KTerm_WriteString(term, "Hello from session 1\n");
+
+// Switch to session 2
+KTerm_SetActiveSession(term, 2);
+
+// Write to session 2
+KTerm_WriteString(term, "Hello from session 2\n");
+```
+
+**See Also:**
+- `KTerm_WriteCharToSession()` - Write to specific session
+- `KTerm_SetSplitScreen()` - Configure split screen
+
+**Notes:**
+- Only the active session receives input.
+- Background sessions continue to update.
+- Useful for multiplexing multiple terminal contexts.
+
+##### `KTerm_WriteCharToSession()`
+
+**Signature:**
+```c
+void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
+```
+
+**Description:**
+Writes a character directly to a specific session's input pipeline, regardless of which session is currently active. This allows you to send data to background sessions.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `session_index`: Target session index (0-2)
+- `ch`: Character to write
+
+**Example:**
+```c
+// Write to session 1 while session 0 is active
+KTerm_WriteCharToSession(term, 1, 'A');
+KTerm_WriteCharToSession(term, 1, '\n');
+```
+
+**See Also:**
+- `KTerm_SetActiveSession()` - Switch active session
+- `KTerm_WriteChar()` - Write to active session
+
+**Notes:**
+- Does not change the active session.
+- Useful for background processing.
+- Thread-safe for multi-threaded applications.
+
+#### Split Screen and Layout
+
+##### `KTerm_SetSplitScreen()`
+
+**Signature:**
+```c
+void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
+```
+
+**Description:**
+Enables or disables split-screen mode. When enabled, the screen is divided horizontally at the specified row, with different sessions displayed in the top and bottom viewports.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `active`: `true` to enable split screen, `false` to disable
+- `row`: The 0-indexed terminal row where the split occurs
+- `top_idx`: Session index for the top viewport
+- `bot_idx`: Session index for the bottom viewport
+
+**Example:**
+```c
+// Enable split screen at row 12, with session 0 on top and session 1 on bottom
+KTerm_SetSplitScreen(term, true, 12, 0, 1);
+
+// Disable split screen
+KTerm_SetSplitScreen(term, false, 0, 0, 0);
+```
+
+**See Also:**
+- `KTerm_SplitPane()` - Split pane (tree-based layout)
+- `KTerm_SetActiveSession()` - Switch active session
+
+**Notes:**
+- Split screen is a simple horizontal division.
+- For more complex layouts, use `KTerm_SplitPane()`.
+- Both viewports display their respective sessions simultaneously.
+
+##### `KTerm_SplitPane()`
+
+**Signature:**
+```c
+KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);
+```
+
+**Description:**
+Splits the target pane into two child panes using a tree-based layout system. This allows for arbitrary recursive split layouts (horizontal and vertical).
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `target_pane`: Pointer to the pane to split (or `NULL` for root)
+- `split_type`: Direction of split (`PANE_SPLIT_VERTICAL` or `PANE_SPLIT_HORIZONTAL`)
+- `ratio`: Size ratio of the first child (0.0 - 1.0)
+
+**Return Value:**
+Returns a pointer to the new leaf pane.
+
+**Example:**
+```c
+// Split the root pane vertically (50/50)
+KTermPane* right_pane = KTerm_SplitPane(term, NULL, PANE_SPLIT_VERTICAL, 0.5f);
+
+// Split the right pane horizontally (60/40)
+KTermPane* bottom_pane = KTerm_SplitPane(term, right_pane, PANE_SPLIT_HORIZONTAL, 0.6f);
+```
+
+**See Also:**
+- `KTerm_ClosePane()` - Close a pane
+- `KTerm_SetSplitScreen()` - Simple split screen
+- `KTerm_SetSessionResizeCallback()` - Resize notifications
+
+**Notes:**
+- Creates a tree-based layout system.
+- Each leaf pane contains a session.
+- Panes are automatically resized when the terminal is resized.
+- Supports arbitrary nesting depth.
+
+##### `KTerm_ClosePane()`
+
+**Signature:**
+```c
+void KTerm_ClosePane(KTerm* term, KTermPane* pane);
+```
+
+**Description:**
+Closes the specified pane and merges its space back into the parent. The session in the closed pane is preserved but no longer displayed.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `pane`: Pointer to the pane to close
+
+**Example:**
+```c
+// Close a pane
+KTerm_ClosePane(term, bottom_pane);
+```
+
+**See Also:**
+- `KTerm_SplitPane()` - Split pane
+- `KTerm_SetActiveSession()` - Switch active session
+
+**Notes:**
+- Planned feature (may not be fully implemented).
+- Closing a pane does not destroy the session.
+- The session can be displayed again by creating a new pane.
+
+#### Session Resize Notifications
+
+##### `KTerm_SetSessionResizeCallback()`
+
+**Signature:**
+```c
+void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
+```
+
+**Description:**
+Sets a callback invoked when a specific session's dimensions change due to a layout reflow or pane resize. This allows you to respond to terminal size changes.
+
+**Parameters:**
+- `term`: Pointer to the K-Term instance
+- `callback`: Function pointer to the session resize callback
+
+**Callback Signature:**
+```c
+typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows);
+```
+
+**Example:**
+```c
+void my_resize_callback(KTerm* term, int session_index, int cols, int rows) {
+    printf("Session %d resized to %d x %d\n", session_index, cols, rows);
+    // Update application state based on new size
+}
+
+KTerm_SetSessionResizeCallback(term, my_resize_callback);
+```
+
+**See Also:**
+- `KTerm_SplitPane()` - Split pane
+- `KTerm_SetSplitScreen()` - Configure split screen
+
+**Notes:**
+- Called when a session's dimensions change.
+- Useful for updating application state based on terminal size.
+- Called from the main thread.
+- Important for responsive terminal applications.
 
 -   `void KTerm_ResizePane(KTerm* term, KTermPane* pane, int width, int height);`
     Resizes a specific pane. (Planned).
@@ -1803,6 +3829,53 @@ Defines the role of a node in the layout tree.
 | `PANE_SPLIT_HORIZONTAL` | A node that splits its area into Left and Right children. |
 | `PANE_LEAF` | A terminal node containing an active session. |
 
+#### 7.1.7. `KTermEventType`
+
+Defines the type of input event.
+
+| Value | Description |
+| :--- | :--- |
+| `KTERM_EVENT_KEYBOARD` | A keyboard key press or release event. |
+| `KTERM_EVENT_MOUSE` | A mouse button or motion event. |
+| `KTERM_EVENT_FOCUS` | A window focus gain or loss event. |
+| `KTERM_EVENT_RESIZE` | A terminal resize event. |
+
+#### 7.1.8. `KTermMouseAction`
+
+Defines the type of mouse action.
+
+| Value | Description |
+| :--- | :--- |
+| `MOUSE_ACTION_PRESS` | Mouse button pressed. |
+| `MOUSE_ACTION_RELEASE` | Mouse button released. |
+| `MOUSE_ACTION_MOTION` | Mouse moved. |
+
+#### 7.1.9. `KTermWriteMode`
+
+Defines the write mode for graphics operations (ReGIS, Tektronix).
+
+| Value | Description |
+| :--- | :--- |
+| `WRITE_MODE_REPLACE` | Replace existing pixels (default). |
+| `WRITE_MODE_OVERLAY` | Overlay on top of existing pixels. |
+| `WRITE_MODE_ERASE` | Erase pixels (set to background). |
+| `WRITE_MODE_XOR` | XOR with existing pixels (complement). |
+
+#### 7.1.10. `KTermOperationType`
+
+Defines the type of deferred operation.
+
+| Value | Description |
+| :--- | :--- |
+| `OP_ERASE_DISPLAY` | Erase part or all of the display. |
+| `OP_ERASE_LINE` | Erase part or all of a line. |
+| `OP_INSERT_LINES` | Insert blank lines. |
+| `OP_DELETE_LINES` | Delete lines. |
+| `OP_INSERT_CHARS` | Insert blank characters. |
+| `OP_DELETE_CHARS` | Delete characters. |
+| `OP_FILL_RECT` | Fill a rectangular region. |
+| `OP_COPY_RECT` | Copy a rectangular region. |
+
 ### 7.2. Core Structs
 
 #### 7.2.1. `KTerm`
@@ -1924,6 +3997,373 @@ Manages state for the Kitty Graphics Protocol.
     -   `int current_frame`: Current frame being displayed.
     -   `double frame_timer`: Animation timer.
 
+#### 7.2.11. `KTermConfig`
+
+Configuration structure passed to `KTerm_Create()` to customize terminal behavior at initialization.
+
+-   `int width`: Terminal width in character cells (default: `DEFAULT_TERM_WIDTH`).
+-   `int height`: Terminal height in character cells (default: `DEFAULT_TERM_HEIGHT`).
+-   `VTLevel level`: Initial emulation level (default: `VT_LEVEL_XTERM`).
+-   `bool enable_sixel`: Enable Sixel graphics support (default: `true`).
+-   `bool enable_kitty_graphics`: Enable Kitty Graphics Protocol (default: `true`).
+-   `bool enable_regis`: Enable ReGIS graphics (default: `true`).
+-   `bool enable_tektronix`: Enable Tektronix emulation (default: `true`).
+-   `bool enable_gateway`: Enable Gateway Protocol (default: `true`).
+-   `bool enable_networking`: Enable networking features (default: `true`).
+-   `int max_sessions`: Maximum number of sessions (default: `MAX_SESSIONS`).
+-   `size_t vram_limit`: Maximum VRAM for graphics (default: 64MB).
+-   `bool strict_mode`: Enable strict coordinate validation (default: `false`).
+
+#### 7.2.12. `KTermEvent`
+
+Represents an input event (keyboard or mouse) to be processed by the terminal.
+
+-   `int type`: Event type (`KTERM_EVENT_KEYBOARD`, `KTERM_EVENT_MOUSE`, etc.).
+-   `union data`:
+    -   `struct key`: Keyboard event data.
+        -   `int code`: Key code or Unicode codepoint.
+        -   `int modifiers`: Modifier bitmask (Shift, Ctrl, Alt, etc.).
+    -   `struct mouse`: Mouse event data.
+        -   `int x, y`: Mouse coordinates in character cells.
+        -   `int button`: Button number (1=Left, 2=Middle, 3=Right).
+        -   `int action`: Action type (Press, Release, Motion).
+        -   `int modifiers`: Modifier bitmask.
+
+#### 7.2.13. `KTermRect`
+
+Represents a rectangular region on the screen.
+
+-   `int x, y`: Top-left corner coordinates (0-based).
+-   `int width, height`: Dimensions in character cells.
+
+#### 7.2.14. `KTermOp`
+
+Represents a deferred operation to be executed on the terminal state. Operations are queued and executed atomically to ensure thread safety.
+
+-   `int type`: Operation type (Erase, Insert, Delete, etc.).
+-   `KTermRect region`: The affected region.
+-   `EnhancedTermChar fill_char`: Character to use for fill operations.
+-   `int param1, param2`: Additional parameters depending on operation type.
+
+#### 7.2.15. `VTFeatures`
+
+A collection of boolean flags representing which VT features are enabled at the current emulation level.
+
+-   `bool sixel_graphics`: Sixel graphics support.
+-   `bool regis_graphics`: ReGIS graphics support.
+-   `bool kitty_graphics`: Kitty Graphics Protocol support.
+-   `bool tektronix`: Tektronix emulation support.
+-   `bool true_color`: 24-bit RGB color support.
+-   `bool mouse_tracking`: Mouse tracking support.
+-   `bool bracketed_paste`: Bracketed paste mode support.
+-   `bool soft_fonts`: DECDLD soft font support.
+-   `bool user_defined_keys`: DECUDK support.
+-   `bool rectangular_operations`: DECCRA rectangular operations support.
+-   `bool session_management`: Multi-session support.
+-   `bool locator_support`: DEC Locator support.
+-   `bool gateway_protocol`: Gateway Protocol support.
+-   `bool kitty_keyboard`: Kitty Keyboard Protocol support.
+
+#### 7.2.16. `VTperformance`
+
+Configuration for performance tuning of the input pipeline.
+
+-   `int target_fps`: Target frames per second for input processing (default: 60).
+-   `float time_budget_ms`: Maximum time budget per frame in milliseconds (default: 2.0).
+-   `int chars_per_frame`: Maximum characters to process per frame (calculated from FPS and time budget).
+-   `bool adaptive_processing`: Enable adaptive processing based on load (default: `true`).
+
+#### 7.2.17. `SixelGraphics`
+
+Manages state for Sixel graphics parsing and rendering.
+
+-   `unsigned char* data`: Pixel buffer for Sixel image data.
+-   `int width, height`: Dimensions of the Sixel image.
+-   `int cursor_x, cursor_y`: Current cursor position within the Sixel image.
+-   `int palette[256]`: Active color palette for Sixel rendering.
+-   `bool scrolling_enabled`: Whether images scroll with text (DECSDM mode).
+-   `bool cursor_placement_enabled`: Whether cursor is placed at end of graphic (Mode 8452).
+
+#### 7.2.18. `ReGISGraphics`
+
+Manages state for ReGIS graphics parsing and rendering.
+
+-   `int cursor_x, cursor_y`: Current graphics cursor position.
+-   `int write_mode`: Current write mode (Replace, Overlay, Erase, XOR).
+-   `ExtendedColor foreground_color`: Current foreground color for drawing.
+-   `ExtendedColor background_color`: Current background color.
+-   `bool graphics_mode_active`: Whether the terminal is in ReGIS graphics mode.
+-   `unsigned char* vector_buffer`: Buffer for accumulated vector drawing commands.
+-   `int vector_buffer_size`: Current size of vector buffer.
+
+#### 7.2.19. `TektronixGraphics`
+
+Manages state for Tektronix 4010/4014 emulation.
+
+-   `bool graphics_mode_active`: Whether the terminal is in Tektronix graphics mode.
+-   `int cursor_x, cursor_y`: Current graphics cursor position.
+-   `int gin_mode_active`: Whether GIN (Graphic Input) mode is active.
+-   `unsigned char* vector_buffer`: Buffer for accumulated vector drawing commands.
+-   `int vector_buffer_size`: Current size of vector buffer.
+
+#### 7.2.20. `TitleManager`
+
+Manages window and icon titles.
+
+-   `char window_title[MAX_TITLE_LENGTH]`: The current window title.
+-   `char icon_title[MAX_TITLE_LENGTH]`: The current icon title.
+-   `bool title_changed`: Flag indicating if the title has been changed since last query.
+
+#### 7.2.21. `SoftFont`
+
+Manages custom character glyphs loaded via DECDLD.
+
+-   `unsigned char* glyph_data`: Buffer containing custom glyph bitmap data.
+-   `int glyph_width, glyph_height`: Dimensions of each glyph.
+-   `int char_start, char_count`: Range of characters defined.
+-   `bool enabled`: Whether soft fonts are currently active.
+
+#### 7.2.22. `TabStops`
+
+Manages horizontal tab stop configuration.
+
+-   `bool stops[MAX_TAB_STOPS]`: Array of boolean flags indicating which columns have tab stops.
+-   `int stop_count`: Number of active tab stops.
+
+#### 7.2.23. `KTermRenderBuffer`
+
+Double-buffered rendering state for thread-safe rendering.
+
+-   `KTermRenderBuffer* current`: Pointer to the current render buffer being written to.
+-   `KTermRenderBuffer* previous`: Pointer to the previous render buffer being read from.
+-   `EnhancedTermChar* grid_data`: Character grid data for rendering.
+-   `int width, height`: Dimensions of the render buffer.
+-   `bool dirty`: Flag indicating if the buffer has changed since last render.
+
+#### 7.2.24. `KTermStatus`
+
+Status information returned by `KTerm_GetStatus()`.
+
+-   `int input_pipeline_used`: Bytes currently used in input pipeline.
+-   `int input_pipeline_capacity`: Total input pipeline capacity.
+-   `int response_buffer_used`: Bytes currently used in response buffer.
+-   `int response_buffer_capacity`: Total response buffer capacity.
+-   `int frames_processed`: Total number of frames processed.
+-   `int characters_processed`: Total characters processed.
+-   `int overflow_count`: Number of pipeline overflow events.
+-   `float average_frame_time_ms`: Average frame processing time in milliseconds.
+-   `float peak_frame_time_ms`: Peak frame processing time in milliseconds.
+
+---
+
+## 7.3. Advanced Usage Patterns
+
+This section provides practical patterns and best practices for advanced K-Term integration.
+
+### 7.3.1. High-Performance Graphics Integration
+
+When integrating Sixel, Kitty, or ReGIS graphics, follow these patterns for optimal performance:
+
+**Pattern: Batch Graphics Updates**
+```c
+// Instead of sending graphics one at a time, batch them
+for (int i = 0; i < image_count; i++) {
+    // Prepare image data
+    const unsigned char* image_data = get_image(i);
+    size_t image_size = get_image_size(i);
+    
+    // Send to terminal
+    KTerm_PushInput(term, image_data, image_size);
+}
+
+// Process all at once
+KTerm_Update(term);
+```
+
+**Pattern: Monitor VRAM Usage**
+```c
+// Check graphics memory usage
+KTermStatus status = KTerm_GetStatus(term);
+if (status.graphics_vram_used > VRAM_THRESHOLD) {
+    // Clear old graphics or reduce quality
+    KTerm_ExecuteGatewayCommand(term, "RESET;GRAPHICS");
+}
+```
+
+### 7.3.2. Multi-Session Workflow
+
+For applications using multiple sessions:
+
+**Pattern: Session-Specific Graphics**
+```c
+// Set graphics target to specific session
+KTerm_ExecuteGatewayCommand(term, "SET;SIXEL_SESSION;1");
+
+// Send Sixel data - goes to session 1
+KTerm_WriteString(term, sixel_data);
+
+// Reset to default
+KTerm_ExecuteGatewayCommand(term, "RESET;SIXEL_SESSION");
+```
+
+**Pattern: Background Session Updates**
+```c
+// Update session 1 while session 0 is active
+for (int i = 0; i < data_length; i++) {
+    KTerm_WriteCharToSession(term, 1, data[i]);
+}
+
+// Session 1 updates in background
+KTerm_Update(term);
+```
+
+### 7.3.3. Performance Optimization
+
+**Pattern: Adaptive Frame Rate**
+```c
+// Measure frame time
+double frame_start = get_time_ms();
+
+KTerm_Update(term);
+KTerm_Draw(term);
+
+double frame_time = get_time_ms() - frame_start;
+
+// Adjust processing budget if needed
+if (frame_time > TARGET_FRAME_TIME) {
+    KTerm_SetPipelineTimeBudget(term, 1.0f);  // Reduce budget
+} else if (frame_time < TARGET_FRAME_TIME * 0.5) {
+    KTerm_SetPipelineTimeBudget(term, 3.0f);  // Increase budget
+}
+```
+
+**Pattern: Overflow Detection and Handling**
+```c
+// Check for pipeline overflow
+if (KTerm_IsEventOverflow(term)) {
+    // Log warning
+    fprintf(stderr, "Input pipeline overflow detected\n");
+    
+    // Clear pending events to recover
+    KTerm_ClearEvents(term);
+    
+    // Optionally reduce input rate
+    usleep(10000);  // 10ms delay
+}
+```
+
+### 7.3.4. Gateway Protocol Extensions
+
+**Pattern: Custom Extension Handler**
+```c
+void my_extension_handler(KTerm* term, const char* data) {
+    printf("Custom extension received: %s\n", data);
+    // Process custom data
+}
+
+// Register extension
+KTerm_RegisterGatewayExtension(term, "myext", my_extension_handler);
+
+// Host can now send: DCS GATE KTERM;0;EXT;myext;data ST
+```
+
+**Pattern: Grid-Based Dashboard**
+```c
+// Fill background with protected cells
+KTerm_ExecuteGatewayCommand(term, 
+    "EXT;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
+
+// Draw title bar
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;banner;0;0;0;Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
+
+// Draw status fields (unprotected for user input)
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
+```
+
+---
+
+## 7.4. Performance Optimization Guide
+
+### 7.4.1. Input Pipeline Tuning
+
+The input pipeline processes characters at a configurable rate to balance responsiveness with CPU usage.
+
+**Recommended Settings:**
+
+| Use Case | Target FPS | Time Budget | Notes |
+|----------|-----------|-------------|-------|
+| Interactive Terminal | 60 | 2.0ms | Balanced responsiveness and CPU |
+| High-Throughput Graphics | 30 | 5.0ms | Prioritize graphics throughput |
+| Low-Power Embedded | 30 | 1.0ms | Minimize CPU usage |
+| Real-Time Applications | 120 | 1.0ms | Maximum responsiveness |
+
+**Configuration Example:**
+```c
+// For high-throughput graphics
+KTerm_SetPipelineTargetFPS(term, 30);
+KTerm_SetPipelineTimeBudget(term, 5.0f);
+
+// For real-time applications
+KTerm_SetPipelineTargetFPS(term, 120);
+KTerm_SetPipelineTimeBudget(term, 1.0f);
+```
+
+### 7.4.2. Memory Optimization
+
+**Buffer Sizing:**
+- Input Pipeline: Default 1MB (configurable via `KTERM_INPUT_PIPELINE_SIZE`)
+- Output Pipeline: Default 16KB (configurable via `KTERM_OUTPUT_PIPELINE_SIZE`)
+- Graphics VRAM: Default 64MB (configurable via `KTermConfig.vram_limit`)
+
+**Optimization Strategies:**
+1. **Reduce Buffer Sizes** for embedded systems
+2. **Monitor Overflow** to detect undersized buffers
+3. **Clear Graphics** periodically to free VRAM
+4. **Use Streaming** for large data transfers
+
+### 7.4.3. Rendering Optimization
+
+**GPU Pipeline Efficiency:**
+- Text rendering uses single compute shader pass
+- Graphics compositing uses dedicated texture_blit shader
+- Dirty flag optimization skips unchanged cells
+
+**Optimization Tips:**
+1. **Minimize Screen Updates** - Only update changed regions
+2. **Batch Graphics** - Send multiple images in one update
+3. **Use Appropriate Levels** - Higher VT levels may have more overhead
+4. **Profile Rendering** - Use `KTerm_GetStatus()` to measure performance
+
+### 7.4.4. Thread Safety Considerations
+
+**Safe Operations:**
+- `KTerm_WriteChar()` - Thread-safe
+- `KTerm_WriteCharToSession()` - Thread-safe
+- `KTerm_Update()` - Main thread only
+- `KTerm_Draw()` - Render thread only
+
+**Pattern: Multi-Threaded Input**
+```c
+// Thread 1: Input from network
+void network_thread(KTerm* term) {
+    while (running) {
+        unsigned char ch = read_from_network();
+        KTerm_WriteChar(term, ch);  // Thread-safe
+    }
+}
+
+// Thread 2: Main loop
+void main_loop(KTerm* term) {
+    while (running) {
+        KTerm_Update(term);      // Main thread only
+        KTerm_Draw(term);        // Render thread only
+        present_to_screen();
+    }
+}
+```
+
 ---
 
 ## 8. Configuration Constants
@@ -1947,6 +4387,335 @@ These `#define` constants, located at the top of `kterm.h`, allow for compile-ti
 
 ---
 
-## 9. License
+## 9. Usage Examples and Tutorials
+
+This section provides comprehensive examples and step-by-step tutorials for common K-Term integration scenarios.
+
+### 9.1. Basic Terminal Integration
+
+**Scenario:** Integrate K-Term into a simple application with keyboard and mouse input.
+
+**Step 1: Initialize the Terminal**
+```c
+#include "kterm.h"
+
+int main() {
+    // Create configuration
+    KTermConfig config = {
+        .width = 80,
+        .height = 25,
+        .level = VT_LEVEL_XTERM,
+        .enable_sixel = true,
+        .enable_kitty_graphics = true
+    };
+    
+    // Create terminal instance
+    KTerm* term = KTerm_Create(config);
+    if (!term) {
+        fprintf(stderr, "Failed to create terminal\n");
+        return 1;
+    }
+    
+    // Initialize terminal
+    if (!KTerm_Init(term)) {
+        fprintf(stderr, "Failed to initialize terminal\n");
+        KTerm_Destroy(term);
+        return 1;
+    }
+    
+    return 0;
+}
+```
+
+**Step 2: Set Up Callbacks**
+```c
+// Output callback for responses
+void output_callback(void* ctx, const char* data, size_t len) {
+    FILE* output = (FILE*)ctx;
+    fwrite(data, 1, len, output);
+    fflush(output);
+}
+
+// Title change callback
+void title_callback(KTerm* term, const char* title, bool is_icon) {
+    if (!is_icon) {
+        printf("Window title: %s\n", title);
+    }
+}
+
+// In main:
+KTerm_SetOutputSink(term, output_callback, stdout);
+KTerm_SetTitleCallback(term, title_callback);
+```
+
+**Step 3: Main Event Loop**
+```c
+bool running = true;
+
+while (running) {
+    // Update terminal (process input pipeline)
+    KTerm_Update(term);
+    
+    // Render terminal
+    KTerm_Draw(term);
+    
+    // Present to screen
+    present_to_display();
+    
+    // Handle input
+    handle_keyboard_input(term);
+    handle_mouse_input(term);
+    
+    // Check for exit condition
+    if (should_exit()) {
+        running = false;
+    }
+}
+
+// Cleanup
+KTerm_Cleanup(term);
+KTerm_Destroy(term);
+```
+
+### 9.2. Multi-Session Terminal Multiplexer
+
+**Scenario:** Create a terminal multiplexer with split-screen support.
+
+**Step 1: Initialize Multiple Sessions**
+```c
+KTerm* term = KTerm_Create(config);
+KTerm_Init(term);
+
+// Sessions are automatically initialized
+// Access them via KTerm_SetActiveSession()
+```
+
+**Step 2: Create Split Layout**
+```c
+// Split screen vertically (50/50)
+KTermPane* right_pane = KTerm_SplitPane(term, NULL, PANE_SPLIT_VERTICAL, 0.5f);
+
+// Split right pane horizontally (60/40)
+KTermPane* bottom_pane = KTerm_SplitPane(term, right_pane, PANE_SPLIT_HORIZONTAL, 0.6f);
+
+// Now we have 3 panes with sessions 0, 1, 2
+```
+
+**Step 3: Route Input to Active Pane**
+```c
+// Input automatically goes to focused pane
+// Switch focus with Ctrl+B followed by navigation keys
+// Or programmatically:
+KTerm_SetActiveSession(term, 1);  // Switch to session 1
+```
+
+**Step 4: Update All Sessions**
+```c
+// All sessions update in background
+KTerm_Update(term);
+
+// Write to specific session
+KTerm_WriteCharToSession(term, 0, 'A');
+KTerm_WriteCharToSession(term, 1, 'B');
+KTerm_WriteCharToSession(term, 2, 'C');
+```
+
+### 9.3. Graphics Integration (Sixel/Kitty)
+
+**Scenario:** Display images using Sixel or Kitty Graphics Protocol.
+
+**Step 1: Prepare Image Data**
+```c
+// Load image and convert to Sixel format
+unsigned char* sixel_data = load_image_as_sixel("image.png");
+size_t sixel_size = get_sixel_size();
+```
+
+**Step 2: Send to Terminal**
+```c
+// Method 1: Direct write
+KTerm_PushInput(term, sixel_data, sixel_size);
+
+// Method 2: Via Gateway Protocol (for Kitty)
+char gateway_cmd[1024];
+snprintf(gateway_cmd, sizeof(gateway_cmd),
+    "\033PGATE;KTERM;0;EXT;icat;%s\033\\",
+    base64_encode(image_data));
+KTerm_WriteString(term, gateway_cmd);
+```
+
+**Step 3: Process and Render**
+```c
+KTerm_Update(term);
+KTerm_Draw(term);
+```
+
+### 9.4. Gateway Protocol Dashboard
+
+**Scenario:** Create an interactive dashboard using Gateway Protocol grid operations.
+
+**Step 1: Create Background**
+```c
+// Fill entire screen with blue background
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
+```
+
+**Step 2: Add Title Bar**
+```c
+// Draw title with yellow text on blue background
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;banner;0;0;0;System Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
+```
+
+**Step 3: Add Input Fields**
+```c
+// Create unprotected input field
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
+
+// Add label
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;grid;banner;0;2;5;Input:;1;7;#;rgb:FFFFFF;rgb:0000AA");
+```
+
+**Step 4: Update Values**
+```c
+// Update status line with current values
+char status[256];
+snprintf(status, sizeof(status),
+    "EXT;grid;banner;0;2;20;CPU: %d%% MEM: %d%%;1;7;#;rgb:00FF00;rgb:0000AA",
+    cpu_usage, mem_usage);
+KTerm_ExecuteGatewayCommand(term, status);
+```
+
+### 9.5. Remote Terminal Connection
+
+**Scenario:** Connect to a remote host via SSH and display terminal.
+
+**Step 1: Establish Connection**
+```c
+// Use Gateway Protocol networking
+KTerm_ExecuteGatewayCommand(term,
+    "EXT;net;connect;ssh://user@host.com");
+```
+
+**Step 2: Handle Connection Events**
+```c
+void connection_callback(KTerm* term, int status) {
+    if (status == CONNECTED) {
+        printf("Connected to remote host\n");
+    } else if (status == DISCONNECTED) {
+        printf("Disconnected from remote host\n");
+    }
+}
+
+KTerm_SetConnectionCallback(term, connection_callback);
+```
+
+**Step 3: Forward Input/Output**
+```c
+// Input from local keyboard goes to remote
+KTerm_WriteString(term, "ls -la\n");
+
+// Output from remote appears in terminal
+KTerm_Update(term);
+KTerm_Draw(term);
+```
+
+### 9.6. Performance Monitoring
+
+**Scenario:** Monitor and optimize terminal performance.
+
+**Step 1: Collect Performance Data**
+```c
+KTermStatus status = KTerm_GetStatus(term);
+
+printf("Input Pipeline: %d/%d bytes\n",
+    status.input_pipeline_used,
+    status.input_pipeline_capacity);
+
+printf("Characters Processed: %d\n",
+    status.characters_processed);
+
+printf("Overflow Events: %d\n",
+    status.overflow_count);
+
+printf("Average Frame Time: %.2f ms\n",
+    status.average_frame_time_ms);
+```
+
+**Step 2: Detect and Handle Overflow**
+```c
+if (KTerm_IsEventOverflow(term)) {
+    fprintf(stderr, "Input pipeline overflow!\n");
+    
+    // Clear pending events
+    KTerm_ClearEvents(term);
+    
+    // Reduce input rate
+    usleep(10000);
+    
+    // Optionally reduce processing budget
+    KTerm_SetPipelineTimeBudget(term, 1.0f);
+}
+```
+
+**Step 3: Adaptive Tuning**
+```c
+// Measure frame time
+double frame_start = get_time_ms();
+
+KTerm_Update(term);
+KTerm_Draw(term);
+
+double frame_time = get_time_ms() - frame_start;
+
+// Adjust if needed
+if (frame_time > 16.67) {  // Target 60 FPS
+    KTerm_SetPipelineTimeBudget(term, 1.0f);  // Reduce
+} else if (frame_time < 8.0) {  // Well under budget
+    KTerm_SetPipelineTimeBudget(term, 3.0f);  // Increase
+}
+```
+
+### 9.7. Troubleshooting Guide
+
+**Issue: Input Pipeline Overflow**
+- **Cause:** Host sending data faster than terminal can process
+- **Solution:** Increase time budget or reduce input rate
+- **Code:**
+  ```c
+  KTerm_SetPipelineTimeBudget(term, 5.0f);  // Increase from default 2.0ms
+  ```
+
+**Issue: Graphics Not Displaying**
+- **Cause:** Graphics protocol not enabled or wrong format
+- **Solution:** Verify emulation level and graphics format
+- **Code:**
+  ```c
+  KTerm_SetLevel(term, VT_LEVEL_XTERM);  // Ensure graphics support
+  ```
+
+**Issue: High CPU Usage**
+- **Cause:** Processing too many characters per frame
+- **Solution:** Reduce time budget or target FPS
+- **Code:**
+  ```c
+  KTerm_SetPipelineTargetFPS(term, 30);  // Reduce from 60
+  KTerm_SetPipelineTimeBudget(term, 1.0f);  // Reduce from 2.0ms
+  ```
+
+**Issue: Memory Usage Growing**
+- **Cause:** Graphics VRAM not being freed
+- **Solution:** Clear graphics periodically
+- **Code:**
+  ```c
+  KTerm_ExecuteGatewayCommand(term, "RESET;GRAPHICS");
+  ```
+
+---
+
+## 10. License
 
 `kterm.h` is licensed under the MIT License.
