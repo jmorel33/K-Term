@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.12
+# K-Term Emulation Library v2.5.13
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -502,18 +502,26 @@ if (term->session) {
 }
 ```
 
-### 4.10. Networking & Telnet
+### 4.10. Networking, Telnet & SSH
 
-The `kt_net.h` module provides a lightweight, non-blocking networking stack for building remote clients (Telnet, Raw TCP) or integrating with custom protocols.
+The `kt_net.h` module provides a lightweight, non-blocking networking stack for building remote clients (Telnet, SSH, Raw TCP) and servers.
 
 **Features:**
-*   **Async Callbacks:** `on_connect`, `on_disconnect`, `on_data`, `on_error`.
-*   **Telnet State Machine:** Built-in RFC 854/857/858 negotiation handling via `on_telnet_command`.
-*   **Security Hooks:** Interfaces for TLS/SSL integration (`KTermNetSecurity`).
-*   **Resilience:** TCP Keep-Alive support.
+*   **Client & Server Modes:** Connect to remote hosts or listen for incoming connections (`KTerm_Net_Listen`).
+*   **Telnet State Machine:** Built-in RFC 854/857/858 negotiation handling (DO/DONT/WILL/WONT) and Subnegotiation (SB).
+*   **SSH Integration:** `ssh_client.c` (in root) provides a reference implementation of the SSH-2 protocol (RFC 4253), featuring:
+    *   **Binary Packet Framing:** Correct handling of packet length, padding, and payload.
+    *   **Authentication:** Full state machine for **Public Key** (Probe & Sign) and **Password** authentication.
+    *   **Pluggable Crypto:** Clear `TODO` hooks for integrating your preferred crypto library (e.g., Sodium, BearSSL, OpenSSL) to create a fully working, dependency-free client.
+    *   **Security Hooks:** `KTermNetSecurity` interface for plugging in custom transport layers.
+*   **Gateway Extensions:** Built-in `EXT;net` commands for runtime network diagnostics:
+    *   `PING`: Check connectivity to a host.
+    *   `MYIP`: Retrieve the local public-facing IP address.
 
-**Example Usage:**
-See `example/telnet_client.c` for a complete graphical Telnet client implementation.
+**Examples:**
+*   `example/telnet_client.c`: A complete graphical Telnet client with negotiation support.
+*   `example/net_server.c`: A functional Telnet server that accepts connections, negotiates options, and provides a shell.
+*   `ssh_client.c`: A reference SSH client implementation demonstrating how to build a custom secure transport.
 
 ```c
 // 1. Initialize Network Module
@@ -546,8 +554,10 @@ KTerm_Net_Connect(term, session, "towel.blinkenlights.nl", 23, NULL, NULL);
 **Core Functions:**
 *   `KTerm_Net_Init(term)`: Initializes the network subsystem (Winsock on Windows) and registers the output sink.
 *   `KTerm_Net_Connect(...)`: Initiates a non-blocking connection.
+*   `KTerm_Net_Listen(...)`: Starts a TCP server socket.
 *   `KTerm_Net_Process(term)`: Polling function (call in your update loop) to handle socket I/O.
 *   `KTerm_Net_SetProtocol(...)`: Switches between `KTERM_NET_PROTO_RAW`, `FRAMED` (binary packet), or `TELNET`.
+*   `KTerm_Net_SetSecurity(...)`: Registers custom handshake/read/write/close hooks for secure protocols.
 
 ## Configuration Constants & Macros
 

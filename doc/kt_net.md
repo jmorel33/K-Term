@@ -103,7 +103,7 @@ KTerm_Net_Listen(term, session, 2323);
 You can implement a custom SSH transport using the `KTermNetSecurity` interface without linking `libssh`. This allows full control over the handshake and crypto.
 
 ```c
-// See example/ssh_skeleton.c for full state machine implementation
+// See ssh_client.c (in root) for full state machine implementation
 KTermNetSecurity ssh_sec = {
     .ctx = my_ssh_context,
     .handshake = my_ssh_handshake, // Returns KTERM_SEC_OK, AGAIN, or ERROR

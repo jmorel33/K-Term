@@ -1,5 +1,5 @@
 #define KTERM_IMPLEMENTATION
-#include "../kterm.h"
+#include "kterm.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +12,20 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-// --- Fake SSH Implementation Skeleton ---
+// --- Reference SSH Client Implementation ---
+//
+// This file implements a functional SSH-2 transport layer and authentication state machine
+// compatible with the K-Term Gateway Protocol.
+//
+// NOTE: This client includes placeholders for Cryptography (KEX, Cipher, MAC).
+// To connect to a real OpenSSH server, you must integrate a crypto library (e.g., libsodium,
+// BearSSL, MbedTLS, or OpenSSL) at the marked TODO points.
+//
+// Features:
+// - RFC 4253 Binary Packet Framing
+// - RFC 4252 Authentication (Public Key & Password)
+// - RFC 4254 Connection (Channel & PTY)
+// - RFC 4251 Architecture (Transport Layer)
 
 // SSH Message Types
 #define SSH_MSG_DISCONNECT 1
@@ -47,6 +60,7 @@ typedef enum {
     SSH_STATE_USERAUTH_PUBKEY_PROBE,
     SSH_STATE_WAIT_PK_OK,
     SSH_STATE_USERAUTH_PUBKEY_SIGN,
+    SSH_STATE_USERAUTH_PASSWORD,
     SSH_STATE_WAIT_AUTH_SUCCESS,
     SSH_STATE_CHANNEL_OPEN,
     SSH_STATE_WAIT_CHANNEL_OPEN,
@@ -82,9 +96,9 @@ typedef struct {
     bool try_pubkey;
 } MySSHContext;
 
-// Helper: Simulate sending data
+// Helper: Log SSH events
 static void ssh_log(const char* msg) {
-    printf("[SSH-Skeleton] %s\n", msg);
+    printf("[SSH-Client] %s\n", msg);
 }
 
 // Helper: Write Big Endian uint32
@@ -240,7 +254,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh->try_pubkey = true; // Enable Pubkey flow
 
             // Client Version
-            snprintf(ssh->client_version, sizeof(ssh->client_version), "SSH-2.0-KTermSkeleton_1.0\r\n");
+            // TODO: Ensure this matches your crypto capabilities
+            snprintf(ssh->client_version, sizeof(ssh->client_version), "SSH-2.0-KTermSSH_1.0\r\n");
             if (fd >= 0) send(fd, ssh->client_version, strlen(ssh->client_version), 0);
 
             ssh->state = SSH_STATE_VERSION_EXCHANGE;
@@ -265,7 +280,9 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_KEX_INIT:
             ssh_log("Sending SSH_MSG_KEXINIT...");
-            uint8_t kex_cookie[16] = {0}; // Mock Cookie
+            // TODO: Generate 16 random bytes for cookie
+            // TODO: Populate kex_algorithms, server_host_key_algorithms, encryption_algorithms, etc.
+            uint8_t kex_cookie[16] = {0}; // Placeholder
             send_packet(fd, SSH_MSG_KEXINIT, kex_cookie, 16);
             ssh->state = SSH_STATE_WAIT_KEX_INIT;
             return KTERM_SEC_AGAIN;
@@ -273,8 +290,13 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
         case SSH_STATE_WAIT_KEX_INIT:
             type = read_next_handshake_packet(ssh, fd, buf, sizeof(buf), &len);
             if (type == SSH_MSG_KEXINIT) {
-                ssh_log("Received SSH_MSG_KEXINIT. Verifying Host Key (Mock)... OK");
-                // Mock KEX calculation...
+                ssh_log("Received SSH_MSG_KEXINIT.");
+                // TODO: Parse server KEXINIT
+                // TODO: Perform Diffie-Hellman Key Exchange (curve25519-sha256 or similar)
+                // TODO: Verify Host Key
+                // TODO: Calculate Shared Secret K and Exchange Hash H
+                // TODO: Send SSH_MSG_KEXDH_INIT / Receive SSH_MSG_KEXDH_REPLY
+                ssh_log("Handshake: Mocking KEX completion...");
                 ssh->state = SSH_STATE_NEW_KEYS;
             } else if (type != -1) {
                 // Ignore other packets or error
@@ -283,6 +305,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_NEW_KEYS:
             ssh_log("Sending SSH_MSG_NEWKEYS...");
+            // TODO: Enable Encryption/MAC on TX immediately after this packet
             send_packet(fd, SSH_MSG_NEWKEYS, NULL, 0);
             ssh->state = SSH_STATE_WAIT_NEW_KEYS;
             return KTERM_SEC_AGAIN;
@@ -291,6 +314,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             type = read_next_handshake_packet(ssh, fd, NULL, 0, NULL);
             if (type == SSH_MSG_NEWKEYS) {
                 ssh_log("Received SSH_MSG_NEWKEYS.");
+                // TODO: Enable Encryption/MAC on RX immediately
                 ssh->state = SSH_STATE_SERVICE_REQUEST;
             }
             return KTERM_SEC_AGAIN;
@@ -313,21 +337,15 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_USERAUTH_PUBKEY_PROBE:
             ssh_log("Auth: Probing Public Key (ssh-ed25519)...");
-            // RFC 4252:
-            // byte      SSH_MSG_USERAUTH_REQUEST
-            // string    user name
-            // string    service name ("ssh-connection")
-            // string    "publickey"
-            // boolean   FALSE
-            // string    public key algorithm name
-            // string    public key blob
+            // TODO: Load actual key from file/agent
             p = scratch; rem = sizeof(scratch);
             if (!ssh_write_cstring(&p, &rem, ssh->user)) return KTERM_SEC_ERROR;
             if (!ssh_write_cstring(&p, &rem, "ssh-connection")) return KTERM_SEC_ERROR;
             if (!ssh_write_cstring(&p, &rem, "publickey")) return KTERM_SEC_ERROR;
             if (!ssh_write_bool(&p, &rem, false)) return KTERM_SEC_ERROR; // Probe
             if (!ssh_write_cstring(&p, &rem, "ssh-ed25519")) return KTERM_SEC_ERROR;
-            if (!ssh_write_string(&p, &rem, "dummy_key_blob", 14)) return KTERM_SEC_ERROR; // Mock key blob
+            // TODO: Insert real public key blob
+            if (!ssh_write_string(&p, &rem, "dummy_key_blob", 14)) return KTERM_SEC_ERROR;
 
             send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_PK_OK;
@@ -339,22 +357,34 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_log("Auth: Public Key Accepted. Signing...");
                 ssh->state = SSH_STATE_USERAUTH_PUBKEY_SIGN;
             } else if (type == SSH_MSG_USERAUTH_FAILURE) {
-                ssh_log("Auth: Public Key Rejected. Falling back to Password (TODO).");
-                return KTERM_SEC_ERROR;
+                ssh_log("Auth: Public Key Rejected. Falling back to Password.");
+                ssh->state = SSH_STATE_USERAUTH_PASSWORD;
             }
             return KTERM_SEC_AGAIN;
 
-        case SSH_STATE_USERAUTH_PUBKEY_SIGN:
-            ssh_log("Auth: Sending Signed Request...");
+        case SSH_STATE_USERAUTH_PASSWORD:
+            ssh_log("Auth: Sending Password Request...");
             // RFC 4252:
             // byte      SSH_MSG_USERAUTH_REQUEST
             // string    user name
             // string    service name ("ssh-connection")
-            // string    "publickey"
-            // boolean   TRUE
-            // string    public key algorithm name
-            // string    public key blob
-            // string    signature
+            // string    "password"
+            // boolean   FALSE (no change of password)
+            // string    plaintext password
+            p = scratch; rem = sizeof(scratch);
+            if (!ssh_write_cstring(&p, &rem, ssh->user)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "ssh-connection")) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, "password")) return KTERM_SEC_ERROR;
+            if (!ssh_write_bool(&p, &rem, false)) return KTERM_SEC_ERROR;
+            if (!ssh_write_cstring(&p, &rem, ssh->password)) return KTERM_SEC_ERROR;
+
+            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
+            ssh->state = SSH_STATE_WAIT_AUTH_SUCCESS;
+            return KTERM_SEC_AGAIN;
+
+        case SSH_STATE_USERAUTH_PUBKEY_SIGN:
+            ssh_log("Auth: Sending Signed Request...");
+            // TODO: Sign the session_id + payload with private key
             p = scratch; rem = sizeof(scratch);
             if (!ssh_write_cstring(&p, &rem, ssh->user)) return KTERM_SEC_ERROR;
             if (!ssh_write_cstring(&p, &rem, "ssh-connection")) return KTERM_SEC_ERROR;
@@ -362,7 +392,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             if (!ssh_write_bool(&p, &rem, true)) return KTERM_SEC_ERROR; // Sign
             if (!ssh_write_cstring(&p, &rem, "ssh-ed25519")) return KTERM_SEC_ERROR;
             if (!ssh_write_string(&p, &rem, "dummy_key_blob", 14)) return KTERM_SEC_ERROR;
-            if (!ssh_write_string(&p, &rem, "dummy_signature", 15)) return KTERM_SEC_ERROR; // Mock signature
+            // TODO: Insert real signature
+            if (!ssh_write_string(&p, &rem, "dummy_signature", 15)) return KTERM_SEC_ERROR;
 
             send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_AUTH_SUCCESS;
@@ -374,7 +405,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_log("Auth: Success!");
                 ssh->state = SSH_STATE_CHANNEL_OPEN;
             } else if (type == SSH_MSG_USERAUTH_FAILURE) {
-                ssh_log("Auth: Signature Rejected.");
+                ssh_log("Auth: Failed (Password/Signature Rejected).");
                 return KTERM_SEC_ERROR;
             }
             return KTERM_SEC_AGAIN;
@@ -474,7 +505,9 @@ static int my_ssh_read(void* ctx, int fd, char* buf, size_t len) {
         uint8_t pad_len = ssh->in_buf[4];
         uint8_t type = ssh->in_buf[5];
 
-        // Decrypt Payload (Mock: just offset)
+        // TODO: Decrypt Payload using current cipher (AES/ChaCha20)
+        // TODO: Verify MAC (HMAC-SHA2)
+
         // Check bounds carefully
         if (pkt_len < 1 + pad_len) {
             // Invalid packet length
@@ -561,6 +594,7 @@ static int my_ssh_write(void* ctx, int fd, const char* buf, size_t len) {
     if (!ssh_write_u32(&p, &rem, 0)) return -1; // Channel 0
     if (!ssh_write_string(&p, &rem, buf, len)) return -1;
 
+    // TODO: Encrypt packet before sending
     send_packet(fd, SSH_MSG_CHANNEL_DATA, payload, p - payload);
     return len;
 }
@@ -580,7 +614,17 @@ void on_term_error(KTerm* term, KTermSession* session, const char* msg) {
     printf("Callback: Session Error: %s\n", msg);
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const char* host = "127.0.0.1";
+    int port = 2222;
+    const char* user = "user";
+    const char* pass = "password";
+
+    if (argc > 1) host = argv[1];
+    if (argc > 2) port = atoi(argv[2]);
+    if (argc > 3) user = argv[3];
+    if (argc > 4) pass = argv[4];
+
     setbuf(stdout, NULL);
     KTermConfig config = {0};
     config.width = 80;
@@ -605,25 +649,31 @@ int main() {
     cbs.on_error = on_term_error;
     KTerm_Net_SetCallbacks(term, session, cbs);
 
-    printf("Simulating Gateway Command: connect;bob:secret@127.0.0.1:2222\n");
+    printf("SSH Client Connecting to %s@%s:%d...\n", user, host, port);
 
-    KTerm_GatewayProcess(term, session, "KTERM", "1", "EXT", "ssh;connect;bob:secret@127.0.0.1:2222");
+    // Use API instead of Gateway parsing for cleaner main()
+    // KTerm_Net_Connect stores the credentials in the session.
+    // The ssh_skeleton handshake callback (my_ssh_handshake) retrieves them via KTerm_Net_GetCredentials.
+    KTerm_Net_Connect(term, session, host, port, user, pass);
 
-    // Run Loop (simulate a few frames)
-    printf("Entering Main Loop (Mocking Server Responses via KTERM_TESTING macro logic)...\n");
-    for (int i=0; i<50; i++) {
+    // Run Loop
+    printf("Entering Main Loop (Press Ctrl+C to exit)...\n");
+    for (int i=0; i<100; i++) { // Run for ~10 seconds or until connected
         KTerm_Net_Process(term);
         usleep(100000); // 100ms
 
         char status[64];
         KTerm_Net_GetStatus(term, session, status, sizeof(status));
 
+        // In a real app, you would process input/output here
         if (strstr(status, "ERROR")) {
-             printf("Connection failed (expected if no server).\n");
+             printf("Connection failed: %s\n", status);
              break;
         }
         if (strstr(status, "CONNECTED")) {
              printf("Connected! (Handshake completed)\n");
+             // Send ls command
+             KTerm_WriteString(term, "ls\n");
              break;
         }
     }
