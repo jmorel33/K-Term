@@ -1,5 +1,14 @@
 # K-Term Update Log
 
+## [v2.5.13] - Reference SSH Client & Docs
+- **SSH Reference Upgrade**: Promoted `example/ssh_skeleton.c` to `ssh_client.c` in the root directory.
+    - Upgraded from a skeleton to a complete reference implementation for a custom SSH transport.
+    - Implemented a full authentication state machine supporting both **Public Key** and **Password** (with fallback).
+    - Added command-line argument parsing (`host port user pass`) for immediate testing.
+    - Included explicit `TODO` hooks for plugging in cryptographic primitives (KEX, Cipher, MAC) to avoid forcing dependencies.
+- **Documentation**: Updated `README.md` and `doc/kt_net.md` to reference the new top-level `ssh_client.c` and detail the upgraded networking capabilities.
+- **Cleanup**: Fixed include paths and initialization logic in the SSH client reference to ensure it compiles and runs as a standalone example.
+
 ## [v2.5.12] - Gateway Network Enhancements & Security
 - **Gateway Expansion**: Added `PING` and `MYIP` commands to the `EXT;net` (or `ssh`) gateway extension.
     - `MYIP`: Returns the local IP address used for internet routing (via UDP connection check to 8.8.8.8).

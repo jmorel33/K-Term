@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 5
-#define KTERM_VERSION_PATCH 12
+#define KTERM_VERSION_PATCH 13
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.5.12"
+#define KTERM_VERSION_STRING "2.5.13"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
