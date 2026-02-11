@@ -723,7 +723,7 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         if (net->keep_alive) {
             int opt = 1; setsockopt(net->socket_fd, SOL_SOCKET, SO_KEEPALIVE, (char*)&opt, sizeof(opt));
 #ifdef TCP_KEEPIDLE
-            if (net->keep_alive_idle > 0) { int idle = net->keep_alive_idle; setsockopt(net->socket_fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle)); }
+            if (net->keep_alive_idle > 0) { int idle = net->keep_alive_idle; setsockopt(net->socket_fd, IPPROTO_TCP, TCP_KEEPIDLE, (const char*)&idle, sizeof(idle)); }
 #endif
         }
         if (connect(net->socket_fd, res->ai_addr, res->ai_addrlen) == 0) {

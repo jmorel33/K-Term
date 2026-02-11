@@ -2,7 +2,7 @@
 #define KT_RENDER_SIT_H
 
 #ifdef KTERM_TESTING
-#include "mock_situation.h"
+#include "tests/mock_situation.h"
 #else
 #include "situation.h"
 #endif
