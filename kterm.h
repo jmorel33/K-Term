@@ -56,10 +56,10 @@
 
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
-#define KTERM_VERSION_MINOR 5
-#define KTERM_VERSION_PATCH 14
+#define KTERM_VERSION_MINOR 6
+#define KTERM_VERSION_PATCH 0
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.5.14"
+#define KTERM_VERSION_STRING "2.6.0"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -69,7 +69,9 @@
 #include "kt_render_sit.h"
 #include "kt_layout.h"
 #include "font_data.h"
+#ifndef KTERM_DISABLE_NET
 #include "kt_net.h"
+#endif
 
 
 // Safe Allocation Wrappers
@@ -3197,7 +3199,9 @@ bool KTerm_Init(KTerm* term) {
     KTerm_RegisterBuiltinExtensions(term);
 #endif
 
+#ifndef KTERM_DISABLE_NET
     KTerm_Net_Init(term);
+#endif
 
     return true;
 }
@@ -13149,7 +13153,9 @@ void KTerm_EnableDebug(KTerm* term, bool enable) {
  * @see KTerm_QueueResponse(term) for response queuing.
  */
 void KTerm_Update(KTerm* term) {
+#ifndef KTERM_DISABLE_NET
     KTerm_Net_Process(term);
+#endif
 
     term->pending_session_switch = -1; // Reset pending switch
     int saved_session = term->active_session;
@@ -15804,7 +15810,9 @@ bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event) {
 #endif
 
 #define KTERM_NET_IMPLEMENTATION
+#ifndef KTERM_DISABLE_NET
 #include "kt_net.h"
+#endif
 
 #define KTERM_COMPOSITE_IMPLEMENTATION
 #include "kt_composite_sit.h"

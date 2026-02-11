@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.14
+# K-Term Emulation Library v2.6.0
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,6 +46,28 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.0: Networking & Production Readiness**
+This release consolidates the massive networking improvements introduced throughout the v2.5.x cycle, delivering a full-featured, non-blocking networking stack for building robust remote clients and servers. It finalizes the SSH/Telnet integration and introduces configuration controls for embedded use.
+
+*   **Networking Core (`kt_net.h`):**
+    *   **Async Architecture:** A completely non-blocking I/O state machine with event callbacks (`on_connect`, `on_data`, `on_error`) prevents UI freezes.
+    *   **Client & Server:** Support for both initiating connections and listening for incoming TCP/Telnet clients (`KTerm_Net_Listen`) with authentication hooks.
+    *   **Resilience:** Built-in Keep-Alive configuration, connection timeouts, automatic retries, and detailed status diagnostics (`KTerm_Net_GetStatus`).
+    *   **Configuration:** New macros `KTERM_DISABLE_NET` and `KTERM_DISABLE_TELNET` allow stripping networking features for minimal or secure builds.
+
+*   **Protocols & Security:**
+    *   **SSH Integration:** A "Bring Your Own Crypto" architecture using `KTermNetSecurity` hooks. Includes a production-ready reference client (`ssh_client.c`) with a full RFC 4253 binary packet framer and RFC 4252 Authentication state machine (Public Key & Password).
+    *   **Telnet Stack:** Full RFC 854 Telnet protocol support with an internal state machine for Option Negotiation (DO/DONT/WILL/WONT) and Subnegotiation (SB).
+    *   **Sodium Example:** Added `example/ssh_sodium.c` demonstrating integration with `libsodium` (Curve25519/ChaCha20-Poly1305).
+
+*   **Gateway & Session Routing:**
+    *   **Session Multiplexing:** Network streams can be dynamically routed to specific local panes via the `ATTACH` command (`EXT;net;attach;SESSION=n`), enabling complex multi-session remote layouts.
+    *   **Remote Control:** Full control via Gateway commands (`connect`, `disconnect`, `ping`, `myip`), with hardened parsing for IPv6 and complex credentials.
+
+*   **Examples & Tools:**
+    *   **Graphical Clients:** Upgraded `telnet_client.c` and `ssh_client.c` to fully graphical applications with window resizing, CRT effects, and status overlays.
+    *   **Net Server:** Functional Telnet server example (`net_server.c`) with shell integration.
 
 **New in v2.5.0: Feature Consolidation & Stabilization**
 This major release consolidates the extensive feature set introduced throughout the v2.4.x development cycle, delivering a production-ready, high-performance terminal emulation engine. It marks the complete integration with the Situation framework and finalizes the advanced Gateway Grid system.
@@ -509,6 +531,7 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
 **Features:**
 *   **Client & Server Modes:** Connect to remote hosts or listen for incoming connections (`KTerm_Net_Listen`).
 *   **Telnet State Machine:** Built-in RFC 854/857/858 negotiation handling (DO/DONT/WILL/WONT) and Subnegotiation (SB).
+    > **Note:** Telnet is inherently insecure (plaintext). For real-world applications over the internet, we strongly recommend using the SSH integration or disabling Telnet via `KTERM_DISABLE_TELNET`.
 *   **SSH Integration:** `ssh_client.c` (in root) provides a reference implementation of the SSH-2 protocol (RFC 4253), featuring:
     *   **Binary Packet Framing:** Correct handling of packet length, padding, and payload.
     *   **Authentication:** Full state machine for **Public Key** (Probe & Sign) and **Password** authentication.
@@ -553,6 +576,11 @@ KTerm_Net_SetKeepAlive(term, session, true, 60); // Enable SO_KEEPALIVE
 KTerm_Net_Connect(term, session, "towel.blinkenlights.nl", 23, NULL, NULL);
 ```
 
+**Session Routing:**
+Network connections are bound to specific `KTermSession` instances. In a multi-pane layout (multiplexer), you can map different connections to different sessions.
+*   The **Gateway Protocol** allows dynamic routing via `EXT;net;attach;SESSION=n`, directing the active network stream to a target pane.
+*   API: `KTerm_Net_SetTargetSession(term, session, target_idx)` allows programmatic redirection.
+
 **Core Functions:**
 *   `KTerm_Net_Init(term)`: Initializes the network subsystem (Winsock on Windows) and registers the output sink.
 *   `KTerm_Net_Connect(...)`: Initiates a non-blocking connection.
@@ -572,6 +600,8 @@ and buffer sizes. These can be modified before compilation.
 You can define the following macros to enable/disable specific subsystems:
 
 *   `KTERM_DISABLE_GATEWAY`: Disables the Gateway Protocol (runtime introspection/configuration). Reduces code size and removes the overhead of parsing `DCS GATE` sequences.
+*   `KTERM_DISABLE_NET`: Disables the networking module (`kt_net.h`) entirely for strictly local/offline builds.
+*   `KTERM_DISABLE_TELNET`: Disables Telnet protocol support within the networking module, leaving only Raw TCP and custom SSH hooks active.
 *   `KTERM_ENABLE_MT_ASSERTS`: Enables runtime checks to ensure main-thread-only functions are called correctly (Debug only).
 
 ## Key Data Structures
