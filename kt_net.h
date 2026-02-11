@@ -1,6 +1,8 @@
 #ifndef KT_NET_H
 #define KT_NET_H
 
+#ifndef KTERM_DISABLE_NET
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,11 +33,13 @@ typedef struct {
     void (*on_data)(KTerm* term, KTermSession* session, const char* data, size_t len);
     void (*on_error)(KTerm* term, KTermSession* session, const char* msg);
 
+#ifndef KTERM_DISABLE_TELNET
     // Telnet Negotiation Callback (Return true to handle, false for default rejection)
     bool (*on_telnet_command)(KTerm* term, KTermSession* session, unsigned char command, unsigned char option);
 
     // Telnet Subnegotiation Callback
     void (*on_telnet_sb)(KTerm* term, KTermSession* session, unsigned char option, const char* data, size_t len);
+#endif
 
     // Server-Side Auth Callback (Return true if valid)
     bool (*on_auth)(KTerm* term, KTermSession* session, const char* user, const char* pass);
@@ -66,7 +70,9 @@ typedef struct {
 typedef enum {
     KTERM_NET_PROTO_RAW = 0,
     KTERM_NET_PROTO_FRAMED = 1,
+#ifndef KTERM_DISABLE_TELNET
     KTERM_NET_PROTO_TELNET = 2
+#endif
 } KTermNetProtocol;
 
 // Packet Types for Framed Mode
@@ -75,6 +81,7 @@ typedef enum {
 #define KTERM_PKT_GATEWAY 0x03 // Payload: Gateway Command String
 #define KTERM_PKT_ATTACH  0x04 // Payload: [SessionID:1]
 
+#ifndef KTERM_DISABLE_TELNET
 // Telnet Commands (RFC 854)
 #define KTERM_TELNET_SE   240
 #define KTERM_TELNET_NOP  241
@@ -99,6 +106,7 @@ typedef enum {
 #define KTERM_TELNET_NAWS       31
 #define KTERM_TELNET_ENVIRON    36
 #define KTERM_TELNET_NEW_ENVIRON 39
+#endif
 
 // Initialization
 void KTerm_Net_Init(KTerm* term);
@@ -126,8 +134,10 @@ void KTerm_Net_SetTargetSession(KTerm* term, KTermSession* session, int target_i
 // Send Framed Packet (Helper)
 void KTerm_Net_SendPacket(KTerm* term, KTermSession* session, uint8_t type, const void* payload, size_t len);
 
+#ifndef KTERM_DISABLE_TELNET
 // Send Telnet Command (Helper)
 void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t command, uint8_t option);
+#endif
 
 // Utilities
 void KTerm_Net_GetLocalIP(char* buffer, size_t max_len);
@@ -137,11 +147,15 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
 }
 #endif
 
+#endif // KTERM_DISABLE_NET
+
 #endif // KT_NET_H
 
 #ifdef KTERM_NET_IMPLEMENTATION
 #ifndef KTERM_NET_IMPLEMENTATION_GUARD
 #define KTERM_NET_IMPLEMENTATION_GUARD
+
+#ifndef KTERM_DISABLE_NET
 
 #include <stdio.h>
 #include <string.h>
@@ -174,6 +188,7 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
     #define INVALID_SOCKET -1
 #endif
 
+#ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
 typedef enum {
     TELNET_STATE_NORMAL = 0,
@@ -185,6 +200,7 @@ typedef enum {
     TELNET_STATE_SB,
     TELNET_STATE_SB_IAC
 } TelnetParseState;
+#endif
 
 // Auth State for Server
 typedef enum {
@@ -226,11 +242,13 @@ typedef struct {
     bool keep_alive;
     int keep_alive_idle;
 
+#ifndef KTERM_DISABLE_TELNET
     // Telnet State
     TelnetParseState telnet_state;
     char sb_buffer[1024];
     int sb_len;
     unsigned char sb_option;
+#endif
 
     // Auth State
     NetAuthState auth_state;
@@ -243,6 +261,7 @@ typedef struct {
     // Hardening: Timeouts & Retries
     time_t connect_start_time;
     int retry_count;
+    char last_error[256];
 
 } KTermNetSession;
 
@@ -326,6 +345,7 @@ static void KTerm_Net_Log(KTerm* term, int session_idx, const char* msg) {
 
 static void KTerm_Net_TriggerError(KTerm* term, KTermSession* session, KTermNetSession* net, const char* msg) {
     KTerm_Net_Log(term, (int)(session - term->sessions), msg);
+    if (net) snprintf(net->last_error, sizeof(net->last_error), "%s", msg);
 
     // Retry Logic for Connection Errors
     if (net->state == KTERM_NET_STATE_CONNECTING || net->state == KTERM_NET_STATE_RESOLVING) {
@@ -392,6 +412,7 @@ static void KTerm_Net_ProcessFrame(KTerm* term, KTermSession* session, KTermNetS
     }
 }
 
+#ifndef KTERM_DISABLE_TELNET
 void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t command, uint8_t option) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
     if (!net) return;
@@ -403,6 +424,7 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
         if(net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
     }
 }
+#endif
 
 static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* data, size_t len) {
     KTerm* term = (KTerm*)user_data;
@@ -424,6 +446,7 @@ static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* d
                 if(net->tx_head == net->tx_tail) net->tx_tail = (net->tx_tail + 1) % NET_BUFFER_SIZE;
             }
         }
+#ifndef KTERM_DISABLE_TELNET
         else if (net->protocol == KTERM_NET_PROTO_TELNET) {
             for (size_t i = 0; i < len; i++) {
                 net->tx_buffer[net->tx_head] = data[i];
@@ -437,6 +460,7 @@ static void KTerm_Net_Sink(void* user_data, KTermSession* session, const char* d
             }
             return;
         }
+#endif
 
         for (size_t i = 0; i < len; i++) {
             net->tx_buffer[net->tx_head] = data[i];
@@ -471,7 +495,9 @@ void KTerm_Net_Connect(KTerm* term, KTermSession* session, const char* host, int
     net->is_server = false;
     net->tx_head = 0; net->tx_tail = 0;
     net->rx_len = 0; net->expected_frame_len = 0;
+#ifndef KTERM_DISABLE_TELNET
     net->telnet_state = TELNET_STATE_NORMAL;
+#endif
     net->target_session_index = (int)(session - term->sessions);
 
     // Hardening Init
@@ -492,7 +518,9 @@ void KTerm_Net_Listen(KTerm* term, KTermSession* session, int port) {
     // Zero out buffers and state
     net->tx_head = 0; net->tx_tail = 0;
     net->rx_len = 0; net->expected_frame_len = 0;
+#ifndef KTERM_DISABLE_TELNET
     net->telnet_state = TELNET_STATE_NORMAL;
+#endif
     net->auth_state = AUTH_STATE_NONE;
     net->socket_fd = INVALID_SOCKET;
     net->listener_fd = INVALID_SOCKET;
@@ -558,8 +586,11 @@ void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_
             case KTERM_NET_STATE_ERROR: state_str = "ERROR"; break;
             default: break;
         }
+        snprintf(buffer, max_len, "STATE=%s;HOST=%s;PORT=%d;RETRY=%d;LAST_ERROR=%s",
+                 state_str, net->host, net->port, net->retry_count, net->last_error);
+    } else {
+        snprintf(buffer, max_len, "STATE=%s", state_str);
     }
-    snprintf(buffer, max_len, "STATE=%s", state_str);
 }
 
 void KTerm_Net_GetCredentials(KTerm* term, KTermSession* session, char* user_out, size_t user_max, char* pass_out, size_t pass_max) {
@@ -748,10 +779,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
 
             KTerm_Net_Log(term, session_idx, "Client Connected");
 
+#ifndef KTERM_DISABLE_TELNET
             // Negotiate Echo if Telnet
             if (net->protocol == KTERM_NET_PROTO_TELNET) {
                 KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_WILL, KTERM_TELNET_ECHO);
             }
+#endif
 
             if (net->callbacks.on_auth) {
                 net->state = KTERM_NET_STATE_AUTH;
@@ -844,6 +877,7 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                  // Simple Auth State Machine
                  for(int i=0; i<nbytes; i++) {
                      char c = rx[i];
+#ifndef KTERM_DISABLE_TELNET
                      // Handle Telnet Commands even during Auth? Yes, needed for IAC WILL ECHO logic
                      if (net->protocol == KTERM_NET_PROTO_TELNET) {
                          if (net->telnet_state == TELNET_STATE_NORMAL && c == KTERM_TELNET_IAC) { net->telnet_state = TELNET_STATE_IAC; continue; }
@@ -867,6 +901,7 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                              }
                          }
                      }
+#endif
 
                      if (c == '\r' || c == '\n') {
                          net->auth_input_buf[net->auth_input_len] = '\0';
@@ -934,7 +969,9 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                         net->rx_len = remaining; net->expected_frame_len = 0;
                     }
                  }
-            } else if (net->protocol == KTERM_NET_PROTO_TELNET) {
+            }
+#ifndef KTERM_DISABLE_TELNET
+            else if (net->protocol == KTERM_NET_PROTO_TELNET) {
                 if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
                 int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
 
@@ -1021,7 +1058,9 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                             break;
                     }
                 }
-            } else {
+            }
+#endif
+            else {
                 if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
                 int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
                 if (!net->is_server) {
@@ -1125,6 +1164,8 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
 #undef KT_POPEN
 #undef KT_PCLOSE
 }
+
+#endif // KTERM_DISABLE_NET
 
 #endif // KTERM_NET_IMPLEMENTATION_GUARD
 #endif // KTERM_NET_IMPLEMENTATION

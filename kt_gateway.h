@@ -650,6 +650,11 @@ static int GatewayCommandCmp(const void* key, const void* elem) {
 // Handlers
 
 static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+#ifdef KTERM_DISABLE_NET
+    char response[64];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;ATTACH;ERR;NET_DISABLED\x1B\\", id);
+    KTerm_QueueResponse(term, response);
+#else
     char subcmd[64];
     if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
 
@@ -664,6 +669,7 @@ static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const
             }
         }
     }
+#endif
 }
 
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
@@ -1460,6 +1466,9 @@ static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char
 }
 
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+#ifdef KTERM_DISABLE_NET
+    if (respond) respond(term, session, "ERR;NET_DISABLED");
+#else
     if (!args) return;
 
     char buffer[512];
@@ -1552,6 +1561,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
     }
+#endif
 }
 
 static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {

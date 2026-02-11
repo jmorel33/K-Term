@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.4.27
+# kterm.h - Technical Reference Manual v2.6.0
 
 **(c) 2026 Jacques Morel**
 
@@ -69,6 +69,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.20. BiDirectional Text Support (BiDi)](#420-bidirectional-text-support-bidi)
     *   [4.21. DEC Locator Support](#421-dec-locator-support)
     *   [4.22. VT Pipe (Gateway Protocol)](#422-vt-pipe-gateway-protocol)
+    *   [4.23. Networking & SSH](#423-networking--ssh)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -860,6 +861,8 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;CONCEAL`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |
 | `PIPE;BANNER`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
 | `PIPE;VT`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
+| `EXT;net`    | `connect;...` | Control networking (connect, disconnect, ping). See Section 4.23. |
+| `EXT;ssh`    | `connect;...` | Alias for `EXT;net`. |
 | `SET;SESSION`| `<ID>` | Sets the target session for subsequent Gateway commands. `<ID>` is the session index (0-3). Commands will apply to this session regardless of origin. |
 | `SET;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
 | `SET;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics. |
@@ -1285,6 +1288,175 @@ To set the text color to Red (`ESC [ 31 m`) safely:
 1.  **Encode:** `\x1B[31m` -> Base64 `G1szMW0=`
 2.  **Send:** `\033PGATE;KTERM;0;PIPE;VT;B64;G1szMW0=\033\`
 3.  **Result:** The terminal decodes the payload and executes `ESC [ 31 m` as if it were typed locally.
+
+### 4.23. Networking & SSH
+
+The `kt_net.h` module (fully integrated into `kterm.h` in v2.6.0) provides a lightweight, non-blocking networking abstraction. It enables KTerm instances to connect to remote hosts via TCP (raw sockets) or SSH, seamlessly integrating with the KTerm event loop and Gateway Protocol.
+
+**Features:**
+- **Client Mode:** Connect to remote TCP servers or SSH hosts.
+- **Server Mode:** Accept incoming connections (`KTerm_Net_Listen`) with optional authentication.
+- **Non-Blocking Architecture:** Connection attempts and I/O are fully async to prevent UI freezes.
+- **Event-Driven:** Callbacks for connection status (`on_connect`, `on_disconnect`), data reception, and errors.
+- **Security Hooks:** Interface (`KTermNetSecurity`) for plugging in TLS/SSL (e.g., OpenSSL) or custom encryption (SSH).
+- **Protocol Support:**
+    - `KTERM_NET_PROTO_RAW`: Raw byte stream.
+    - `KTERM_NET_PROTO_FRAMED`: Binary framing for multiplexing resizing, gateway commands, and data.
+    - `KTERM_NET_PROTO_TELNET`: Full Telnet protocol (RFC 854) support with state machine and negotiation callbacks.
+
+#### 4.23.1. Configuration Macros
+
+You can disable networking features at compile time to reduce binary size or enforce security policies:
+*   `KTERM_DISABLE_NET`: Disables the entire networking module (`kt_net.h`) and associated Gateway commands.
+*   `KTERM_DISABLE_TELNET`: Disables the Telnet protocol logic (state machine and callbacks) while keeping Raw TCP and SSH support active.
+
+#### 4.23.2. Initialization & Event Loop
+
+The networking subsystem is initialized automatically by `KTerm_Init`. However, to handle network I/O, you must ensure your main loop calls `KTerm_Update` (which internally calls `KTerm_Net_Process`):
+
+```c
+while (running) {
+    // KTerm_Update processes Network I/O, timers, and logic
+    KTerm_Update(term);
+    // ... Render ...
+}
+```
+
+To handle network events asynchronously, register callbacks:
+
+```c
+void my_connect(KTerm* term, KTermSession* session) {
+    printf("Connected!\n");
+}
+
+void my_error(KTerm* term, KTermSession* session, const char* msg) {
+    printf("Net Error: %s\n", msg);
+}
+
+KTermNetCallbacks callbacks = {
+    .on_connect = my_connect,
+    .on_disconnect = my_disconnect,
+    .on_data = NULL, // If NULL, data is automatically written to the terminal
+    .on_error = my_error,
+    // Optional: Handle Telnet Negotiation
+    .on_telnet_command = my_telnet_negotiation,
+    // Optional: Handle Telnet Subnegotiation (SB)
+    .on_telnet_sb = my_telnet_sb_handler
+};
+
+KTerm_Net_SetCallbacks(term, session, callbacks);
+```
+
+#### 4.23.3. Client Mode
+
+**Programmatic:**
+```c
+KTermSession* session = &term->sessions[0];
+// Connects asynchronously. 'on_connect' called when ready.
+KTerm_Net_Connect(term, session, "192.168.1.50", 23, "user", "password");
+```
+
+**Gateway Command:**
+```
+DCS GATE;KTERM;1;EXT;net;connect;192.168.1.50:23 ST
+```
+
+**Diagnostics:**
+Use `KTerm_Net_GetStatus` to retrieve detailed connection state (Host, Port, Retry Count, Last Error).
+
+#### 4.23.4. Server Mode
+
+KTerm can listen for incoming connections, effectively acting as a terminal server.
+
+```c
+// Callback to verify credentials (simple auth)
+bool my_auth(KTerm* term, KTermSession* session, const char* user, const char* pass) {
+    return (strcmp(user, "admin") == 0 && strcmp(pass, "secret") == 0);
+}
+
+KTermNetCallbacks cbs = { .on_connect = my_on_client, .on_auth = my_auth };
+KTerm_Net_SetCallbacks(term, session, cbs);
+
+// Start Server on port 2323
+KTerm_Net_Listen(term, session, 2323);
+```
+
+#### 4.23.5. SSH & Custom Security Hooks
+
+KTerm provides a "Bring Your Own Crypto" interface via `KTermNetSecurity`. This allows you to implement SSH or TLS without linking the core library to specific crypto implementations like OpenSSL or libssh.
+
+**SSH Reference Implementation:**
+See `example/ssh_sodium.c` (using libsodium) or `ssh_client.c` (skeleton) for a full implementation of the SSH-2 state machine (RFC 4253), covering:
+1.  **Handshake:** Algorithm negotiation (KEXINIT) and Key Exchange (ECDH).
+2.  **Authentication:** Public Key (Probe/Sign) and Password auth (RFC 4252).
+3.  **Transport:** Binary packet framing (Length + Padding + Payload).
+
+```c
+KTermNetSecurity ssh_sec = {
+    .ctx = my_ssh_context,
+    .handshake = my_ssh_handshake, // Returns KTERM_SEC_OK, AGAIN, or ERROR
+    .read = my_ssh_read,           // Decrypts and handles SSH packets
+    .write = my_ssh_write,         // Encrypts and frames data
+    .close = my_ssh_close
+};
+KTerm_Net_SetSecurity(term, session, ssh_sec);
+```
+
+#### 4.23.6. Telnet Protocol Support
+
+To enable Telnet support (RFC 854 processing), set the protocol to `KTERM_NET_PROTO_TELNET`. This automatically filters IAC sequences and triggers callbacks for negotiation.
+
+```c
+KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_TELNET);
+```
+
+You can handle negotiation (WILL/WONT/DO/DONT) via the `on_telnet_command` callback. If the callback returns `false` (or is NULL), the library automatically rejects requests (sends DONT/WONT) to ensure compliance.
+
+```c
+bool my_telnet_handler(KTerm* term, KTermSession* session, unsigned char cmd, unsigned char opt) {
+    if (cmd == KTERM_TELNET_WILL && opt == TELNET_OPT_ECHO) {
+        // Accept remote echo
+        KTerm_Net_SendTelnetCommand(term, session, KTERM_TELNET_DO, opt);
+        return true;
+    }
+    return false; // Reject everything else
+}
+```
+> **Warning:** Telnet transmits data in plaintext. Use `KTERM_DISABLE_TELNET` to disable this feature in secure environments.
+
+#### 4.23.7. Custom Protocol Framing
+
+The `KTERM_NET_PROTO_FRAMED` mode supports binary multiplexing of data and out-of-band events over a single TCP stream.
+
+```c
+KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_FRAMED);
+```
+
+**Packet Format:** `[TYPE:1][LEN:4 (Big Endian)][PAYLOAD:LEN]`
+
+| Type | Name | Payload |
+|---|---|---|
+| `0x01` | DATA | Raw terminal I/O bytes |
+| `0x02` | RESIZE | `[Width:4][Height:4]` (Big Endian) |
+| `0x03` | GATEWAY | Gateway Command String (e.g. `EXT;grid;fill...`) |
+| `0x04` | ATTACH | `[SessionID:1]` (Routes future traffic to session N) |
+
+#### 4.23.8. Session Routing
+
+Network connections are bound to specific `KTermSession` instances. In a multi-pane layout (multiplexer), you can map different connections to different sessions dynamically.
+
+*   **Gateway:** `DCS GATE;KTERM;1;ATTACH;SESSION=2 ST` directs all subsequent data received on the current connection to Session 2.
+*   **API:** `KTerm_Net_SetTargetSession(term, session, target_idx)`.
+
+#### 4.23.9. Gateway Control Commands
+
+Networking can be inspected and controlled via `DCS GATE` commands (Extension `EXT`):
+
+*   `EXT;net;connect;<host>:<port>`: Initiates a connection.
+*   `EXT;net;disconnect`: Closes the connection.
+*   `EXT;net;ping;<host>`: Checks system connectivity to a host. Returns command output.
+*   `EXT;net;myip`: Returns the local public-facing IP address.
+*   `EXT;ssh;...`: Alias for `EXT;net`.
 
 ---
 

@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.6.0] - Production Readiness & Networking Configuration
+- **Networking Configuration:** Introduced `KTERM_DISABLE_NET` and `KTERM_DISABLE_TELNET` macros to allow granular control over networking features, enabling minimal builds for embedded environments.
+- **Enhanced Diagnostics:** Updated `KTerm_Net_GetStatus` to return detailed connection state, including the last error message, retry count, and resolved host/port.
+- **SSH Integration Example:** Added `example/ssh_sodium.c` as a concrete reference for integrating `libsodium` cryptographic primitives into the SSH client hooks.
+- **Session Routing:** Documented dynamic session routing for network connections, clarifying how to map multiple connections to split-screen panes.
+- **Telnet Security:** Added explicit warnings and configuration options regarding Telnet's insecurity, promoting SSH for production use.
+
 ## [v2.5.14] - Graphical Remote Clients
 - **Graphical Upgrade**: Upgraded `telnet_client.c` and `ssh_client.c` from console skeletons to full graphical applications using the Situation framework.
     - Added resizing support with dynamic protocol negotiation (NAWS for Telnet, Window Change for SSH).
