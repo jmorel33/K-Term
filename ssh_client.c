@@ -1,6 +1,11 @@
 // KTerm SSH Client Reference Implementation
 // A graphical, standalone SSH-2 client demonstrating KTerm's custom security transport layer.
 //
+// ⚠️ WARNING: REFERENCE IMPLEMENTATION WITH MOCK CRYPTO ⚠️
+// This client uses STUBBED cryptographic primitives (Mock KEX, Mock Signatures).
+// DO NOT USE FOR REAL SSH CONNECTIONS WITHOUT PLUGGING IN A REAL CRYPTO LIBRARY.
+// See `KTermNetSecurity` hooks for integration points (e.g. libsodium, OpenSSL).
+//
 // Features:
 // - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254)
 // - "Bring Your Own Crypto": Pluggable hooks for Key Exchange, Encryption, and MAC

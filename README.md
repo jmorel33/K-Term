@@ -37,6 +37,19 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 
 </details>
 
+## Quick Start
+
+To build the included examples (Telnet Client, SSH Client, Server) using the provided Makefile:
+
+```bash
+make
+```
+
+> **Note:** This requires `libsituation` and standard build tools (`gcc`).
+> - **`telnet_client`**: A full graphical Telnet client.
+> - **`ssh_client`**: A reference SSH client (see crypto warning below).
+> - **`net_server`**: A simple Telnet/TCP server.
+
 ## Description
 
 **K-Term** (`kterm.h`) is a production-ready, single-header C library delivering the most comprehensive and faithful terminal emulation available today — spanning the full DEC lineage from VT52 to VT525, classic xterm behavior, and cutting-edge modern extensions.
@@ -222,6 +235,11 @@ The library processes a stream of input characters (typically from a host applic
 -   **Retro CRT Effects:** Configurable screen curvature, scanlines, and visual bell.
 -   **Safety:** Hardened against buffer overflows and integer exploits using `StreamScanner` and safe parsing primitives.
 -   **Diagnostics:** Built-in test suite and verbose debug logging.
+
+## Known Limitations
+
+-   **BiDirectional Text (BiDi):** Support is currently limited to visual reordering. Full `fribidi` parity for complex RTL text shaping is planned for a future release.
+-   **SSH Cryptography:** The `ssh_client.c` reference implementation uses **mock cryptographic primitives** by default. For production use, you must integrate a real crypto library (e.g., libsodium, OpenSSL) into the provided `KTermNetSecurity` hooks.
 
 ## How It Works
 
