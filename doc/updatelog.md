@@ -1,5 +1,14 @@
 # K-Term Update Log
 
+## [v2.5.14] - Graphical Remote Clients
+- **Graphical Upgrade**: Upgraded `telnet_client.c` and `ssh_client.c` from console skeletons to full graphical applications using the Situation framework.
+    - Added resizing support with dynamic protocol negotiation (NAWS for Telnet, Window Change for SSH).
+    - Integrated CRT effects toggle (F12) and visual status indicators.
+    - Moved `telnet_client.c` to the root directory for consistency.
+- **Telnet Client**: Added robust negotiation for `NAWS`, `TTYPE` ("XTERM-256COLOR"), `ECHO`, and `SGA`.
+- **SSH Client**: Finalized the reference SSH-2 implementation with PTY resizing and mock host key verification UI.
+- **Documentation**: Updated `README.md` with specific compilation instructions for the new graphical examples.
+
 ## [v2.5.13] - Reference SSH Client & Docs
 - **SSH Reference Upgrade**: Promoted `example/ssh_skeleton.c` to `ssh_client.c` in the root directory.
     - Upgraded from a skeleton to a complete reference implementation for a custom SSH transport.
