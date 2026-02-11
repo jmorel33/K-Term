@@ -10,14 +10,15 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Architectural Deep Dive](#13-architectural-deep-dive)
-        *   [1.3.1. Core Philosophy and The `KTerm` Struct](#131-core-philosophy-and-the-kterm-struct)
-        *   [1.3.2. The Input Pipeline](#132-the-input-pipeline)
-        *   [1.3.3. The Processing Loop and State Machine](#133-the-processing-loop-and-state-machine)
-        *   [1.3.4. The Screen Buffer](#134-the-screen-buffer)
-        *   [1.3.5. The Rendering Engine](#135-the-rendering-engine)
-        *   [1.3.6. The Output Pipeline (Response System)](#136-the-output-pipeline-response-system)
-        *   [1.3.7. Session Management](#137-session-management)
+    *   [1.3. Known Limitations (v2.6.0)](#13-known-limitations-v260)
+    *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
+        *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
+        *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
+        *   [1.4.3. The Processing Loop and State Machine](#143-the-processing-loop-and-state-machine)
+        *   [1.4.4. The Screen Buffer](#144-the-screen-buffer)
+        *   [1.4.5. The Rendering Engine](#145-the-rendering-engine)
+        *   [1.4.6. The Output Pipeline (Response System)](#146-the-output-pipeline-response-system)
+        *   [1.4.7. Session Management](#147-session-management)
 
 *   [2. Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
     *   [2.1. Setting the Compliance Level](#21-setting-the-compliance-level)
@@ -170,11 +171,27 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Architectural Deep Dive
+### 1.3. Known Limitations (v2.6.0)
+
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.0 release:
+
+1.  **BiDirectional Text (BiDi):**
+    -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
+    -   It lacks full `fribidi` parity for complex text shaping and implicit paragraph direction handling.
+    -   This may affect rendering accuracy for Right-to-Left languages (e.g., Arabic, Hebrew) in complex contexts.
+
+2.  **Cryptography Stubs:**
+    -   The `ssh_client.c` reference implementation includes a full SSH-2 state machine and packet framer but uses **mock cryptographic primitives** by default.
+    -   Users must integrate a real crypto library (e.g., libsodium, OpenSSL, or BearSSL) into the provided hooks (`KTermNetSecurity`) for secure production use.
+
+3.  **Unicode Coverage:**
+    -   Glyph rendering relies on the `stb_truetype` rasterizer. While it supports the Basic Multilingual Plane (BMP), specialized rendering for complex scripts (Devanagari, etc.) beyond basic shaping is not yet fully implemented.
+
+### 1.4. Architectural Deep Dive
 
 This section provides a more detailed examination of the library's internal components and data flow, expanding on the brief overview. Understanding this architecture is key to extending the library or diagnosing complex emulation issues.
 
-#### 1.3.1. Core Philosophy and The `KTerm` Struct
+#### 1.4.1. Core Philosophy and The `KTerm` Struct
 
 The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device.
 
@@ -185,7 +202,7 @@ In **v2.4**, `KTerm` acts as a thread-safe hypervisor/multiplexer. Instead of ma
 
 The API remains **instance-based** (`KTerm*`), allowing multiple independent multiplexer instances to coexist.
 
-#### 1.3.2. The Input Pipeline
+#### 1.4.2. The Input Pipeline
 
 The terminal is a consumer of sequential character data. The entry point for all incoming data from a host application (e.g., a shell, a remote server) is the input pipeline.
 
@@ -193,7 +210,7 @@ The terminal is a consumer of sequential character data. The entry point for all
 -   **Ingestion:** Host applications use `KTerm_WriteChar(term, ...)`, `KTerm_WriteString(term, ...)` to append data to this buffer. These functions are intended for use from the main application thread.
 -   **Flow Control:** The pipeline has a fixed size (`16384` bytes). If the host writes data faster than the terminal can process it, an overflow flag (`pipeline_overflow`) is set. This allows the host application to detect the overflow and potentially pause data transmission.
 
-#### 1.3.3. The Processing Loop and State Machine
+#### 1.4.3. The Processing Loop and State Machine
 
 The heart of the emulation is the main processing loop within `KTerm_Update(term)`, which drives a sophisticated state machine.
 
@@ -205,7 +222,7 @@ The heart of the emulation is the main processing loop within `KTerm_Update(term
     -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `KTerm_ExecuteCSICommand`, `KTerm_ExecuteOSCCommand`).
     -   **Deferred Operations:** Unlike previous versions, execution does **not** modify the grid directly. Instead, it queues a `KTermOp` (Operation) into the session's **Op Queue**. This ensures atomicity and thread safety.
 
-#### 1.3.4. The Screen Buffer
+#### 1.4.4. The Screen Buffer
 
 The visual state of the terminal is stored in one of two screen buffers, both of which are 2D arrays of `EnhancedTermChar`.
 
@@ -216,7 +233,7 @@ The visual state of the terminal is stored in one of two screen buffers, both of
     -   Flags for DEC special modes like double-width or double-height characters (currently unsupported).
 -   **Primary vs. Alternate Buffer:** The terminal maintains `screen` and `alt_screen`. Applications like `vim` or `less` switch to the alternate buffer (`CSI ?1049 h`) to create a temporary full-screen interface. When they exit, they switch back (`CSI ?1049 l`), restoring the original screen content and scrollback.
 
-#### 1.3.5. The Rendering Engine (The Compositor)
+#### 1.4.5. The Rendering Engine (The Compositor)
 
 The v2.4 rendering engine operates as a decoupled, thread-safe **Compositor**. The Logic Thread prepares a double-buffered `KTermRenderBuffer`, while the Render Thread consumes it. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
 
@@ -265,7 +282,7 @@ graph TD
     Session --> Callbacks
 ```
 
-#### 1.3.6. The Output Pipeline (Response System)
+#### 1.4.6. The Output Pipeline (Response System)
 
 The terminal needs to send data back to the host in response to certain queries or events. This is handled by the output pipeline, or response system.
 
@@ -275,7 +292,7 @@ The terminal needs to send data back to the host in response to certain queries 
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
 -   **Sink (Modern):** Applications can register an `OutputSink` using `KTerm_SetOutputSink`. This flushes the ring buffer and subsequently bypasses it, delivering response data directly to the callback as it is generated (zero-copy). This is the preferred method for high-performance integration.
 
-#### 1.3.7. Session Management (Multiplexer)
+#### 1.4.7. Session Management (Multiplexer)
 
 Version 2.4 decouples the tiling multiplexer into `kt_layout.h`.
 
