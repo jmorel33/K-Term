@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.5.13
+# K-Term Emulation Library v2.5.14
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -519,9 +519,11 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
     *   `MYIP`: Retrieve the local public-facing IP address.
 
 **Examples:**
-*   `example/telnet_client.c`: A complete graphical Telnet client with negotiation support.
+*   `telnet_client.c`: A complete graphical Telnet client with negotiation support.
+    *   *Compile:* `gcc telnet_client.c -o telnet_client -lkterm -lsituation -lm`
 *   `example/net_server.c`: A functional Telnet server that accepts connections, negotiates options, and provides a shell.
 *   `ssh_client.c`: A reference SSH client implementation demonstrating how to build a custom secure transport.
+    *   *Compile:* `gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm`
 
 ```c
 // 1. Initialize Network Module
