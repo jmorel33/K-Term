@@ -1,5 +1,15 @@
 # K-Term Update Log
 
+## [v2.6.6] - Network Diagnostics & Traceroute
+- **Traceroute Support:** Added `TRACEROUTE` command to the `EXT;net` (or `ssh`) Gateway extension (`EXT;net;traceroute;host=x;maxhops=30`).
+- **Cross-Platform Implementation:**
+  - **Linux:** Utilizes `SOCK_DGRAM` with `IP_RECVERR` for non-root UDP traceroute.
+  - **Windows:** Implements `IcmpSendEcho2` via `iphlpapi` for async ICMP tracing.
+- **Async Architecture:** Fully integrated into `kt_net.h` as a non-blocking state machine (`KTerm_Net_Traceroute`, `KTerm_Net_ProcessTraceroute`), ensuring UI responsiveness during hops.
+- **Gateway API Update:** Updated `GatewayExtHandler` signature to include the request `id`, allowing extensions to route async responses correctly.
+- **Optimized DNS:** Implemented optimistic `inet_pton` checks to bypass blocking DNS resolution for raw IP addresses.
+- **Memory Safety:** Fixed potential memory leaks in network context destruction and user data handling.
+
 ## [v2.6.5] - Networking Completion & LibSSH (Phase 5)
 - **Production-Ready SSH:** Integrated full `libssh` support into `kt_net.h` and `ssh_client.c`. When compiled with `KTERM_USE_LIBSSH`, the client performs real-world authentication (Public Key / Password), channel allocation, and encryption, replacing the previous mock implementation.
 - **Auto-Terminfo Injection:** Implemented automatic injection of `TERM=xterm-256color` during the SSH handshake (via `ssh_channel_request_env` or Mock `env` packet), ensuring correct remote terminal behavior without manual configuration.

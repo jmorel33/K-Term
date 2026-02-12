@@ -795,8 +795,9 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
 // --- Gateway Extension: Automate ---
 // Format: EXT;automate;trigger;add;pattern;action
 //         EXT;automate;trigger;list
-static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
+    (void)id;
 
     // Simple parser
     char buffer[512];

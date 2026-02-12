@@ -143,6 +143,12 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
 void KTerm_Net_GetLocalIP(char* buffer, size_t max_len);
 void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
 
+// Traceroute Callback
+typedef void (*KTermTracerouteCallback)(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
+
+// Starts an async traceroute. Use NULL callback for default Gateway output if integrated.
+void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data);
+
 #ifdef __cplusplus
 }
 #endif
@@ -172,6 +178,8 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <iphlpapi.h>
+    #include <icmpapi.h>
     typedef SOCKET socket_t;
     #define CLOSE_SOCKET closesocket
     #define IS_VALID_SOCKET(s) ((s) != INVALID_SOCKET)
@@ -182,11 +190,20 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
     #include <netdb.h>
     #include <arpa/inet.h>
     #include <sys/select.h>
+    #ifdef __linux__
+        #include <linux/errqueue.h>
+        #include <sys/uio.h>
+        #include <sys/time.h>
+        #include <netinet/ip_icmp.h>
+    #endif
     typedef int socket_t;
     #define CLOSE_SOCKET close
     #define IS_VALID_SOCKET(s) ((s) >= 0)
     #define INVALID_SOCKET -1
 #endif
+
+// Forward declaration
+struct KTermTracerouteContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -256,6 +273,8 @@ typedef struct {
     int auth_input_len;
     char auth_user_temp[64];
 
+    struct KTermTracerouteContext* traceroute;
+
     int target_session_index;
 
     // Hardening: Timeouts & Retries
@@ -264,6 +283,28 @@ typedef struct {
     char last_error[256];
 
 } KTermNetSession;
+
+typedef struct KTermTracerouteContext {
+    int state; // 0=IDLE, 1=RESOLVE, 2=SEND, 3=WAIT, 4=DONE
+    char host[256];
+    struct sockaddr_in dest_addr;
+    int current_ttl;
+    int max_hops;
+    int current_probe;
+    int timeout_ms;
+
+    socket_t sockfd;
+    struct timeval probe_start_time;
+
+    KTermTracerouteCallback callback;
+    void* user_data;
+
+#ifdef _WIN32
+    HANDLE icmp_handle;
+    HANDLE icmp_event;
+    char reply_buffer[1024];
+#endif
+} KTermTracerouteContext;
 
 // --- Helper Functions ---
 
@@ -294,6 +335,19 @@ static KTermNetSession* KTerm_Net_CreateContext(KTermSession* session) {
 static void KTerm_Net_DestroyContext(KTermSession* session) {
     if (!session || !session->user_data) return;
     KTermNetSession* net = (KTermNetSession*)session->user_data;
+
+    if (net->traceroute) {
+        if (IS_VALID_SOCKET(net->traceroute->sockfd)) {
+             CLOSE_SOCKET(net->traceroute->sockfd);
+        }
+#ifdef _WIN32
+        if (net->traceroute->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->traceroute->icmp_handle);
+        if (net->traceroute->icmp_event) CloseHandle(net->traceroute->icmp_event);
+#endif
+        if (net->traceroute->user_data) free(net->traceroute->user_data);
+        free(net->traceroute);
+        net->traceroute = NULL;
+    }
 
     if (net->security.close) {
         net->security.close(net->security.ctx);
@@ -668,6 +722,183 @@ void KTerm_Net_SendPacket(KTerm* term, KTermSession* session, uint8_t type, cons
     }
 }
 
+static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->traceroute) return;
+    KTermTracerouteContext* tr = net->traceroute;
+
+    if (tr->state == 4) return; // DONE
+
+#ifdef __linux__
+    // Linux Implementation using IP_RECVERR
+    if (tr->state == 1) { // RESOLVE
+        // Done in Start (blocking for now)
+        tr->state = 2;
+    }
+
+    if (tr->state == 2) { // SEND
+        if (tr->current_ttl > tr->max_hops) {
+             tr->state = 4; // DONE
+             // Optional: Callback with hop=0 to signal finish?
+             return;
+        }
+
+        int ttl = tr->current_ttl;
+        if (setsockopt(tr->sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0) {
+             // Handle error
+        }
+
+        struct sockaddr_in dest = tr->dest_addr;
+        dest.sin_port = htons(33434 + tr->current_ttl);
+
+        gettimeofday(&tr->probe_start_time, NULL);
+        if (sendto(tr->sockfd, "probe", 5, 0, (struct sockaddr*)&dest, sizeof(dest)) < 0) {
+             // Handle error
+        }
+        tr->state = 3; // WAIT
+    }
+    else if (tr->state == 3) { // WAIT
+        char msg_control[1024];
+        struct iovec iov;
+        char buf[512];
+        struct msghdr msg = {0};
+        struct sockaddr_in r_addr;
+
+        iov.iov_base = buf;
+        iov.iov_len = sizeof(buf);
+        msg.msg_name = &r_addr;
+        msg.msg_namelen = sizeof(r_addr);
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = msg_control;
+        msg.msg_controllen = sizeof(msg_control);
+
+        bool got_reply = false;
+        bool reached = false;
+        char ip_str[INET_ADDRSTRLEN] = {0};
+
+        int n = recvmsg(tr->sockfd, &msg, MSG_ERRQUEUE | MSG_DONTWAIT);
+        if (n >= 0) {
+            struct cmsghdr *cmsg;
+            for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+                if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR) {
+                    struct sock_extended_err *ee = (struct sock_extended_err *)CMSG_DATA(cmsg);
+                    struct sockaddr_in *offender = (struct sockaddr_in *)SO_EE_OFFENDER(ee);
+                    inet_ntop(AF_INET, &offender->sin_addr, ip_str, sizeof(ip_str));
+
+                    if (ee->ee_origin == SO_EE_ORIGIN_ICMP) {
+                         if (ee->ee_type == ICMP_TIME_EXCEEDED || ee->ee_type == ICMP_DEST_UNREACH) {
+                             got_reply = true;
+                             if (ee->ee_type == ICMP_DEST_UNREACH) reached = true;
+                         }
+                    }
+                }
+            }
+        }
+
+        if (got_reply) {
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            double rtt = (now.tv_sec - tr->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - tr->probe_start_time.tv_usec) / 1000.0;
+
+            if (tr->callback) {
+                tr->callback(term, session, tr->current_ttl, ip_str, rtt, reached, tr->user_data);
+            }
+
+            if (reached) {
+                tr->state = 4; // DONE
+            } else {
+                tr->current_ttl++;
+                tr->state = 2; // SEND next
+            }
+        } else {
+             struct timeval now;
+             gettimeofday(&now, NULL);
+             double elapsed = (now.tv_sec - tr->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - tr->probe_start_time.tv_usec) / 1000.0;
+             if (elapsed > tr->timeout_ms) {
+                 if (tr->callback) {
+                     tr->callback(term, session, tr->current_ttl, "*", 0, false, tr->user_data);
+                 }
+                 tr->current_ttl++;
+                 tr->state = 2;
+             }
+        }
+    }
+#elif defined(_WIN32)
+    if (tr->state == 2) { // SEND
+        if (tr->current_ttl > tr->max_hops) {
+             tr->state = 4; // DONE
+             return;
+        }
+
+        ResetEvent(tr->icmp_event);
+        IP_OPTION_INFORMATION ip_opts = {0};
+        ip_opts.Ttl = tr->current_ttl;
+
+        DWORD res = IcmpSendEcho2(
+            tr->icmp_handle,
+            tr->icmp_event,
+            NULL, NULL,
+            tr->dest_addr.sin_addr.s_addr,
+            "probe", 5,
+            &ip_opts,
+            tr->reply_buffer, 1024,
+            tr->timeout_ms
+        );
+
+        if (res == 0 && GetLastError() == ERROR_IO_PENDING) {
+            tr->probe_start_time.tv_sec = GetTickCount(); // Store tick count in sec field
+            tr->state = 3; // WAIT
+        } else if (res > 0) {
+            tr->probe_start_time.tv_sec = GetTickCount();
+            SetEvent(tr->icmp_event);
+            tr->state = 3;
+        } else {
+             // Error
+             if (tr->callback) tr->callback(term, session, tr->current_ttl, "ERR", 0, false, tr->user_data);
+             tr->current_ttl++;
+        }
+    }
+    else if (tr->state == 3) { // WAIT
+        if (WaitForSingleObject(tr->icmp_event, 0) == WAIT_OBJECT_0) {
+             PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)tr->reply_buffer;
+             struct in_addr addr;
+             addr.s_addr = reply->Address;
+             char* ip_str = inet_ntoa(addr);
+
+             double rtt = (double)reply->RoundTripTime;
+             bool reached = (reply->Status == IP_SUCCESS);
+
+             if (reply->Status == IP_SUCCESS || reply->Status == IP_TTL_EXPIRED_TRANSIT) {
+                 if (tr->callback) tr->callback(term, session, tr->current_ttl, ip_str, rtt, reached, tr->user_data);
+             } else {
+                 if (tr->callback) tr->callback(term, session, tr->current_ttl, "*", 0, false, tr->user_data);
+             }
+
+             if (reached) tr->state = 4;
+             else {
+                 tr->current_ttl++;
+                 tr->state = 2;
+             }
+        } else {
+             // Timeout Check
+             DWORD now = GetTickCount();
+             if (now - tr->probe_start_time.tv_sec > (DWORD)tr->timeout_ms) {
+                 if (tr->callback) tr->callback(term, session, tr->current_ttl, "*", 0, false, tr->user_data);
+                 tr->current_ttl++;
+                 tr->state = 2;
+             }
+        }
+    }
+#else
+    // Fallback
+    if (tr->state != 4) {
+        if (tr->callback) tr->callback(term, session, 0, "ERR;UNSUPPORTED_PLATFORM", 0, true, tr->user_data);
+        tr->state = 4;
+    }
+#endif
+}
+
 void KTerm_Net_Init(KTerm* term) {
     if (!term) return;
     KTerm_SetOutputSink(term, KTerm_Net_Sink, term);
@@ -680,6 +911,11 @@ void KTerm_Net_Init(KTerm* term) {
 static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
     KTermSession* session = &term->sessions[session_idx];
     KTermNetSession* net = KTerm_Net_GetContext(session);
+
+    // Process Async Traceroute if active
+    if (net && net->traceroute) {
+        KTerm_Net_ProcessTraceroute(term, session);
+    }
 
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
 
@@ -1209,6 +1445,99 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
     }
 #undef KT_POPEN
 #undef KT_PCLOSE
+}
+
+void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data) {
+    if (!term || !session || !host) return;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return;
+
+    // Cleanup existing
+    if (net->traceroute) {
+        if (IS_VALID_SOCKET(net->traceroute->sockfd)) CLOSE_SOCKET(net->traceroute->sockfd);
+        free(net->traceroute);
+        net->traceroute = NULL;
+    }
+
+    net->traceroute = (KTermTracerouteContext*)calloc(1, sizeof(KTermTracerouteContext));
+    if (!net->traceroute) return;
+
+    KTermTracerouteContext* tr = net->traceroute;
+    strncpy(tr->host, host, sizeof(tr->host)-1);
+    tr->max_hops = (max_hops > 0) ? max_hops : 30;
+    tr->timeout_ms = (timeout_ms > 0) ? timeout_ms : 2000;
+    tr->callback = cb;
+    tr->user_data = user_data;
+    tr->current_ttl = 1;
+
+#ifdef __linux__
+    // Setup UDP Socket
+    if (inet_pton(AF_INET, host, &tr->dest_addr.sin_addr) == 1) {
+        tr->dest_addr.sin_family = AF_INET;
+    } else {
+        struct addrinfo hints = {0}, *res;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        if (getaddrinfo(host, "33434", &hints, &res) != 0) {
+            if (cb) cb(term, session, 0, "ERR;DNS_FAILED", 0, true, tr->user_data);
+            if (tr->user_data) free(tr->user_data);
+            free(tr); net->traceroute = NULL;
+            return;
+        }
+        tr->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+        freeaddrinfo(res);
+    }
+
+    tr->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (!IS_VALID_SOCKET(tr->sockfd)) {
+        if (cb) cb(term, session, 0, "ERR;SOCKET_FAILED", 0, true, tr->user_data);
+        if (tr->user_data) free(tr->user_data);
+        free(tr); net->traceroute = NULL;
+        return;
+    }
+
+    int on = 1;
+    setsockopt(tr->sockfd, SOL_IP, IP_RECVERR, &on, sizeof(on));
+
+    // Set non-blocking
+    fcntl(tr->sockfd, F_SETFL, fcntl(tr->sockfd, F_GETFL, 0) | O_NONBLOCK);
+
+    tr->state = 2; // Ready to SEND
+#elif defined(_WIN32)
+    // Windows Implementation
+    if (inet_pton(AF_INET, host, &tr->dest_addr.sin_addr) == 1) {
+        tr->dest_addr.sin_family = AF_INET;
+    } else {
+        struct addrinfo hints = {0}, *res;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+             if (cb) cb(term, session, 0, "ERR;DNS_FAILED", 0, true, tr->user_data);
+             if (tr->user_data) free(tr->user_data);
+             free(tr); net->traceroute = NULL;
+             return;
+        }
+        tr->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+        freeaddrinfo(res);
+    }
+
+    tr->icmp_handle = IcmpCreateFile();
+    if (tr->icmp_handle == INVALID_HANDLE_VALUE) {
+         if (cb) cb(term, session, 0, "ERR;ICMP_CREATE_FAILED", 0, true, tr->user_data);
+         if (tr->user_data) free(tr->user_data);
+         free(tr); net->traceroute = NULL;
+         return;
+    }
+    tr->icmp_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    tr->state = 2; // SEND
+#else
+    if (cb) cb(term, session, 0, "ERR;UNSUPPORTED_PLATFORM", 0, true, tr->user_data);
+    if (tr->user_data) free(tr->user_data);
+    free(tr); net->traceroute = NULL;
+#endif
 }
 
 #endif // KTERM_DISABLE_NET
