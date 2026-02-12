@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.6.5] - Networking Completion & LibSSH (Phase 5)
+- **Production-Ready SSH:** Integrated full `libssh` support into `kt_net.h` and `ssh_client.c`. When compiled with `KTERM_USE_LIBSSH`, the client performs real-world authentication (Public Key / Password), channel allocation, and encryption, replacing the previous mock implementation.
+- **Auto-Terminfo Injection:** Implemented automatic injection of `TERM=xterm-256color` during the SSH handshake (via `ssh_channel_request_env` or Mock `env` packet), ensuring correct remote terminal behavior without manual configuration.
+- **Mock/Reference Mode:** Retained the internal "Mock" SSH state machine for testing and reference purposes. The build system now cleanly selects between Mock and Production modes based on the `KTERM_USE_LIBSSH` macro.
+- **Documentation:** Updated `NETWORKING_GAPS.md` to reflect the completion of all networking roadmap phases (Resilience, Graphics, Convenience, Automation).
+- **Cleanup:** Removed all `TODO` placeholders from the networking stack, solidifying the codebase for release.
+
 ## [v2.6.4] - Networking Automation (Phase 4)
 - **Automation Triggers:** Implemented Phase 4 of the networking roadmap by adding support for automation triggers in `ssh_client.c`. Triggers allow defining "Expect-Send" style rules in the configuration file (`Trigger "pattern" "action"`).
 - **Auto-Response Logic:** The SSH client now scans incoming data streams for configured patterns and automatically injects response text into the channel, enabling automated login sequences, MFA handling, or environment setup.

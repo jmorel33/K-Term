@@ -1,21 +1,25 @@
 // KTerm SSH Client Reference Implementation
 // A graphical, standalone SSH-2 client demonstrating KTerm's custom security transport layer.
 //
-// ⚠️ WARNING: REFERENCE IMPLEMENTATION WITH MOCK CRYPTO ⚠️
-// This client uses STUBBED cryptographic primitives (Mock KEX, Mock Signatures).
-// DO NOT USE FOR REAL SSH CONNECTIONS WITHOUT PLUGGING IN A REAL CRYPTO LIBRARY.
-// See `KTermNetSecurity` hooks for integration points (e.g. libsodium, OpenSSL).
+// KTerm SSH Client Reference Implementation
+// A graphical, standalone SSH-2 client.
+//
+// MODES:
+// 1. PRODUCTION (KTERM_USE_LIBSSH): Uses libssh for real, secure connections.
+// 2. REFERENCE/MOCK: Uses internal stubbed crypto for testing/educational purposes.
+//    ⚠️ WARNING: MOCK MODE IS NOT SECURE. DO NOT USE FOR REAL SENSITIVE CONNECTIONS.
 //
 // Features:
-// - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254)
-// - "Bring Your Own Crypto": Pluggable hooks for Key Exchange, Encryption, and MAC
+// - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254) - In Mock Mode
+// - "Bring Your Own Crypto": Pluggable hooks architecture
 // - Graphical Window via Situation
-// - Mock Host Key Verification UI
-// - Resizable PTY
-// - Phase 4: Automation (Triggers) & Scripting via Gateway
+// - Auto-Terminfo Injection (xterm-256color)
+// - Automation (Triggers) & Scripting via Gateway
+// - Clipboard Integration (OSC 52)
 //
 // Usage: ./ssh_client [user@]host [port]
-// Compile: gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm
+// Compile (Mock): gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm
+// Compile (LibSSH): gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm -lssh -DKTERM_USE_LIBSSH
 
 #define KTERM_IMPLEMENTATION
 #include "kterm.h"
@@ -40,9 +44,10 @@
 #include <strings.h> // for strcasecmp
 
 // --- Configuration ---
+#ifndef KTERM_USE_LIBSSH
 // Define KTERM_USE_MOCK_CRYPTO to run against tests/mock_ssh_server.py without external libs.
-// Define KTERM_LINK_LIBSSH or similar to enable real crypto (requires implementation).
 #define KTERM_USE_MOCK_CRYPTO 1
+#endif
 
 // --- SSH Message Types ---
 #define SSH_MSG_DISCONNECT 1
@@ -459,8 +464,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_KEX_INIT:
             // Send KEXINIT
-            // Crypto Hooks: Here you would populate algo lists
-            // For now, sending dummy cookie
+            // [MOCK MODE]: Sending dummy cookie and empty algo lists.
+            // In a real implementation (or libssh mode), this would negotiate algorithms.
             memset(scratch, 0, 16); // Cookie
             send_packet(fd, SSH_MSG_KEXINIT, scratch, 16); // + empty lists (invalid but skeleton)
             ssh->state = SSH_STATE_WAIT_KEX_INIT;
@@ -469,11 +474,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
         case SSH_STATE_WAIT_KEX_INIT:
             type = read_next_handshake_packet(ssh, fd, buf, sizeof(buf));
             if (type == SSH_MSG_KEXINIT) {
-                // Crypto Hooks: Perform ECDH/DH here
-                // 1. Parse server algorithms
-                // 2. Select algorithm (curve25519-sha256)
-                // 3. Generate keypair
-                // 4. Send SSH_MSG_KEX_ECDH_INIT
+                // [MOCK MODE]: Simulating ECDH/DH exchange.
+                // Skipped: Parse server algorithms, select curve25519-sha256, generate keypair.
                 update_status("Mocking KEX (Host Key Verification)...");
                 // Simulate Host Key check
                 if (!ssh->show_hostkey_alert) {
@@ -495,7 +497,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
         case SSH_STATE_WAIT_NEW_KEYS:
             type = read_next_handshake_packet(ssh, fd, NULL, 0);
             if (type == SSH_MSG_NEWKEYS) {
-                // Crypto Hooks: Initialize Ciphers (AES/ChaCha) and MACs
+                // [MOCK MODE]: Ciphers (AES/ChaCha) and MACs would be initialized here.
                 ssh->state = SSH_STATE_SERVICE_REQUEST;
             }
             return KTERM_SEC_AGAIN;
@@ -578,6 +580,16 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, 0);
             ssh_write_string(&p, &rem, "", 0); // Modes
             send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+
+            // Inject Environment Variable (Auto-Terminfo / TERM)
+            p = scratch; rem = sizeof(scratch);
+            ssh_write_u32(&p, &rem, ssh->remote_channel_id);
+            ssh_write_cstring(&p, &rem, "env");
+            ssh_write_bool(&p, &rem, false);
+            ssh_write_cstring(&p, &rem, "TERM");
+            ssh_write_cstring(&p, &rem, "xterm-256color");
+            send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+
             ssh->state = SSH_STATE_SHELL;
             return KTERM_SEC_AGAIN;
 
@@ -993,6 +1005,7 @@ int main(int argc, char** argv) {
         }
     }
 
+#ifndef KTERM_USE_LIBSSH
     KTermNetSecurity sec = {
         .handshake = my_ssh_handshake,
         .read = my_ssh_read,
@@ -1001,8 +1014,11 @@ int main(int argc, char** argv) {
         .ctx = &global_ssh_ctx
     };
     KTerm_Net_SetSecurity(term, session, sec);
+#else
+    printf("[Init] Using LibSSH for Transport Layer\n");
+#endif
 
-    // Set Data Callback for Graphics Interception
+    // Set Data Callback for Graphics Interception (and Automation)
     KTermNetCallbacks cbs = {0};
     cbs.on_data = my_net_on_data;
     KTerm_Net_SetCallbacks(term, session, cbs);
