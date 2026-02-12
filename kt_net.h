@@ -692,14 +692,57 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         ssh_options_set(net->ssh_session, SSH_OPTIONS_HOST, net->host);
         ssh_options_set(net->ssh_session, SSH_OPTIONS_PORT, &net->port);
         ssh_options_set(net->ssh_session, SSH_OPTIONS_USER, net->user);
+
         int rc = ssh_connect(net->ssh_session);
         if (rc != SSH_OK) { KTerm_Net_TriggerError(term, session, net, ssh_get_error(net->ssh_session)); return; }
+
         net->state = KTERM_NET_STATE_AUTH;
+
+        // --- Authentication Loop ---
         rc = ssh_userauth_none(net->ssh_session, NULL);
-        if (rc == SSH_AUTH_SUCCESS) {
-            net->state = KTERM_NET_STATE_CONNECTED;
-            if (net->callbacks.on_connect) net->callbacks.on_connect(term, session);
+
+        // If "none" fails, try public key
+        if (rc == SSH_AUTH_ERROR || rc == SSH_AUTH_DENIED || rc == SSH_AUTH_PARTIAL) {
+            rc = ssh_userauth_publickey_auto(net->ssh_session, NULL, NULL);
         }
+
+        // If public key fails, try password
+        if (rc == SSH_AUTH_ERROR || rc == SSH_AUTH_DENIED || rc == SSH_AUTH_PARTIAL) {
+            if (net->password[0]) {
+                rc = ssh_userauth_password(net->ssh_session, NULL, net->password);
+            }
+        }
+
+        if (rc != SSH_AUTH_SUCCESS) {
+            KTerm_Net_TriggerError(term, session, net, "Authentication Failed");
+            return;
+        }
+
+        // --- Channel Setup ---
+        net->ssh_channel = ssh_channel_new(net->ssh_session);
+        if (!net->ssh_channel) { KTerm_Net_TriggerError(term, session, net, "Channel alloc failed"); return; }
+
+        if (ssh_channel_open_session(net->ssh_channel) != SSH_OK) {
+            KTerm_Net_TriggerError(term, session, net, "Channel open failed"); return;
+        }
+
+        // Auto-Terminfo: Request PTY with correct TERM type (fallback to xterm-256color)
+        // If we had access to session->term_type, we would use it.
+        // For now, hardcode widely compatible default or use "xterm-256color".
+        if (ssh_channel_request_pty(net->ssh_channel) != SSH_OK) {
+             // Non-fatal, but logged
+             KTerm_Net_Log(term, (int)(session - term->sessions), "PTY Request Failed");
+        }
+
+        // Send environment variables (e.g., TERM) if supported
+        ssh_channel_request_env(net->ssh_channel, "TERM", "xterm-256color");
+
+        if (ssh_channel_request_shell(net->ssh_channel) != SSH_OK) {
+            KTerm_Net_TriggerError(term, session, net, "Shell request failed"); return;
+        }
+
+        net->state = KTERM_NET_STATE_CONNECTED;
+        if (net->callbacks.on_connect) net->callbacks.on_connect(term, session);
 #else
         // ... (Standard Client Connect Logic) ...
         struct addrinfo hints, *res;
