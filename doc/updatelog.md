@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.4] - Networking Automation (Phase 4)
+- **Automation Triggers:** Implemented Phase 4 of the networking roadmap by adding support for automation triggers in `ssh_client.c`. Triggers allow defining "Expect-Send" style rules in the configuration file (`Trigger "pattern" "action"`).
+- **Auto-Response Logic:** The SSH client now scans incoming data streams for configured patterns and automatically injects response text into the channel, enabling automated login sequences, MFA handling, or environment setup.
+- **Gateway Automation:** Added `EXT;automate` Gateway extension to allow runtime management of triggers (add/list) from within the terminal session.
+- **Config Parsing Fix:** Rewrote the `ssh_client.c` configuration parser to robustly handle quoted strings for Trigger patterns and actions, fixing destructive tokenization issues.
+
 ## [v2.6.3] - Networking Convenience (Phase 3)
 - **Session Persistence:** Added `--persist` flag to `ssh_client.c`. When enabled, the terminal session state (grid content, cursor, history) is serialized to a file on exit/disconnect and automatically restored on the next connection to the same host. Filenames are sanitized to prevent directory traversal.
 - **Config File Support:** Added `--config <file>` support to `ssh_client.c` (defaulting to `ssh_config`). Implemented a parser for standard SSH config directives (`Host`, `HostName`, `User`, `Port`) and K-Term specific extensions (`Durable`, `Term`).
