@@ -106,6 +106,11 @@ typedef struct {
     uint32_t remote_channel_id;
     bool try_pubkey;
 
+    // Configuration
+    bool durable_mode;
+    char term_type[64];
+    time_t last_reconnect_attempt;
+
     // UI State
     char status_text[256];
     bool show_hostkey_alert;
@@ -353,7 +358,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, ssh->remote_channel_id);
             ssh_write_cstring(&p, &rem, "pty-req");
             ssh_write_bool(&p, &rem, true); // Want reply
-            ssh_write_cstring(&p, &rem, "xterm-256color");
+            ssh_write_cstring(&p, &rem, ssh->term_type[0] ? ssh->term_type : "xterm-256color");
             ssh_write_u32(&p, &rem, 80); // Width chars
             ssh_write_u32(&p, &rem, 24); // Height chars
             ssh_write_u32(&p, &rem, 0);
@@ -446,19 +451,37 @@ int main(int argc, char** argv) {
     int port = 2222;
     const char* user = "root";
     const char* pass = "toor";
+    bool durable = false;
+    const char* term_type = "xterm-256color";
+    bool host_provided = false;
 
-    // Args: [user@]host [port]
-    if (argc > 1) {
-        char* at = strchr(argv[1], '@');
-        if (at) {
-            *at = '\0';
-            user = argv[1];
-            host = at + 1;
+    // Parse Arguments
+    int arg_idx = 1;
+    while (arg_idx < argc) {
+        if (strcmp(argv[arg_idx], "--durable") == 0) {
+            durable = true;
+            arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--term") == 0 && arg_idx + 1 < argc) {
+            term_type = argv[arg_idx + 1];
+            arg_idx += 2;
         } else {
-            host = argv[1];
+            // Positional args
+            if (!host_provided) { // First positional
+                host_provided = true;
+                char* at = strchr(argv[arg_idx], '@');
+                if (at) {
+                    *at = '\0';
+                    user = argv[arg_idx];
+                    host = at + 1;
+                } else {
+                    host = argv[arg_idx];
+                }
+            } else {
+                port = atoi(argv[arg_idx]);
+            }
+            arg_idx++;
         }
     }
-    if (argc > 2) port = atoi(argv[2]);
 
     // 1. Platform Init
     KTermInitInfo init_info = {
@@ -484,6 +507,8 @@ int main(int argc, char** argv) {
     global_ssh_ctx.state = SSH_STATE_INIT;
     strncpy(global_ssh_ctx.user, user, 63);
     strncpy(global_ssh_ctx.password, pass, 63);
+    global_ssh_ctx.durable_mode = durable;
+    strncpy(global_ssh_ctx.term_type, term_type, 63);
 
     KTermNetSecurity sec = {
         .handshake = my_ssh_handshake,
@@ -548,12 +573,41 @@ int main(int argc, char** argv) {
         snprintf(title, sizeof(title), "K-Term SSH: %s | State: %s", host, global_ssh_ctx.status_text);
         KTerm_SetWindowTitle(term, title);
 
+        // Durable Mode Reconnection Logic
+        if (global_ssh_ctx.durable_mode) {
+            char status_buf[256];
+            KTerm_Net_GetStatus(term, session, status_buf, sizeof(status_buf));
+
+            if (strstr(status_buf, "STATE=DISCONNECTED") || strstr(status_buf, "STATE=ERROR")) {
+                time_t now = time(NULL);
+                if (now - global_ssh_ctx.last_reconnect_attempt > 3) {
+                    global_ssh_ctx.last_reconnect_attempt = now;
+                    update_status("Reconnecting (Durable)...");
+
+                    // Reset SSH State
+                    global_ssh_ctx.state = SSH_STATE_INIT;
+
+                    // Reconnect
+                    KTerm_Net_Connect(term, session, host, port, user, pass);
+                }
+            }
+        }
+
         KTermSit_ProcessInput(term);
         KTerm_Update(term);
 
         KTerm_BeginFrame();
             ClearBackground((Color){0, 0, 0, 255});
             KTerm_Draw(term);
+
+            // Draw Overlay if Reconnecting
+            if (global_ssh_ctx.durable_mode &&
+               (strstr(global_ssh_ctx.status_text, "Reconnecting") || strstr(global_ssh_ctx.status_text, "ERROR") || strstr(global_ssh_ctx.status_text, "DISCONNECTED"))) {
+                // Simple red box in top right
+                // Since we don't have direct access to Situation DrawRectangle here easily without including it or using KTerm ops,
+                // we'll just rely on the Title Bar status update for now, or print a message to the terminal if it's not frozen.
+                // But terminal might be frozen/cleared on reconnect.
+            }
         KTerm_EndFrame();
     }
 

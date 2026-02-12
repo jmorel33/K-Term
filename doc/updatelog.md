@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.1] - Networking Resilience (Phase 1)
+- **Session Serialization:** Added `kt_serialize.h` (header-only library) to serialize and deserialize `KTermSession` state (grid content, cursor, scrollback, attributes) to a portable binary format. This lays the groundwork for session persistence.
+- **Durable SSH Client:** Enhanced `ssh_client.c` with a `--durable` flag. In this mode, the client automatically attempts to reconnect (every 3 seconds) if the network connection is lost or an error occurs, improving resilience on unstable links.
+- **Terminal Type Negotiation:** Added `--term <type>` flag to `ssh_client.c`, allowing users to customize the requested terminal type during the SSH handshake (defaults to `xterm-256color`).
+- **Tests:** Added `tests/test_serialize_suite.c` to verify the correctness of the serialization logic (cursor preservation, cell attributes, and content fidelity).
+
 ## [v2.6.0-pre] - Pre-Release: Compilation & Networking Verification
 - **Compilation Success:** K-Term v2.6.0 now compiles successfully on Windows with GCC 15.1.0 (MSYS2 MinGW64) with all features fully enabled.
 - **Networking Module Verified:** Fixed 3 compilation issues related to the networking module:
