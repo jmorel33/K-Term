@@ -43,6 +43,12 @@ To bridge these gaps systematically without compromising K-Term's lightweight ar
 2.  **Session Persistence:** Use the Phase 1 serialization hooks to save session state to disk on exit/disconnect and restore it on relaunch.
 3.  **Gateway Scripting:** Introduce a lightweight scripting layer (or expand Gateway commands) to allow users to script complex login flows or automations.
 
+### Phase 4: Automation & Interconnectivity (The "Power")
+**Goal:** Enable complex workflows, automation, and cross-session interactions.
+1.  **Triggers & Automation:** Implement "Expect-Send" style triggers in `ssh_client.c` to handle automated logins, MFA prompts, or environment setup. Triggers can be defined in the config file.
+2.  **Gateway Automation Extension:** Register a new `EXT;automate` extension to allow runtime management of triggers and scripts via the Gateway Protocol.
+3.  **Cross-Session Control:** Enhance the Gateway to allow scripts or triggers in one session to control or broadcast to others (`broadcast` targeting), enabling "Cluster SSH" style workflows.
+
 ## Why This Matters
 - K-Term is **superior for embedding/custom apps** (own crypto, Telnet server, GPU tie-ins, thread-safe).
 - But for standalone use (`telnet_client.c`/`ssh_client.c`), these perks make competitors feel more "magical" for end-users.

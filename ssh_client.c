@@ -12,6 +12,7 @@
 // - Graphical Window via Situation
 // - Mock Host Key Verification UI
 // - Resizable PTY
+// - Phase 4: Automation (Triggers) & Scripting via Gateway
 //
 // Usage: ./ssh_client [user@]host [port]
 // Compile: gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm
@@ -87,6 +88,14 @@ typedef enum {
     SSH_STATE_REKEYING
 } MySSHState;
 
+// Automation Trigger
+typedef struct {
+    char pattern[128];
+    char action[128];
+    bool oneshot;
+    bool active;
+} AutomationTrigger;
+
 typedef struct {
     MySSHState state;
     MySSHState pre_rekey_state;
@@ -109,6 +118,7 @@ typedef struct {
     uint32_t local_channel_id;
     uint32_t remote_channel_id;
     bool try_pubkey;
+    int socket_fd; // Cached for automation
 
     // Configuration
     bool durable_mode;
@@ -121,6 +131,12 @@ typedef struct {
     char status_text[256];
     bool show_hostkey_alert;
     char hostkey_fingerprint[64];
+
+    // Automation
+    AutomationTrigger triggers[16];
+    int trigger_count;
+    char trigger_buffer[1024]; // Sliding window for pattern matching
+    int trigger_buf_len;
 } MySSHContext;
 
 static MySSHContext global_ssh_ctx = {0}; // Simplified for single-session example
@@ -153,7 +169,83 @@ static void g_append(const char* data, size_t len) {
     g_ctx.len += len;
 }
 
+// Forward declaration
+static int send_packet(int fd, uint8_t type, const void* payload, size_t len);
+static bool ssh_write_u32(uint8_t** ptr, size_t* rem, uint32_t val);
+static bool ssh_write_string(uint8_t** ptr, size_t* rem, const char* str, size_t len);
+
+static void check_triggers(MySSHContext* ctx, const char* data, size_t len) {
+    if (ctx->trigger_count == 0) return;
+
+    // Append to sliding window
+    int space = sizeof(ctx->trigger_buffer) - ctx->trigger_buf_len - 1; // -1 for null
+    if (len > space) {
+        // Shift buffer to make room
+        int shift = len - space;
+        if (shift > ctx->trigger_buf_len) shift = ctx->trigger_buf_len;
+        memmove(ctx->trigger_buffer, ctx->trigger_buffer + shift, ctx->trigger_buf_len - shift);
+        ctx->trigger_buf_len -= shift;
+    }
+
+    // Copy new data
+    int copy_len = (len < sizeof(ctx->trigger_buffer) - ctx->trigger_buf_len - 1) ? len : (sizeof(ctx->trigger_buffer) - ctx->trigger_buf_len - 1);
+    memcpy(ctx->trigger_buffer + ctx->trigger_buf_len, data, copy_len);
+    ctx->trigger_buf_len += copy_len;
+    ctx->trigger_buffer[ctx->trigger_buf_len] = '\0'; // Null terminate for strstr
+
+    // Check triggers
+    for (int i = 0; i < ctx->trigger_count; i++) {
+        if (ctx->triggers[i].active && ctx->triggers[i].pattern[0]) {
+            if (strstr(ctx->trigger_buffer, ctx->triggers[i].pattern)) {
+                // Match!
+                printf("[Automate] Trigger matched: '%s' -> Sending Action\n", ctx->triggers[i].pattern);
+
+                // Execute Action (Send to Host)
+                // We need to wrap it in SSH channel data packet
+                if (ctx->socket_fd > 0 && ctx->state == SSH_STATE_READY) {
+                    uint8_t payload[1024];
+                    uint8_t* p = payload;
+                    size_t rem = sizeof(payload);
+
+                    // Interpret escape sequences in action (\n, \r)
+                    char active_action[128];
+                    int k=0;
+                    for(int j=0; ctx->triggers[i].action[j] && k<127; j++) {
+                        if(ctx->triggers[i].action[j] == '\\') {
+                            j++;
+                            if(ctx->triggers[i].action[j] == 'n') active_action[k++] = '\n';
+                            else if(ctx->triggers[i].action[j] == 'r') active_action[k++] = '\r';
+                            else if(ctx->triggers[i].action[j] == 't') active_action[k++] = '\t';
+                            else active_action[k++] = ctx->triggers[i].action[j];
+                        } else {
+                            active_action[k++] = ctx->triggers[i].action[j];
+                        }
+                    }
+                    active_action[k] = '\0';
+
+                    ssh_write_u32(&p, &rem, ctx->remote_channel_id);
+                    ssh_write_string(&p, &rem, active_action, k);
+                    send_packet(ctx->socket_fd, SSH_MSG_CHANNEL_DATA, payload, p - payload);
+                }
+
+                if (ctx->triggers[i].oneshot) {
+                    ctx->triggers[i].active = false;
+                }
+
+                // Clear buffer to prevent double match? Or shift?
+                // For now, clear to keep it simple and avoid loops
+                ctx->trigger_buf_len = 0;
+                break;
+            }
+        }
+    }
+}
+
 static bool my_net_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
+    // 1. Run Automation Triggers
+    check_triggers(&global_ssh_ctx, data, len);
+
+    // 2. Graphics Interception
     size_t processed = 0;
     int idx = (int)(session - term->sessions);
 
@@ -329,6 +421,7 @@ static int read_next_handshake_packet(MySSHContext* ssh, int fd, uint8_t* out_pa
 
 static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd) {
     MySSHContext* ssh = (MySSHContext*)ctx;
+    ssh->socket_fd = fd; // Store for automation access
     uint8_t buf[1024];
     uint8_t scratch[1024];
     uint8_t* p;
@@ -573,7 +666,37 @@ typedef struct {
     int port;
     bool durable;
     char term_type[64];
+    AutomationTrigger triggers[16];
+    int trigger_count;
 } SSHProfile;
+
+// Helper to parse quoted strings (e.g. "foo bar")
+static char* parse_quoted(char* src, char* dest, size_t dest_size) {
+    char* start = src;
+    while (*start == ' ' || *start == '\t') start++;
+
+    if (*start == '"') {
+        start++;
+        char* end = strchr(start, '"');
+        if (end) {
+            size_t len = end - start;
+            if (len >= dest_size) len = dest_size - 1;
+            strncpy(dest, start, len);
+            dest[len] = '\0';
+            return end + 1;
+        }
+    } else {
+        // Unquoted: Read until space
+        char* end = start;
+        while (*end && *end != ' ' && *end != '\t' && *end != '\n') end++;
+        size_t len = end - start;
+        if (len >= dest_size) len = dest_size - 1;
+        strncpy(dest, start, len);
+        dest[len] = '\0';
+        return end;
+    }
+    return start;
+}
 
 // Simple line-based config parser (SSH-config style)
 static bool load_config_profile(const char* config_path, const char* profile_name, SSHProfile* out_profile) {
@@ -602,36 +725,102 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         char* end = p + strlen(p) - 1;
         while (end > p && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
 
+        // Handle Trigger manually to support quotes
+        if (strncasecmp(p, "Trigger", 7) == 0 && (p[7] == ' ' || p[7] == '\t' || p[7] == '"')) {
+            if (in_block && out_profile) {
+                if (out_profile->trigger_count < 16) {
+                    char* ptr = p + 7; // Skip "Trigger"
+
+                    // Parse pattern
+                    ptr = parse_quoted(ptr, out_profile->triggers[out_profile->trigger_count].pattern, 128);
+                    // Parse action
+                    ptr = parse_quoted(ptr, out_profile->triggers[out_profile->trigger_count].action, 128);
+
+                    out_profile->triggers[out_profile->trigger_count].active = true;
+                    out_profile->triggers[out_profile->trigger_count].oneshot = true;
+                    out_profile->trigger_count++;
+                }
+            }
+            continue;
+        }
+
         char key[64] = {0};
         char val[256] = {0};
 
-        // Split key/value (space, tab, or =)
         char* token = strtok(p, " \t=");
         if (token) {
             strncpy(key, token, 63);
-            token = strtok(NULL, " \t=");
-            if (token) strncpy(val, token, 255);
-        }
 
-        if (strcasecmp(key, "Host") == 0) {
-            if (found) break; // Already found our block, next Host ends it
-            if (strcasecmp(val, profile_name) == 0) {
-                in_block = true;
-                found = true;
-                if (out_profile) strcpy(out_profile->host_pattern, val);
-            } else {
-                in_block = false;
+            if (strcasecmp(key, "Host") == 0) {
+                char* host_pattern = strtok(NULL, " \t=");
+                if (host_pattern) {
+                    if (found) break; // Already found our block, next Host ends it
+                    if (strcasecmp(host_pattern, profile_name) == 0) {
+                        in_block = true;
+                        found = true;
+                        if (out_profile) strcpy(out_profile->host_pattern, host_pattern);
+                    } else {
+                        in_block = false;
+                    }
+                }
+            } else if (in_block && out_profile) {
+                char* v = strtok(NULL, " \t=");
+                if (v) {
+                    strncpy(val, v, 255);
+                    if (strcasecmp(key, "HostName") == 0) strcpy(out_profile->hostname, val);
+                    else if (strcasecmp(key, "User") == 0) strcpy(out_profile->user, val);
+                    else if (strcasecmp(key, "Port") == 0) out_profile->port = atoi(val);
+                    else if (strcasecmp(key, "Durable") == 0) out_profile->durable = (strcasecmp(val, "true") == 0 || strcasecmp(val, "yes") == 0 || strcmp(val, "1") == 0);
+                    else if (strcasecmp(key, "Term") == 0) strcpy(out_profile->term_type, val);
+                }
             }
-        } else if (in_block && out_profile) {
-            if (strcasecmp(key, "HostName") == 0) strcpy(out_profile->hostname, val);
-            else if (strcasecmp(key, "User") == 0) strcpy(out_profile->user, val);
-            else if (strcasecmp(key, "Port") == 0) out_profile->port = atoi(val);
-            else if (strcasecmp(key, "Durable") == 0) out_profile->durable = (strcasecmp(val, "true") == 0 || strcasecmp(val, "yes") == 0 || strcmp(val, "1") == 0);
-            else if (strcasecmp(key, "Term") == 0) strcpy(out_profile->term_type, val);
         }
     }
     fclose(f);
     return found;
+}
+
+// --- Gateway Extension: Automate ---
+// Format: EXT;automate;trigger;add;pattern;action
+//         EXT;automate;trigger;list
+static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+    if (!args) return;
+
+    // Simple parser
+    char buffer[512];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char* cmd = strtok(buffer, ";");
+    if (!cmd) return;
+
+    if (strcmp(cmd, "trigger") == 0) {
+        char* sub = strtok(NULL, ";");
+        if (sub && strcmp(sub, "add") == 0) {
+            char* pat = strtok(NULL, ";");
+            char* act = strtok(NULL, ";");
+            if (pat && act && global_ssh_ctx.trigger_count < 16) {
+                AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
+                strncpy(t->pattern, pat, 127);
+                strncpy(t->action, act, 127);
+                t->active = true;
+                t->oneshot = true;
+                if (respond) respond(term, session, "OK;TRIGGER_ADDED");
+            } else {
+                if (respond) respond(term, session, "ERR;FULL_OR_INVALID");
+            }
+        } else if (sub && strcmp(sub, "list") == 0) {
+            // Very simple list
+            char msg[1024] = "OK;TRIGGERS=";
+            for(int i=0; i<global_ssh_ctx.trigger_count; i++) {
+                if(global_ssh_ctx.triggers[i].active) {
+                    strcat(msg, global_ssh_ctx.triggers[i].pattern);
+                    strcat(msg, ",");
+                }
+            }
+            if (respond) respond(term, session, msg);
+        }
+    }
 }
 
 // --- Main ---
@@ -683,6 +872,7 @@ int main(int argc, char** argv) {
 
                 // Check if target is a profile in config
                 SSHProfile profile;
+                memset(&profile, 0, sizeof(profile));
                 if (load_config_profile(config_file, target, &profile)) {
                     printf("Loaded profile '%s' from %s\n", target, config_file);
 
@@ -703,6 +893,13 @@ int main(int argc, char** argv) {
                     if (profile.term_type[0]) {
                         strncpy(cfg_term, profile.term_type, sizeof(cfg_term));
                         term_type = cfg_term;
+                    }
+
+                    // Copy triggers
+                    for(int i=0; i<profile.trigger_count; i++) {
+                        if (global_ssh_ctx.trigger_count < 16) {
+                            global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++] = profile.triggers[i];
+                        }
                     }
                 } else {
                     // Not a profile, parse as user@host
@@ -740,6 +937,9 @@ int main(int argc, char** argv) {
 
     KTerm_Net_Init(term);
     KTermSession* session = &term->sessions[0];
+
+    // Register Extension
+    KTerm_RegisterGatewayExtension(term, "automate", KTerm_Ext_Automate);
 
     // 3. SSH Security Init
     // In real app, allocate context per session. Here global.
@@ -862,7 +1062,7 @@ int main(int argc, char** argv) {
                     ssh_write_u32(&p, &rem, rows);
                     ssh_write_u32(&p, &rem, 0);
                     ssh_write_u32(&p, &rem, 0);
-                    send_packet((int)KTerm_Net_GetSocket(term, session), SSH_MSG_CHANNEL_REQUEST, payload, p - payload);
+                    send_packet((int)(intptr_t)KTerm_Net_GetSocket(term, session), SSH_MSG_CHANNEL_REQUEST, payload, p - payload);
                 }
             }
         }
