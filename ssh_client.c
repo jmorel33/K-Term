@@ -23,6 +23,9 @@
 #define KTERM_IO_SIT_IMPLEMENTATION
 #include "kt_io_sit.h"
 
+#define KTERM_SERIALIZE_IMPLEMENTATION
+#include "kt_serialize.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +36,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <strings.h> // for strcasecmp
 
 // --- Configuration ---
 // Define KTERM_USE_MOCK_CRYPTO to run against tests/mock_ssh_server.py without external libs.
@@ -108,6 +112,8 @@ typedef struct {
 
     // Configuration
     bool durable_mode;
+    bool persist_session;
+    char session_file[256];
     char term_type[64];
     time_t last_reconnect_attempt;
 
@@ -558,6 +564,76 @@ static void my_ssh_close(void* ctx) {
     // Cleanup
 }
 
+// --- Config Parser ---
+
+typedef struct {
+    char host_pattern[256];
+    char hostname[256];
+    char user[64];
+    int port;
+    bool durable;
+    char term_type[64];
+} SSHProfile;
+
+// Simple line-based config parser (SSH-config style)
+static bool load_config_profile(const char* config_path, const char* profile_name, SSHProfile* out_profile) {
+    FILE* f = fopen(config_path, "r");
+    if (!f) return false;
+
+    char line[512];
+    bool in_block = false;
+    bool found = false;
+
+    // Initialize Defaults
+    if (out_profile) {
+        memset(out_profile, 0, sizeof(SSHProfile));
+        out_profile->port = 22;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        // Trim leading whitespace
+        char* p = line;
+        while (*p == ' ' || *p == '\t') p++;
+
+        // Skip comments/empty
+        if (*p == '#' || *p == '\n' || *p == '\0') continue;
+
+        // Trim trailing whitespace
+        char* end = p + strlen(p) - 1;
+        while (end > p && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
+
+        char key[64] = {0};
+        char val[256] = {0};
+
+        // Split key/value (space, tab, or =)
+        char* token = strtok(p, " \t=");
+        if (token) {
+            strncpy(key, token, 63);
+            token = strtok(NULL, " \t=");
+            if (token) strncpy(val, token, 255);
+        }
+
+        if (strcasecmp(key, "Host") == 0) {
+            if (found) break; // Already found our block, next Host ends it
+            if (strcasecmp(val, profile_name) == 0) {
+                in_block = true;
+                found = true;
+                if (out_profile) strcpy(out_profile->host_pattern, val);
+            } else {
+                in_block = false;
+            }
+        } else if (in_block && out_profile) {
+            if (strcasecmp(key, "HostName") == 0) strcpy(out_profile->hostname, val);
+            else if (strcasecmp(key, "User") == 0) strcpy(out_profile->user, val);
+            else if (strcasecmp(key, "Port") == 0) out_profile->port = atoi(val);
+            else if (strcasecmp(key, "Durable") == 0) out_profile->durable = (strcasecmp(val, "true") == 0 || strcasecmp(val, "yes") == 0 || strcmp(val, "1") == 0);
+            else if (strcasecmp(key, "Term") == 0) strcpy(out_profile->term_type, val);
+        }
+    }
+    fclose(f);
+    return found;
+}
+
 // --- Main ---
 
 int main(int argc, char** argv) {
@@ -566,8 +642,23 @@ int main(int argc, char** argv) {
     const char* user = "root";
     const char* pass = "toor";
     bool durable = false;
+    bool persist = false;
     const char* term_type = "xterm-256color";
     bool host_provided = false;
+
+    // Mutable buffers for config overrides
+    char cfg_host[256];
+    char cfg_user[64];
+    char cfg_term[64];
+
+    const char* config_file = "ssh_config"; // Default local config
+
+    // Pre-parse for --config (optional)
+    for (int i=1; i<argc-1; i++) {
+        if (strcmp(argv[i], "--config") == 0) {
+            config_file = argv[i+1];
+        }
+    }
 
     // Parse Arguments
     int arg_idx = 1;
@@ -575,6 +666,12 @@ int main(int argc, char** argv) {
         if (strcmp(argv[arg_idx], "--durable") == 0) {
             durable = true;
             arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--persist") == 0) {
+            persist = true;
+            arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--config") == 0) {
+            // Already handled, skip
+            arg_idx += 2;
         } else if (strcmp(argv[arg_idx], "--term") == 0 && arg_idx + 1 < argc) {
             term_type = argv[arg_idx + 1];
             arg_idx += 2;
@@ -582,13 +679,41 @@ int main(int argc, char** argv) {
             // Positional args
             if (!host_provided) { // First positional
                 host_provided = true;
-                char* at = strchr(argv[arg_idx], '@');
-                if (at) {
-                    *at = '\0';
-                    user = argv[arg_idx];
-                    host = at + 1;
+                char* target = argv[arg_idx];
+
+                // Check if target is a profile in config
+                SSHProfile profile;
+                if (load_config_profile(config_file, target, &profile)) {
+                    printf("Loaded profile '%s' from %s\n", target, config_file);
+
+                    if (profile.hostname[0]) {
+                        strncpy(cfg_host, profile.hostname, sizeof(cfg_host));
+                        host = cfg_host;
+                    } else {
+                        host = target;
+                    }
+
+                    if (profile.user[0]) {
+                        strncpy(cfg_user, profile.user, sizeof(cfg_user));
+                        user = cfg_user;
+                    }
+
+                    if (profile.port > 0) port = profile.port;
+                    if (profile.durable) durable = true;
+                    if (profile.term_type[0]) {
+                        strncpy(cfg_term, profile.term_type, sizeof(cfg_term));
+                        term_type = cfg_term;
+                    }
                 } else {
-                    host = argv[arg_idx];
+                    // Not a profile, parse as user@host
+                    char* at = strchr(target, '@');
+                    if (at) {
+                        *at = '\0';
+                        user = target;
+                        host = at + 1;
+                    } else {
+                        host = target;
+                    }
                 }
             } else {
                 port = atoi(argv[arg_idx]);
@@ -622,7 +747,51 @@ int main(int argc, char** argv) {
     strncpy(global_ssh_ctx.user, user, 63);
     strncpy(global_ssh_ctx.password, pass, 63);
     global_ssh_ctx.durable_mode = durable;
+    global_ssh_ctx.persist_session = persist;
+
+    // Sanitize host for filename (replace non-alphanumeric with _)
+    char safe_host[256];
+    strncpy(safe_host, host, sizeof(safe_host)-1);
+    safe_host[sizeof(safe_host)-1] = '\0';
+    for (int i=0; safe_host[i]; i++) {
+        if (!((safe_host[i] >= 'a' && safe_host[i] <= 'z') ||
+              (safe_host[i] >= 'A' && safe_host[i] <= 'Z') ||
+              (safe_host[i] >= '0' && safe_host[i] <= '9') ||
+              safe_host[i] == '.' || safe_host[i] == '-')) {
+            safe_host[i] = '_';
+        }
+    }
+    snprintf(global_ssh_ctx.session_file, sizeof(global_ssh_ctx.session_file), "ssh_session_%s_%d.dat", safe_host, port);
+
     strncpy(global_ssh_ctx.term_type, term_type, 63);
+
+    // Try to restore session if persistence is enabled and file exists
+    if (persist) {
+        FILE* f = fopen(global_ssh_ctx.session_file, "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long fsize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            if (fsize > 0) {
+                void* buf = malloc(fsize);
+                if (buf) {
+                    size_t read_len = fread(buf, 1, fsize, f);
+                    if (read_len == (size_t)fsize) {
+                        if (KTerm_DeserializeSession(session, buf, fsize)) {
+                            printf("Restored session from %s\n", global_ssh_ctx.session_file);
+                        } else {
+                            printf("Failed to deserialize session.\n");
+                        }
+                    } else {
+                        printf("Failed to read session file (partial read).\n");
+                    }
+                    free(buf);
+                }
+            }
+            fclose(f);
+        }
+    }
 
     KTermNetSecurity sec = {
         .handshake = my_ssh_handshake,
@@ -651,7 +820,12 @@ int main(int argc, char** argv) {
     KTerm_Net_Connect(term, session, host, port, user, pass);
 
     // 4. Main Loop
+    int frame_count = 0;
     while (!WindowShouldClose()) {
+#ifdef KTERM_TESTING
+        frame_count++;
+        if (frame_count > 100) break; // Exit for testing persistence
+#endif
 
         // Mock Host Key Prompt Overlay
         if (global_ssh_ctx.show_hostkey_alert) {
@@ -737,6 +911,22 @@ int main(int argc, char** argv) {
     }
 
     KTerm_Net_Disconnect(term, session);
+
+    // Persist session state on exit
+    if (global_ssh_ctx.persist_session) {
+        void* buf = NULL;
+        size_t len = 0;
+        if (KTerm_SerializeSession(session, &buf, &len)) {
+            FILE* f = fopen(global_ssh_ctx.session_file, "wb");
+            if (f) {
+                fwrite(buf, 1, len, f);
+                fclose(f);
+                printf("Session saved to %s\n", global_ssh_ctx.session_file);
+            }
+            free(buf);
+        }
+    }
+
     KTerm_Destroy(term);
     KTerm_Platform_Shutdown();
     return 0;

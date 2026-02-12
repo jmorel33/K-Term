@@ -1,5 +1,10 @@
 # K-Term Update Log
 
+## [v2.6.3] - Networking Convenience (Phase 3)
+- **Session Persistence:** Added `--persist` flag to `ssh_client.c`. When enabled, the terminal session state (grid content, cursor, history) is serialized to a file on exit/disconnect and automatically restored on the next connection to the same host. Filenames are sanitized to prevent directory traversal.
+- **Config File Support:** Added `--config <file>` support to `ssh_client.c` (defaulting to `ssh_config`). Implemented a parser for standard SSH config directives (`Host`, `HostName`, `User`, `Port`) and K-Term specific extensions (`Durable`, `Term`).
+- **Resilience:** Combined with Phase 1 durability, this release makes `ssh_client` a robust, state-preserving remote terminal suitable for standalone use.
+
 ## [v2.6.2] - Networking Graphics (Phase 2)
 - **High-Throughput Graphics API:** Added `KTerm_WriteRawGraphics` to the core `kterm.h` API. This function bypasses the standard input ring buffer (SPSC), allowing direct, high-speed injection of large binary payloads (like Kitty images or Sixel graphics) after ensuring all pending text is flushed. This prevents buffer overflows and frame drops for heavy graphics workloads.
 - **Data Interception Hook:** Updated `KTermNetCallbacks` in `kt_net.h` so the `on_data` callback returns a `bool`. Returning `true` signals that the client has consumed the data, skipping default processing. This enables custom handling of specific escape sequences (e.g., stripping graphics headers).
