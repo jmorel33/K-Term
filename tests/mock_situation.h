@@ -10,7 +10,7 @@
 
 // Include stb_truetype for font support
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "../stb_truetype.h"
+#include "stb_truetype.h"
 
 // Types
 typedef int SituationError;
@@ -65,12 +65,15 @@ typedef int SituationRendererType;
 #define SIT_RENDERER_OPENGL 0
 #define SIT_RENDERER_VULKAN 1
 
-// Globals for tests
-static char last_clipboard_text[1024 * 1024]; // 1MB buffer for test
-static double mock_time = 0.0;
-static inline void MockSetTime(double t) { mock_time = t; }
-
-// Key definitions
+// Keys
+#define SIT_KEY_LEFT_CONTROL 341
+#define SIT_KEY_RIGHT_CONTROL 345
+#define SIT_KEY_LEFT_ALT 342
+#define SIT_KEY_RIGHT_ALT 346
+#define SIT_KEY_LEFT_SHIFT 340
+#define SIT_KEY_RIGHT_SHIFT 344
+#define SIT_KEY_PAGE_UP 266
+#define SIT_KEY_PAGE_DOWN 267
 #define SIT_KEY_F1 290
 #define SIT_KEY_F2 291
 #define SIT_KEY_F3 292
@@ -83,6 +86,16 @@ static inline void MockSetTime(double t) { mock_time = t; }
 #define SIT_KEY_F10 299
 #define SIT_KEY_F11 300
 #define SIT_KEY_F12 301
+
+// Mouse Buttons
+#define GLFW_MOUSE_BUTTON_LEFT 0
+#define GLFW_MOUSE_BUTTON_RIGHT 1
+#define GLFW_MOUSE_BUTTON_MIDDLE 2
+
+// Globals for tests
+static char last_clipboard_text[1024 * 1024]; // 1MB buffer for test
+static double mock_time = 0.0;
+static inline void MockSetTime(double t) { mock_time = t; }
 
 // Functions
 static inline int SituationCreateBuffer(size_t size, void* data, int usage, SituationBuffer* buffer) {
@@ -113,14 +126,12 @@ static inline int SituationCreateTextureEx(SituationImage image, bool mipmaps, i
 static inline void SituationDestroyTexture(SituationTexture* texture) { texture->id = 0; texture->slot_index = 0; }
 static inline uint64_t SituationGetTextureHandle(SituationTexture texture) { return texture.id; }
 
-// Mock texture slot getter
 static inline _SituationTextureSlot* _SitGetTextureSlot(SituationTexture handle) {
     static _SituationTextureSlot slot = {0};
     slot.id = handle.id;
     return &slot;
 }
 
-// Corrected signature
 static inline int SituationCreateComputePipelineFromMemory(const char* code, int layout_id, SituationComputePipeline* pipeline) {
     pipeline->id = 1;
     return SITUATION_SUCCESS;
@@ -145,7 +156,6 @@ static inline bool SituationTimerGetOscillatorState(int slot) { return true; }
 static inline double SituationTimerGetTime() { return mock_time; }
 static inline float SituationGetFrameTime() { return 0.016f; }
 
-// Corrected signature: unsigned char** data
 static inline int SituationLoadFileData(const char* path, int* len, unsigned char** data) {
     if (len) *len = 0;
     if (data) *data = NULL;
@@ -176,7 +186,7 @@ static inline void SituationFreeString(char* str) { free(str); }
 static inline SituationRendererType SituationGetRendererType() { return SIT_RENDERER_OPENGL; }
 static inline void SituationGetLastErrorMsg(char** msg) { *msg = NULL; }
 
-// Stubs for others
+// Window / Input
 static inline void SituationRestoreWindow() {}
 static inline void SituationMinimizeWindow() {}
 static inline void SituationSetWindowPosition(int x, int y) {}
@@ -187,10 +197,34 @@ static inline bool SituationIsWindowFullscreen() { return false; }
 static inline void SituationToggleFullscreen() {}
 static inline int SituationGetScreenHeight() { return 1080; }
 static inline int SituationGetScreenWidth() { return 1920; }
-typedef struct {} SituationInitInfo;
-static inline void SituationInit(int flags, void* ctx, SituationInitInfo* info) {}
+
+// Structs for Init
+typedef struct {
+    int window_width;
+    int window_height;
+    const char* window_title;
+    int initial_active_window_flags;
+} SituationInitInfo;
+
+static inline int SituationInit(int flags, void* ctx, SituationInitInfo* info) { return SITUATION_SUCCESS; }
 static inline void SituationSetTargetFPS(int fps) {}
 static inline void SituationBeginFrame() {}
 static inline void SituationShutdown() {}
+
+// Input
+static inline bool SituationIsKeyDown(int key) { return false; }
+static inline int SituationGetKeyPressed() { return 0; }
+static inline int SituationGetCharPressed() { return 0; }
+static inline Vector2 SituationGetMousePosition() { return (Vector2){0,0}; }
+static inline bool SituationIsMouseButtonPressed(int button) { return false; }
+static inline bool SituationIsMouseButtonDown(int button) { return false; }
+static inline bool SituationIsMouseButtonReleased(int button) { return false; }
+static inline float SituationGetMouseWheelMove() { return 0.0f; }
+
+// Raylib-like
+static inline bool WindowShouldClose() { return false; } // Loop forever in mock
+static inline void ClearBackground(Color c) {}
+static inline bool SituationIsWindowResized() { return false; }
+static inline void SituationGetWindowSize(int* w, int* h) { *w=800; *h=600; }
 
 #endif // MOCK_SITUATION_H

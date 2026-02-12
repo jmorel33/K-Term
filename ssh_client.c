@@ -119,6 +119,120 @@ typedef struct {
 
 static MySSHContext global_ssh_ctx = {0}; // Simplified for single-session example
 
+// --- Graphics Interception ---
+typedef enum {
+    G_STATE_NORMAL = 0,
+    G_STATE_BUFFERING
+} GraphicsState;
+
+typedef struct {
+    GraphicsState state;
+    char* buffer;
+    size_t len;
+    size_t capacity;
+    char header_buf[16];
+    int header_len;
+} GraphicsContext;
+
+static GraphicsContext g_ctx = {0};
+
+static void g_append(const char* data, size_t len) {
+    if (g_ctx.len + len > g_ctx.capacity) {
+        size_t new_cap = g_ctx.capacity * 2;
+        if (new_cap < g_ctx.len + len) new_cap = g_ctx.len + len + 1024 * 1024;
+        g_ctx.buffer = (char*)realloc(g_ctx.buffer, new_cap);
+        g_ctx.capacity = new_cap;
+    }
+    memcpy(g_ctx.buffer + g_ctx.len, data, len);
+    g_ctx.len += len;
+}
+
+static bool my_net_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
+    size_t processed = 0;
+    int idx = (int)(session - term->sessions);
+
+    while (processed < len) {
+        if (g_ctx.state == G_STATE_NORMAL) {
+            char c = data[processed];
+
+            if (g_ctx.header_len > 0) {
+                // We are accumulating a potential header
+                if (g_ctx.header_len < 15) g_ctx.header_buf[g_ctx.header_len++] = c;
+
+                bool handled = false;
+                if (g_ctx.header_len >= 3) {
+                    if (memcmp(g_ctx.header_buf, "\x1B_G", 3) == 0) {
+                        g_ctx.state = G_STATE_BUFFERING;
+                        g_append(g_ctx.header_buf, 3);
+                        g_ctx.header_len = 0;
+                        handled = true;
+                    } else if (memcmp(g_ctx.header_buf, "\x1BPq", 3) == 0) {
+                        g_ctx.state = G_STATE_BUFFERING;
+                        g_append(g_ctx.header_buf, 3);
+                        g_ctx.header_len = 0;
+                        handled = true;
+                    } else {
+                        // Mismatch or unknown sequence, flush as text
+                        for (int i=0; i<g_ctx.header_len; i++) KTerm_WriteCharToSession(term, idx, g_ctx.header_buf[i]);
+                        g_ctx.header_len = 0;
+                        handled = true;
+                    }
+                } else if (g_ctx.header_len == 2) {
+                    if (g_ctx.header_buf[1] != '_' && g_ctx.header_buf[1] != 'P') {
+                        // Not a graphics prefix, flush
+                        for (int i=0; i<g_ctx.header_len; i++) KTerm_WriteCharToSession(term, idx, g_ctx.header_buf[i]);
+                        g_ctx.header_len = 0;
+                        handled = true;
+                    }
+                }
+                // If not handled, we keep buffering (valid partial prefix)
+                processed++;
+            } else {
+                if (c == '\x1B') {
+                    g_ctx.header_buf[g_ctx.header_len++] = c;
+                    processed++;
+                } else {
+                    KTerm_WriteCharToSession(term, idx, c);
+                    processed++;
+                }
+            }
+        }
+        else { // BUFFERING
+            const char* current = data + processed;
+            size_t remaining = len - processed;
+
+            const char* st = NULL;
+            // Search for ST (ESC \)
+            for (size_t i=0; i < remaining - 1; i++) {
+                if (current[i] == '\x1B' && current[i+1] == '\\') {
+                    st = current + i;
+                    break;
+                }
+            }
+
+            if (st) {
+                size_t chunk_len = (st - current) + 2;
+                g_append(current, chunk_len);
+                processed += chunk_len;
+
+                KTerm_WriteRawGraphics(term, idx, g_ctx.buffer, g_ctx.len);
+                g_ctx.len = 0;
+                g_ctx.state = G_STATE_NORMAL;
+            } else {
+                g_append(current, remaining);
+                processed += remaining;
+
+                if (g_ctx.len >= 2 && g_ctx.buffer[g_ctx.len-2] == '\x1B' && g_ctx.buffer[g_ctx.len-1] == '\\') {
+                     KTerm_WriteRawGraphics(term, idx, g_ctx.buffer, g_ctx.len);
+                     g_ctx.len = 0;
+                     g_ctx.state = G_STATE_NORMAL;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 // --- Helper Functions ---
 
 void update_status(const char* msg) {
@@ -518,6 +632,17 @@ int main(int argc, char** argv) {
         .ctx = &global_ssh_ctx
     };
     KTerm_Net_SetSecurity(term, session, sec);
+
+    // Set Data Callback for Graphics Interception
+    KTermNetCallbacks cbs = {0};
+    cbs.on_data = my_net_on_data;
+    KTerm_Net_SetCallbacks(term, session, cbs);
+
+    // Init Graphics Buffer
+    g_ctx.capacity = 1024 * 1024; // Start 1MB
+    g_ctx.buffer = (char*)malloc(g_ctx.capacity);
+    g_ctx.len = 0;
+    g_ctx.state = G_STATE_NORMAL;
 
     // Connect
     char msg[256];
