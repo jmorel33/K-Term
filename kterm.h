@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 5
+#define KTERM_VERSION_PATCH 6
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.6.5"
+#define KTERM_VERSION_STRING "2.6.6"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -179,7 +179,7 @@ typedef void (*KTermOutputSink)(void* user_data, KTermSession* session, const ch
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 // Gateway Extensions
 typedef void (*GatewayResponseCallback)(KTerm* term, KTermSession* session, const char* msg);
-typedef void (*GatewayExtHandler)(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond);
+typedef void (*GatewayExtHandler)(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond);
 #endif
 typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows); // Notification of session resize
 

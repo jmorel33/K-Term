@@ -1355,7 +1355,7 @@ static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const ch
     // Find extension
     for (int i = 0; i < term->gateway_extension_count; i++) {
         if (strcmp(term->gateway_extensions[i].name, ext_name) == 0) {
-            term->gateway_extensions[i].handler(term, session, args, KTerm_QueueSessionResponse);
+            term->gateway_extensions[i].handler(term, session, id, args, KTerm_QueueSessionResponse);
             return;
         }
     }
@@ -1368,9 +1368,10 @@ static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const ch
 
 // Built-in Extension Handlers
 
-static void KTerm_Ext_Broadcast(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_Broadcast(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     (void)session;
     (void)respond;
+    (void)id;
     // Broadcast text to all sessions
     // args: text to broadcast
     if (!args) return;
@@ -1385,7 +1386,8 @@ static void KTerm_Ext_Broadcast(KTerm* term, KTermSession* session, const char* 
     }
 }
 
-static void KTerm_Ext_Themes(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_Themes(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+    (void)id;
     // args: "set;bg=#123456" or "load;theme_name"
     if (!args) return;
 
@@ -1409,8 +1411,8 @@ static void KTerm_Ext_Themes(KTerm* term, KTermSession* session, const char* arg
     }
 }
 
-static void KTerm_Ext_Clipboard(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
-    (void)term; (void)session;
+static void KTerm_Ext_Clipboard(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+    (void)term; (void)session; (void)id;
     // args: "set;text" or "get"
     if (!args) return;
     if (strncmp(args, "set;", 4) == 0) {
@@ -1423,8 +1425,8 @@ static void KTerm_Ext_Clipboard(KTerm* term, KTermSession* session, const char* 
     }
 }
 
-static void KTerm_Ext_Icat(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
-    (void)term; (void)session;
+static void KTerm_Ext_Icat(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+    (void)term; (void)session; (void)id;
     // args: "base64_data" or "file=path"
     if (!args) return;
 
@@ -1451,8 +1453,9 @@ static void KTerm_Ext_Icat(KTerm* term, KTermSession* session, const char* args,
     if (respond) respond(term, session, "OK");
 }
 
-static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
+    (void)id;
 
     KTermSession* target = KTerm_GetTargetSession(term, session);
 
@@ -1465,7 +1468,30 @@ static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char
     if (respond) respond(term, session, "OK");
 }
 
-static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+// Callback for async traceroute responses
+static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data) {
+    if (!term || !session) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[512];
+    if (hop == 0) {
+        // Error or Start
+        // If hop 0 and error string is passed in ip
+        snprintf(payload, sizeof(payload), "ERR;%s", ip ? ip : "UNKNOWN");
+    } else {
+        snprintf(payload, sizeof(payload), "HOP;%d;%s;%.3f%s", hop, ip ? ip : "*", rtt_ms, reached ? ";REACHED" : "");
+    }
+
+    // Format full Gateway response: ESC P GATE ; KTERM ; ID ; TRACEROUTE ; payload ST
+    char response[1024];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;TRACEROUTE;%s\x1B\\", id, payload);
+
+    // Send to session response (Host)
+    KTerm_QueueSessionResponse(term, session, response);
+}
+
+static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
     if (respond) respond(term, session, "ERR;NET_DISABLED");
 #else
@@ -1558,18 +1584,45 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* args, 
         char ip[64];
         KTerm_Net_GetLocalIP(ip, sizeof(ip));
         if (respond) respond(term, session, ip);
+    } else if (strcmp(cmd, "traceroute") == 0) {
+        char* host = NULL;
+        int max_hops = 30;
+        int timeout_ms = 2000;
+
+        char* arg = strtok(NULL, ";");
+        while(arg) {
+            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (strncmp(arg, "maxhops=", 8) == 0) max_hops = atoi(arg+8);
+            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            else if (!host) host = arg; // Fallback positional if not keyed
+            arg = strtok(NULL, ";");
+        }
+
+        if (host) {
+             // Pass ID as user_data (must duplicate it as it needs to persist)
+             // KTerm_Net_Traceroute will free it in DestroyContext
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 KTerm_Net_Traceroute(term, session, host, max_hops, timeout_ms, KTerm_Traceroute_Callback, id_copy);
+                 if (respond) respond(term, session, "OK;STARTED");
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
     }
 #endif
 }
 
-static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
-    KTerm_Ext_SSH(term, session, args, respond);
+static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+    KTerm_Ext_SSH(term, session, id, args, respond);
 }
 
-static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
+    (void)id;
 
     char buffer[256];
     strncpy(buffer, args, sizeof(buffer)-1);
@@ -1908,8 +1961,9 @@ static int KTerm_Grid_Banner(KTermSession* s, int x, int y, const char* text, in
     return count;
 }
 
-static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* args, GatewayResponseCallback respond) {
+static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
+    (void)id;
     
     char buffer[2048]; // Increased buffer size for banners
     strncpy(buffer, args, sizeof(buffer)-1);
