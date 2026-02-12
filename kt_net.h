@@ -30,7 +30,7 @@ typedef enum {
 typedef struct {
     void (*on_connect)(KTerm* term, KTermSession* session);
     void (*on_disconnect)(KTerm* term, KTermSession* session);
-    void (*on_data)(KTerm* term, KTermSession* session, const char* data, size_t len);
+    bool (*on_data)(KTerm* term, KTermSession* session, const char* data, size_t len); // Return true if handled/consumed
     void (*on_error)(KTerm* term, KTermSession* session, const char* msg);
 
 #ifndef KTERM_DISABLE_TELNET
@@ -373,8 +373,9 @@ static void KTerm_Net_ProcessFrame(KTerm* term, KTermSession* session, KTermNetS
     int target_idx = (net->target_session_index != -1) ? net->target_session_index : (int)(session - term->sessions);
 
     if (type == KTERM_PKT_DATA) {
-        if (net->callbacks.on_data) net->callbacks.on_data(term, session, payload, len);
-        if (!net->is_server) {
+        bool handled = false;
+        if (net->callbacks.on_data) handled = net->callbacks.on_data(term, session, payload, len);
+        if (!handled && !net->is_server) {
             for (size_t i = 0; i < len; i++) {
                 KTerm_WriteCharToSession(term, target_idx, payload[i]);
             }
@@ -972,10 +973,11 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
             }
 #ifndef KTERM_DISABLE_TELNET
             else if (net->protocol == KTERM_NET_PROTO_TELNET) {
-                if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
+                bool handled = false;
+                if (net->callbacks.on_data) handled = net->callbacks.on_data(term, session, rx, nbytes);
                 int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
 
-                for (int i = 0; i < nbytes; i++) {
+                if (!handled) for (int i = 0; i < nbytes; i++) {
                     unsigned char c = (unsigned char)rx[i];
 
                     switch (net->telnet_state) {
@@ -1061,9 +1063,10 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
             }
 #endif
             else {
-                if (net->callbacks.on_data) net->callbacks.on_data(term, session, rx, nbytes);
+                bool handled = false;
+                if (net->callbacks.on_data) handled = net->callbacks.on_data(term, session, rx, nbytes);
                 int target = (net->target_session_index != -1) ? net->target_session_index : session_idx;
-                if (!net->is_server) {
+                if (!handled && !net->is_server) {
                     for (int i=0; i<nbytes; i++) {
                         KTerm_WriteCharToSession(term, target, rx[i]);
                     }

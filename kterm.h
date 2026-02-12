@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 1
+#define KTERM_VERSION_PATCH 2
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.6.1"
+#define KTERM_VERSION_STRING "2.6.2"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -1307,6 +1307,9 @@ void KTerm_CalculateFontMetrics(const void* data, int count, int width, int heig
 
 // Clipboard
 void KTerm_CopySelectionToClipboard(KTerm* term);
+
+// Direct Write (Bypasses Input Queue - For High-Throughput Graphics)
+void KTerm_WriteRawGraphics(KTerm* term, int session_index, const char* data, size_t len);
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
 uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
@@ -6551,6 +6554,23 @@ void KTerm_CopySelectionToClipboard(KTerm* term) {
     text_buf[buf_idx] = '\0';
     KTerm_SetClipboardText(text_buf);
     KTerm_Free(text_buf);
+}
+
+void KTerm_WriteRawGraphics(KTerm* term, int session_index, const char* data, size_t len) {
+    if (session_index < 0 || session_index >= MAX_SESSIONS || !data) return;
+    KTermSession* session = &term->sessions[session_index];
+
+    // Flush pending input to ensure correct ordering (Text before Graphics)
+    unsigned char buf[1024];
+    size_t n;
+    while ((n = KTerm_InputQueue_Pop(&session->input_queue, buf, sizeof(buf))) > 0) {
+        for(size_t j=0; j<n; j++) KTerm_ProcessChar(term, session, buf[j]);
+    }
+
+    // Direct processing bypasses the input queue to avoid overflow/drops on large payloads
+    for (size_t i = 0; i < len; i++) {
+        KTerm_ProcessChar(term, session, (unsigned char)data[i]);
+    }
 }
 
 void KTerm_SetPipelineTargetFPS(KTerm* term, int fps) {

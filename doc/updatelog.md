@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.6.2] - Networking Graphics (Phase 2)
+- **High-Throughput Graphics API:** Added `KTerm_WriteRawGraphics` to the core `kterm.h` API. This function bypasses the standard input ring buffer (SPSC), allowing direct, high-speed injection of large binary payloads (like Kitty images or Sixel graphics) after ensuring all pending text is flushed. This prevents buffer overflows and frame drops for heavy graphics workloads.
+- **Data Interception Hook:** Updated `KTermNetCallbacks` in `kt_net.h` so the `on_data` callback returns a `bool`. Returning `true` signals that the client has consumed the data, skipping default processing. This enables custom handling of specific escape sequences (e.g., stripping graphics headers).
+- **SSH Graphics Pass-Through:** Enhanced `ssh_client.c` with a robust state machine that detects split Kitty (`ESC _ G`) and Sixel (`ESC P q`) sequences across TCP packet boundaries. Detected sequences are buffered and fed directly to `KTerm_WriteRawGraphics`, bypassing the text parser for optimal performance.
+- **Clipboard Sync (OSC 52):** Verified and solidified OSC 52 support (Set/Query Clipboard), ensuring remote applications can seamlessly copy text to the host clipboard.
+- **Robustness:** Added comprehensive fragmentation handling to the SSH client example to ensure graphics headers split between packets are correctly reassembled and processed.
+
 ## [v2.6.1] - Networking Resilience (Phase 1)
 - **Session Serialization:** Added `kt_serialize.h` (header-only library) to serialize and deserialize `KTermSession` state (grid content, cursor, scrollback, attributes) to a portable binary format. This lays the groundwork for session persistence.
 - **Durable SSH Client:** Enhanced `ssh_client.c` with a `--durable` flag. In this mode, the client automatically attempts to reconnect (every 3 seconds) if the network connection is lost or an error occurs, improving resilience on unstable links.
