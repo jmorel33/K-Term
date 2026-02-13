@@ -175,6 +175,12 @@ typedef void (*KTermPortScanCallback)(KTerm* term, KTermSession* session, const 
 // Timeout is per port.
 bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data);
 
+// Whois Callback
+typedef void (*KTermWhoisCallback)(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data);
+
+// Starts an async whois query.
+bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data);
+
 #ifdef __cplusplus
 }
 #endif
@@ -233,6 +239,7 @@ bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, co
 struct KTermTracerouteContext;
 struct KTermResponseTimeContext;
 struct KTermPortScanContext;
+struct KTermWhoisContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -310,6 +317,7 @@ typedef struct {
     struct KTermTracerouteContext* traceroute;
     struct KTermResponseTimeContext* response_time;
     struct KTermPortScanContext* port_scan;
+    struct KTermWhoisContext* whois;
 
     int target_session_index;
 
@@ -393,6 +401,18 @@ typedef struct KTermPortScanContext {
     void* user_data;
 } KTermPortScanContext;
 
+typedef struct KTermWhoisContext {
+    int state; // 0=IDLE, 1=CONNECTING, 2=SENDING, 3=RECEIVING, 4=DONE
+    char host[256];
+    char query[256];
+    socket_t sockfd;
+    struct sockaddr_in dest_addr;
+    char buffer[4096];
+
+    KTermWhoisCallback callback;
+    void* user_data;
+} KTermWhoisContext;
+
 // --- Helper Functions ---
 
 static KTermNetSession* KTerm_Net_GetContext(KTermSession* session) {
@@ -459,6 +479,15 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
         if (net->port_scan->user_data) free(net->port_scan->user_data);
         free(net->port_scan);
         net->port_scan = NULL;
+    }
+
+    if (net->whois) {
+        if (IS_VALID_SOCKET(net->whois->sockfd)) {
+             CLOSE_SOCKET(net->whois->sockfd);
+        }
+        if (net->whois->user_data) free(net->whois->user_data);
+        free(net->whois);
+        net->whois = NULL;
     }
 
     if (net->security.close) {
@@ -1358,6 +1387,78 @@ static void KTerm_Net_ProcessPortScan(KTerm* term, KTermSession* session) {
     }
 }
 
+static void KTerm_Net_ProcessWhois(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->whois) return;
+    KTermWhoisContext* ctx = net->whois;
+
+    if (ctx->state == 4) return; // DONE
+
+    if (ctx->state == 1) { // CONNECTING
+        fd_set wfds; struct timeval tv = {0, 0};
+        FD_ZERO(&wfds);
+        FD_SET(ctx->sockfd, &wfds);
+
+        int res = select(ctx->sockfd + 1, NULL, &wfds, NULL, &tv);
+        if (res > 0) {
+            int opt = 0; socklen_t len = sizeof(opt);
+            if (getsockopt(ctx->sockfd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
+                ctx->state = 2; // SENDING
+            } else {
+                if (ctx->callback) ctx->callback(term, session, "ERR;CONNECT_FAILED", 0, true, ctx->user_data);
+                ctx->state = 4;
+            }
+        }
+        // TODO: Timeout check
+    }
+    else if (ctx->state == 2) { // SENDING
+        char buf[512];
+        snprintf(buf, sizeof(buf), "%s\r\n", ctx->query);
+        ssize_t sent = send(ctx->sockfd, buf, strlen(buf), 0);
+        if (sent > 0) {
+            ctx->state = 3; // RECEIVING
+        } else {
+             #ifdef _WIN32
+             if (WSAGetLastError() != WSAEWOULDBLOCK)
+             #else
+             if (errno != EAGAIN && errno != EWOULDBLOCK)
+             #endif
+             {
+                 if (ctx->callback) ctx->callback(term, session, "ERR;SEND_FAILED", 0, true, ctx->user_data);
+                 ctx->state = 4;
+             }
+        }
+    }
+    else if (ctx->state == 3) { // RECEIVING
+        char buf[1024];
+        ssize_t n = recv(ctx->sockfd, buf, sizeof(buf), 0);
+        if (n > 0) {
+            if (ctx->callback) ctx->callback(term, session, buf, n, false, ctx->user_data);
+        } else if (n == 0) {
+            if (ctx->callback) ctx->callback(term, session, NULL, 0, true, ctx->user_data);
+            ctx->state = 4;
+        } else {
+             #ifdef _WIN32
+             if (WSAGetLastError() != WSAEWOULDBLOCK)
+             #else
+             if (errno != EAGAIN && errno != EWOULDBLOCK)
+             #endif
+             {
+                 if (ctx->callback) ctx->callback(term, session, "ERR;RECV_FAILED", 0, true, ctx->user_data);
+                 ctx->state = 4;
+             }
+        }
+    }
+
+    if (ctx->state == 4) {
+        if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+        ctx->sockfd = INVALID_SOCKET;
+        if (ctx->user_data) free(ctx->user_data);
+        free(ctx);
+        net->whois = NULL;
+    }
+}
+
 void KTerm_Net_Init(KTerm* term) {
     if (!term) return;
     KTerm_SetOutputSink(term, KTerm_Net_Sink, term);
@@ -1384,6 +1485,11 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
     // Process Async Port Scan if active
     if (net && net->port_scan) {
         KTerm_Net_ProcessPortScan(term, session);
+    }
+
+    // Process Async Whois if active
+    if (net && net->whois) {
+        KTerm_Net_ProcessWhois(term, session);
     }
 
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
@@ -2116,6 +2222,67 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     free(rt); net->response_time = NULL;
     return false;
 #endif
+    return true;
+}
+
+bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data) {
+    if (!term || !session || !host || !query) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->whois) {
+        if (IS_VALID_SOCKET(net->whois->sockfd)) CLOSE_SOCKET(net->whois->sockfd);
+        if (net->whois->user_data) free(net->whois->user_data);
+        free(net->whois);
+        net->whois = NULL;
+    }
+
+    net->whois = (KTermWhoisContext*)calloc(1, sizeof(KTermWhoisContext));
+    if (!net->whois) return false;
+
+    KTermWhoisContext* ctx = net->whois;
+    strncpy(ctx->host, host, sizeof(ctx->host)-1);
+    strncpy(ctx->query, query, sizeof(ctx->query)-1);
+    ctx->callback = cb;
+    ctx->user_data = user_data;
+
+    // Resolve host
+    // Optimistic: Check if it's already an IP address to avoid blocking getaddrinfo
+    if (inet_pton(AF_INET, host, &ctx->dest_addr.sin_addr) == 1) {
+        ctx->dest_addr.sin_family = AF_INET;
+        ctx->dest_addr.sin_port = htons(43);
+    } else {
+        // Fallback to blocking DNS
+        struct addrinfo hints, *res;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+
+        // Default whois port 43
+        if (getaddrinfo(host, "43", &hints, &res) != 0) {
+            free(ctx); net->whois = NULL;
+            return false;
+        }
+        ctx->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+        freeaddrinfo(res);
+    }
+
+    ctx->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!IS_VALID_SOCKET(ctx->sockfd)) {
+        free(ctx); net->whois = NULL;
+        return false;
+    }
+
+#ifdef _WIN32
+    u_long mode = 1; ioctlsocket(ctx->sockfd, FIONBIO, &mode);
+#else
+    fcntl(ctx->sockfd, F_SETFL, fcntl(ctx->sockfd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+
+    connect(ctx->sockfd, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr));
+    ctx->state = 1; // CONNECTING
+
     return true;
 }
 

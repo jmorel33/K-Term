@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.11] - Diagnostics Expansion: Whois & Latency
+- **Whois Support:** Added `whois` command to Gateway Protocol (`EXT;net;whois;host=...`).
+- **Network API:** Implemented `KTerm_Net_Whois` with optimistic non-blocking resolution.
+- **Speedtest:** Finalized `speedtest_client` with throughput/latency logic.
+- **Fixes:** Resolved compilation warnings in `kt_composite_sit.h` and `speedtest_client.c`.
+
 ## [v2.6.10] - Diagnostics Expansion & Speedtest Multi-Stream
 - Enhanced `speedtest_client` example with multi-stream (x4) download/upload throughput support.
 - Added `dns` (synchronous resolution) and `portscan` (asynchronous TCP scan) commands to the Gateway Protocol (`EXT;net;...`).
