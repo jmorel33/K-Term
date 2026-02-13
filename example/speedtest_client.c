@@ -5,8 +5,8 @@
  *
  * Features:
  * - Latency & Jitter Measurement (via ICMP/TCP Probe)
- * - Download Throughput Test (TCP Stream)
- * - Upload Throughput Test (TCP Stream)
+ * - Multi-Stream Download Throughput Test (TCP Stream x4)
+ * - Multi-Stream Upload Throughput Test (TCP Stream x4)
  * - Real-time Visualization (Graphs/Bars on Terminal Grid)
  *
  * Usage:
@@ -41,6 +41,7 @@
 #define DEFAULT_HOST "speedtest.tele2.net"
 #define DEFAULT_PORT 80
 #define TEST_DURATION_SEC 5.0
+#define NUM_STREAMS 4
 
 // --- State Machine ---
 typedef enum {
@@ -59,6 +60,11 @@ typedef enum {
 } TestState;
 
 typedef struct {
+    uint64_t bytes;
+    bool connected;
+} StreamContext;
+
+typedef struct {
     TestState state;
     char host[256];
     int port;
@@ -72,15 +78,17 @@ typedef struct {
 
     // Download
     double dl_speed_mbps;
-    uint64_t dl_bytes;
     double dl_start_time;
     double dl_progress; // 0.0 - 1.0
+    StreamContext dl_streams[NUM_STREAMS];
+    int dl_connected_count;
 
     // Upload
     double ul_speed_mbps;
-    uint64_t ul_bytes;
     double ul_start_time;
     double ul_progress; // 0.0 - 1.0
+    StreamContext ul_streams[NUM_STREAMS];
+    int ul_connected_count;
 
     // UI
     char status_msg[256];
@@ -95,6 +103,13 @@ static double GetTime() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static int GetSessionIndex(KTerm* term, KTermSession* session) {
+    for (int i=0; i<MAX_SESSIONS; i++) {
+        if (&term->sessions[i] == session) return i;
+    }
+    return -1;
 }
 
 // --- Callbacks ---
@@ -114,44 +129,63 @@ static void cb_latency_result(KTerm* term, KTermSession* session, const Response
 }
 
 static bool cb_dl_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
-    (void)term; (void)session; (void)data;
-    ctx.dl_bytes += len;
+    int idx = GetSessionIndex(term, session);
+    if (idx >= 0 && idx < NUM_STREAMS) {
+        ctx.dl_streams[idx].bytes += len;
+    }
+    (void)data;
     return true; // Consumed
 }
 
 static void cb_dl_on_connect(KTerm* term, KTermSession* session) {
-    (void)term; (void)session;
-    snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Download: Connected, requesting data...");
+    int idx = GetSessionIndex(term, session);
+    if (idx >= 0 && idx < NUM_STREAMS) {
+        if (!ctx.dl_streams[idx].connected) {
+            ctx.dl_streams[idx].connected = true;
+            ctx.dl_connected_count++;
 
-    // Send HTTP GET for large file
-    const char* req = "GET /100MB.zip HTTP/1.1\r\nHost: speedtest.tele2.net\r\nConnection: close\r\n\r\n";
-    int sock = (int)KTerm_Net_GetSocket(term, session);
-    if (sock >= 0) {
-        send(sock, req, strlen(req), 0);
+            // Send HTTP GET
+            const char* req = "GET /100MB.zip HTTP/1.1\r\nHost: speedtest.tele2.net\r\nConnection: close\r\n\r\n";
+            int sock = (int)KTerm_Net_GetSocket(term, session);
+            if (sock >= 0) {
+                send(sock, req, strlen(req), 0);
+            }
+        }
     }
 
-    ctx.dl_start_time = GetTime();
-    ctx.state = STATE_DOWNLOAD_RUNNING;
+    if (ctx.dl_connected_count == NUM_STREAMS && ctx.state == STATE_DOWNLOAD_CONNECTING) {
+        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Download: All streams connected.");
+        ctx.dl_start_time = GetTime();
+        ctx.state = STATE_DOWNLOAD_RUNNING;
+    }
 }
 
 static void cb_ul_on_connect(KTerm* term, KTermSession* session) {
-    (void)term; (void)session;
-    snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Upload: Connected, sending data...");
+    int idx = GetSessionIndex(term, session);
+    if (idx >= 0 && idx < NUM_STREAMS) {
+        if (!ctx.ul_streams[idx].connected) {
+            ctx.ul_streams[idx].connected = true;
+            ctx.ul_connected_count++;
 
-    // Send Header
-    const char* head = "POST /upload.php HTTP/1.1\r\nHost: speedtest.tele2.net\r\nContent-Length: 104857600\r\n\r\n"; // 100MB dummy
-    int sock = (int)KTerm_Net_GetSocket(term, session);
-    if (sock >= 0) {
-        send(sock, head, strlen(head), 0);
+            // Send Header
+            const char* head = "POST /upload.php HTTP/1.1\r\nHost: speedtest.tele2.net\r\nContent-Length: 104857600\r\n\r\n";
+            int sock = (int)KTerm_Net_GetSocket(term, session);
+            if (sock >= 0) {
+                send(sock, head, strlen(head), 0);
+            }
+        }
     }
 
-    ctx.ul_start_time = GetTime();
-    ctx.state = STATE_UPLOAD_RUNNING;
+    if (ctx.ul_connected_count == NUM_STREAMS && ctx.state == STATE_UPLOAD_CONNECTING) {
+        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Upload: All streams connected.");
+        ctx.ul_start_time = GetTime();
+        ctx.state = STATE_UPLOAD_RUNNING;
+    }
 }
 
 static bool cb_ul_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
     (void)term; (void)session; (void)data; (void)len;
-    // We ignore server response for upload test usually, just pump data
+    // Ignore server response
     return true;
 }
 
@@ -193,19 +227,14 @@ static void DrawProgressBar(KTerm* term, int x, int y, int w, double progress, c
 }
 
 static void DrawDashboard(KTerm* term) {
-    SetCursor(term, 0, 0);
-    // Note: Should use a more efficient way than clearing whole screen every frame if strictly text,
-    // but OK for example.
-    // Use clear screen only once or minimal updates.
-    // Here we just overwrite. To avoid flicker, better to clear specific lines or use a buffer.
-    // For simplicity:
-    // KTerm_WriteString(term, "\x1B[2J");
+    // Basic clearing handled by main loop clear screen logic or partial updates
+    // Here we just overwrite
 
     // Title
     SetCursor(term, 2, 1);
-    KTerm_WriteString(term, "\x1B[1;37mK-TERM SPEEDTEST UTILITY\x1B[0m");
+    KTerm_WriteString(term, "\x1B[1;37mK-TERM SPEEDTEST UTILITY (Multi-Stream)\x1B[0m");
     SetCursor(term, 2, 2);
-    char sub[128]; snprintf(sub, sizeof(sub), "Target: %s:%d", ctx.host, ctx.port);
+    char sub[128]; snprintf(sub, sizeof(sub), "Target: %s:%d | Streams: %d", ctx.host, ctx.port, NUM_STREAMS);
     KTerm_WriteString(term, sub);
 
     // Status
@@ -269,8 +298,13 @@ int main(int argc, char** argv) {
     KTerm* term = KTerm_Create(config);
     if (!term) return 1;
 
+    // Enable Gateway for manual testing via console if needed
+    // KTerm_EnableGateway(term, true);
+
     KTerm_Net_Init(term);
-    KTermSession* session = &term->sessions[0];
+
+    // Ensure sessions are initialized (KTerm_Create does it, but we use them explicitly)
+    // Sessions 0-3 are available.
 
     ctx.state = STATE_IDLE;
     KTerm_WriteString(term, "\x1B[2J"); // Clear Screen Once
@@ -289,15 +323,13 @@ int main(int argc, char** argv) {
             case STATE_IDLE:
                 snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Starting Latency Test...");
                 ctx.state = STATE_LATENCY;
-                if (!KTerm_Net_ResponseTime(term, session, ctx.host, 10, 200, 2000, cb_latency_result, NULL)) {
+                if (!KTerm_Net_ResponseTime(term, &term->sessions[0], ctx.host, 10, 200, 2000, cb_latency_result, NULL)) {
                     snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Failed to start Latency Test (Check Root/Permissions)");
-                    // Skip to DL if Ping fails (e.g. non-root on Linux)
                     ctx.state = STATE_DOWNLOAD_INIT;
                 }
                 break;
 
             case STATE_LATENCY:
-                // Waiting for callback
                 break;
 
             case STATE_LATENCY_DONE:
@@ -305,20 +337,37 @@ int main(int argc, char** argv) {
                 break;
 
             case STATE_DOWNLOAD_INIT:
-                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connecting for Download...");
-                // Setup Callbacks
+                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connecting for Download (%d streams)...", NUM_STREAMS);
+
+                ctx.dl_connected_count = 0;
+                memset(ctx.dl_streams, 0, sizeof(ctx.dl_streams));
+
                 KTermNetCallbacks dl_cb = {0};
                 dl_cb.on_connect = cb_dl_on_connect;
                 dl_cb.on_data = cb_dl_on_data;
-                KTerm_Net_SetCallbacks(term, session, dl_cb);
 
-                KTerm_Net_Connect(term, session, ctx.host, ctx.port, "", "");
+                for(int i=0; i<NUM_STREAMS; i++) {
+                    KTerm_Net_SetCallbacks(term, &term->sessions[i], dl_cb);
+                    KTerm_Net_Connect(term, &term->sessions[i], ctx.host, ctx.port, "", "");
+                }
+
                 ctx.dl_progress = 0.0;
                 ctx.state = STATE_DOWNLOAD_CONNECTING;
                 break;
 
             case STATE_DOWNLOAD_CONNECTING:
-                // Wait for cb_dl_on_connect to set STATE_DOWNLOAD_RUNNING
+                // Wait for all connected or timeout
+                if (frames > 2000 && ctx.dl_connected_count < NUM_STREAMS) {
+                     if (ctx.dl_connected_count == 0) {
+                         snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connection Timeout");
+                         ctx.state = STATE_FINISHED;
+                     } else {
+                         // Partial start
+                         snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Starting with %d streams...", ctx.dl_connected_count);
+                         ctx.dl_start_time = GetTime();
+                         ctx.state = STATE_DOWNLOAD_RUNNING;
+                     }
+                }
                 break;
 
             case STATE_DOWNLOAD_RUNNING:
@@ -327,14 +376,17 @@ int main(int argc, char** argv) {
                     double now = GetTime();
                     double elapsed = now - ctx.dl_start_time;
 
+                    uint64_t total_bytes = 0;
+                    for(int i=0; i<NUM_STREAMS; i++) total_bytes += ctx.dl_streams[i].bytes;
+
                     if (elapsed > 0) {
-                        double bits = (double)ctx.dl_bytes * 8.0;
+                        double bits = (double)total_bytes * 8.0;
                         ctx.dl_speed_mbps = (bits / elapsed) / 1000000.0;
                     }
 
                     if (elapsed >= TEST_DURATION_SEC) {
                         ctx.state = STATE_DOWNLOAD_DONE;
-                        KTerm_Net_Disconnect(term, session);
+                        for(int i=0; i<NUM_STREAMS; i++) KTerm_Net_Disconnect(term, &term->sessions[i]);
                     } else {
                         ctx.dl_progress = elapsed / TEST_DURATION_SEC;
                     }
@@ -347,57 +399,79 @@ int main(int argc, char** argv) {
                 break;
 
             case STATE_UPLOAD_INIT:
-                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connecting for Upload...");
-                // Setup Callbacks
+                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connecting for Upload (%d streams)...", NUM_STREAMS);
+
+                ctx.ul_connected_count = 0;
+                memset(ctx.ul_streams, 0, sizeof(ctx.ul_streams));
+
                 KTermNetCallbacks ul_cb = {0};
                 ul_cb.on_connect = cb_ul_on_connect;
                 ul_cb.on_data = cb_ul_on_data;
-                KTerm_Net_SetCallbacks(term, session, ul_cb);
 
-                KTerm_Net_Connect(term, session, ctx.host, ctx.port, "", "");
+                for(int i=0; i<NUM_STREAMS; i++) {
+                    KTerm_Net_SetCallbacks(term, &term->sessions[i], ul_cb);
+                    KTerm_Net_Connect(term, &term->sessions[i], ctx.host, ctx.port, "", "");
+                }
+
                 ctx.ul_progress = 0.0;
                 ctx.state = STATE_UPLOAD_CONNECTING;
                 break;
 
             case STATE_UPLOAD_CONNECTING:
-                // Wait for cb_ul_on_connect
+                // Wait
+                if (frames > 4000 && ctx.ul_connected_count < NUM_STREAMS) {
+                     if (ctx.ul_connected_count == 0) {
+                         snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Connection Timeout");
+                         ctx.state = STATE_FINISHED;
+                     } else {
+                         // Partial start
+                         snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Starting with %d streams...", ctx.ul_connected_count);
+                         ctx.ul_start_time = GetTime();
+                         ctx.state = STATE_UPLOAD_RUNNING;
+                     }
+                }
                 break;
 
             case STATE_UPLOAD_RUNNING:
-                // Pump data if connected
+                // Pump data
                 {
-                    int sock = (int)KTerm_Net_GetSocket(term, session);
-                    if (sock >= 0) {
-                        char chunk[16384]; // 16KB
-                        memset(chunk, 'X', sizeof(chunk));
+                    uint64_t total_bytes = 0;
 
-                        // Burst send (up to 1MB per frame or EAGAIN)
-                        int burst = 0;
-                        int limit = 1024 * 1024; // 1MB per frame
+                    for(int i=0; i<NUM_STREAMS; i++) {
+                        if (!ctx.ul_streams[i].connected) continue;
 
-                        while(burst < limit) {
-                             int sent = send(sock, chunk, sizeof(chunk), MSG_DONTWAIT);
-                             if (sent > 0) {
-                                 ctx.ul_bytes += sent;
-                                 burst += sent;
-                             } else {
-                                 // EAGAIN, EWOULDBLOCK, or Error
-                                 break;
-                             }
+                        int sock = (int)KTerm_Net_GetSocket(term, &term->sessions[i]);
+                        if (sock >= 0) {
+                            char chunk[16384];
+                            memset(chunk, 'X', sizeof(chunk));
+
+                            int burst = 0;
+                            int limit = 256 * 1024; // 256KB per frame per stream
+
+                            while(burst < limit) {
+                                 int sent = send(sock, chunk, sizeof(chunk), MSG_DONTWAIT);
+                                 if (sent > 0) {
+                                     ctx.ul_streams[i].bytes += sent;
+                                     burst += sent;
+                                 } else {
+                                     break;
+                                 }
+                            }
                         }
+                        total_bytes += ctx.ul_streams[i].bytes;
                     }
 
                     double now = GetTime();
                     double elapsed = now - ctx.ul_start_time;
 
                     if (elapsed > 0) {
-                        double bits = (double)ctx.ul_bytes * 8.0;
+                        double bits = (double)total_bytes * 8.0;
                         ctx.ul_speed_mbps = (bits / elapsed) / 1000000.0;
                     }
 
                     if (elapsed >= TEST_DURATION_SEC) {
                         ctx.state = STATE_UPLOAD_DONE;
-                        KTerm_Net_Disconnect(term, session);
+                        for(int i=0; i<NUM_STREAMS; i++) KTerm_Net_Disconnect(term, &term->sessions[i]);
                     } else {
                         ctx.ul_progress = elapsed / TEST_DURATION_SEC;
                     }

@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.10] - Diagnostics Expansion & Speedtest Multi-Stream
+- Enhanced `speedtest_client` example with multi-stream (x4) download/upload throughput support.
+- Added `dns` (synchronous resolution) and `portscan` (asynchronous TCP scan) commands to the Gateway Protocol (`EXT;net;...`).
+- Implemented `KTerm_Net_Resolve` and `KTerm_Net_PortScan` APIs in `kt_net.h`.
+- Bumped version to v2.6.10.
+
 ## [v2.6.9] - Auto-Terminfo Push & Session Persistence
 
 ### Added

@@ -1508,11 +1508,29 @@ static void KTerm_ResponseTime_Callback(KTerm* term, KTermSession* session, cons
     }
 
     // Format full Gateway response: ESC P GATE ; KTERM ; ID ; RESPONSETIME ; payload ST
-    // Format full Gateway response: ESC P GATE ; KTERM ; ID ; RESPONSETIME ; payload ST
     char response[2048];
     snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;RESPONSETIME;%s\x1B\\", id, payload);
     KTerm_QueueSessionResponse(term, session, response);
     // Note: user_data is owned by the Net context and will be freed when the context is destroyed/reset.
+}
+
+// Callback for async port scan results
+static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const char* host, int port, int status, void* user_data) {
+    if (!term || !session) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[256];
+    const char* status_str = "CLOSED";
+    if (status == 1) status_str = "OPEN";
+    else if (status == 0) status_str = "TIMEOUT"; // Or Closed/Refused
+
+    snprintf(payload, sizeof(payload), "HOST=%s;PORT=%d;STATUS=%s", host ? host : "*", port, status_str);
+
+    // Format full Gateway response: ESC P GATE ; KTERM ; ID ; PORTSCAN ; payload ST
+    char response[512];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
 }
 
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
@@ -1667,6 +1685,49 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
+    } else if (strcmp(cmd, "dns") == 0) {
+        char* host = strtok(NULL, ";");
+        if (host) {
+            char ip[64];
+            if (KTerm_Net_Resolve(host, ip, sizeof(ip))) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "OK;IP=%s", ip);
+                if (respond) respond(term, session, msg);
+            } else {
+                if (respond) respond(term, session, "ERR;RESOLVE_FAILED");
+            }
+        } else {
+            if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
+    } else if (strcmp(cmd, "portscan") == 0) {
+        char* host = NULL;
+        char* ports = NULL;
+        int timeout_ms = 1000;
+
+        char* arg = strtok(NULL, ";");
+        while(arg) {
+            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (strncmp(arg, "ports=", 6) == 0) ports = arg + 6;
+            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            else if (!host) host = arg; // 1st Positional
+            else if (!ports) ports = arg; // 2nd Positional
+            arg = strtok(NULL, ";");
+        }
+
+        if (host && ports) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 if (KTerm_Net_PortScan(term, session, host, ports, timeout_ms, KTerm_PortScan_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_ARGS");
         }
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
