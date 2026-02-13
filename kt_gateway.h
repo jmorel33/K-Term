@@ -629,16 +629,24 @@ static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, cons
 static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleDNS(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandlePing(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandlePortScan(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleWhois(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
 static const GatewayCommand gateway_commands[] = {
     { "ATTACH", KTerm_Gateway_HandleAttach },
+    { "DNS", KTerm_Gateway_HandleDNS },
     { "EXT", KTerm_Gateway_HandleExt },
     { "GET", KTerm_Gateway_HandleGet },
     { "INIT", KTerm_Gateway_HandleInit },
+    { "PING", KTerm_Gateway_HandlePing },
     { "PIPE", KTerm_Gateway_HandlePipeCmd },
+    { "PORTSCAN", KTerm_Gateway_HandlePortScan },
     { "RAWDUMP", KTerm_Gateway_HandleRawDump },
     { "RESET", KTerm_Gateway_HandleReset },
-    { "SET", KTerm_Gateway_HandleSet }
+    { "SET", KTerm_Gateway_HandleSet },
+    { "WHOIS", KTerm_Gateway_HandleWhois }
 };
 
 static int GatewayCommandCmp(const void* key, const void* elem) {
@@ -667,6 +675,234 @@ static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const
                 snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;ATTACH;OK;SESSION=%d\x1B\\", id, s_idx);
                 KTerm_QueueResponse(term, response);
             }
+        }
+    }
+#endif
+}
+
+// Forward declarations for callbacks
+static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
+static void KTerm_ResponseTime_Callback(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data);
+static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const char* host, int port, int status, void* user_data);
+static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data);
+
+static void KTerm_Gateway_HandleDNS(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+#ifdef KTERM_DISABLE_NET
+    char response[64];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;DNS;ERR;NET_DISABLED\x1B\\", id);
+    KTerm_QueueResponse(term, response);
+#else
+    // DNS;host
+    if (Stream_Expect(scanner, ';')) {
+        char host[256];
+        // Read until ST or end
+        const char* p = scanner->ptr + scanner->pos;
+        size_t len = strlen(p);
+        if (len > sizeof(host)-1) len = sizeof(host)-1;
+        strncpy(host, p, len);
+        host[len] = '\0';
+
+        if (host[0]) {
+            char ip[64];
+            if (KTerm_Net_Resolve(host, ip, sizeof(ip))) {
+                char response[128];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;DNS;OK;IP=%s\x1B\\", id, ip);
+                KTerm_QueueResponse(term, response);
+            } else {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;DNS;ERR;RESOLVE_FAILED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
+            }
+        } else {
+            char response[64];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;DNS;ERR;MISSING_HOST\x1B\\", id);
+            KTerm_QueueResponse(term, response);
+        }
+    }
+#endif
+}
+
+static void KTerm_Gateway_HandlePing(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+#ifdef KTERM_DISABLE_NET
+    char response[64];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;ERR;NET_DISABLED\x1B\\", id);
+    KTerm_QueueResponse(term, response);
+#else
+    // PING;host;[count;interval;timeout]
+    if (Stream_Expect(scanner, ';')) {
+        char host[256];
+        int count = 4;
+        int interval = 1000;
+        int timeout = 2000;
+
+        // Manually parse args from remainder using strtok-like logic or StreamScanner
+        // Host is first
+        char* token = (char*)scanner->ptr + scanner->pos;
+        char* next_semi = strchr(token, ';');
+        size_t host_len = next_semi ? (size_t)(next_semi - token) : strlen(token);
+        if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
+        strncpy(host, token, host_len);
+        host[host_len] = '\0';
+
+        if (next_semi) {
+            token = next_semi + 1;
+            // Count
+            next_semi = strchr(token, ';');
+            if (next_semi) {
+                count = atoi(token);
+                token = next_semi + 1;
+                // Interval
+                next_semi = strchr(token, ';');
+                if (next_semi) {
+                    interval = atoi(token);
+                    token = next_semi + 1;
+                    // Timeout
+                    timeout = atoi(token);
+                } else {
+                    interval = atoi(token);
+                }
+            } else {
+                count = atoi(token);
+            }
+        }
+
+        if (host[0]) {
+            char* id_copy = (char*)malloc(strlen(id) + 1);
+            if (id_copy) {
+                strcpy(id_copy, id);
+                if (KTerm_Net_ResponseTime(term, session, host, count, interval, timeout, KTerm_ResponseTime_Callback, id_copy)) {
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;OK;STARTED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                } else {
+                    free(id_copy);
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;ERR;START_FAILED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                }
+            }
+        } else {
+            char response[64];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;ERR;MISSING_HOST\x1B\\", id);
+            KTerm_QueueResponse(term, response);
+        }
+    }
+#endif
+}
+
+static void KTerm_Gateway_HandlePortScan(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+#ifdef KTERM_DISABLE_NET
+    char response[64];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;ERR;NET_DISABLED\x1B\\", id);
+    KTerm_QueueResponse(term, response);
+#else
+    // PORTSCAN;host;ports;[timeout]
+    if (Stream_Expect(scanner, ';')) {
+        char host[256];
+        char ports[256];
+        int timeout = 1000;
+
+        char* token = (char*)scanner->ptr + scanner->pos;
+        char* next_semi = strchr(token, ';');
+
+        // Host
+        size_t len = next_semi ? (size_t)(next_semi - token) : strlen(token);
+        if (len >= sizeof(host)) len = sizeof(host)-1;
+        strncpy(host, token, len);
+        host[len] = '\0';
+
+        if (next_semi) {
+            token = next_semi + 1;
+            next_semi = strchr(token, ';');
+            // Ports
+            len = next_semi ? (size_t)(next_semi - token) : strlen(token);
+            if (len >= sizeof(ports)) len = sizeof(ports)-1;
+            strncpy(ports, token, len);
+            ports[len] = '\0';
+
+            if (next_semi) {
+                token = next_semi + 1;
+                timeout = atoi(token);
+            }
+        } else {
+            ports[0] = '\0';
+        }
+
+        if (host[0] && ports[0]) {
+            char* id_copy = (char*)malloc(strlen(id) + 1);
+            if (id_copy) {
+                strcpy(id_copy, id);
+                if (KTerm_Net_PortScan(term, session, host, ports, timeout, KTerm_PortScan_Callback, id_copy)) {
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;OK;STARTED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                } else {
+                    free(id_copy);
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;ERR;START_FAILED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                }
+            }
+        } else {
+            char response[64];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;ERR;MISSING_ARGS\x1B\\", id);
+            KTerm_QueueResponse(term, response);
+        }
+    }
+#endif
+}
+
+static void KTerm_Gateway_HandleWhois(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+#ifdef KTERM_DISABLE_NET
+    char response[64];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;ERR;NET_DISABLED\x1B\\", id);
+    KTerm_QueueResponse(term, response);
+#else
+    // WHOIS;host;[query]
+    if (Stream_Expect(scanner, ';')) {
+        char host[256];
+        char query[256];
+
+        char* token = (char*)scanner->ptr + scanner->pos;
+        char* next_semi = strchr(token, ';');
+
+        // Host
+        size_t len = next_semi ? (size_t)(next_semi - token) : strlen(token);
+        if (len >= sizeof(host)) len = sizeof(host)-1;
+        strncpy(host, token, len);
+        host[len] = '\0';
+
+        if (next_semi) {
+            token = next_semi + 1;
+            len = strlen(token);
+            if (len >= sizeof(query)) len = sizeof(query)-1;
+            strncpy(query, token, len);
+            query[len] = '\0';
+        } else {
+            // Default query = host
+            strncpy(query, host, sizeof(query)-1);
+            query[sizeof(query)-1] = '\0';
+        }
+
+        if (host[0]) {
+            char* id_copy = (char*)malloc(strlen(id) + 1);
+            if (id_copy) {
+                strcpy(id_copy, id);
+                if (KTerm_Net_Whois(term, session, host, query, KTerm_Whois_Callback, id_copy)) {
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;OK;STARTED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                } else {
+                    free(id_copy);
+                    char response[64];
+                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;ERR;START_FAILED\x1B\\", id);
+                    KTerm_QueueResponse(term, response);
+                }
+            }
+        } else {
+            char response[64];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;ERR;MISSING_HOST\x1B\\", id);
+            KTerm_QueueResponse(term, response);
         }
     }
 #endif
