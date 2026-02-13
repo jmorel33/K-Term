@@ -6,6 +6,9 @@
 - **Robustness:** Added timeouts to the config fetch state machine to prevent hangs during network issues.
 - **Whois Timeout:** Implemented asynchronous connection timeout (default 5s) and error handling for `KTerm_Net_Whois` to prevent hangs during network failures.
 - **Diagnostics:** Improved `select` error reporting for asynchronous networking tasks.
+- **Security Fix:** Enforced mandatory security layer (TLS/SSL hooks) for server-side authentication to prevent cleartext password transmission.
+- **Networking Hardening:** Added early rejection and defense-in-depth checks in the networking state machine (`kt_net.h`) to terminate connections attempting unencrypted authentication.
+- **Error Reporting:** Introduced descriptive error "Authentication requires security layer (TLS/SSL)" for rejected unencrypted auth attempts.
 
 
 ## [v2.6.12] - Diagnostics Expansion & Gateway Unification
