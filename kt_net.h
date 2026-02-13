@@ -1656,6 +1656,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
 #endif
 
             if (net->callbacks.on_auth) {
+                // SEC-FIX: Enforce security layer for authentication to prevent cleartext password transmission
+                if (!net->security.read || !net->security.write) {
+                    KTerm_Net_TriggerError(term, session, net, "Authentication requires security layer (TLS/SSL)");
+                    CLOSE_SOCKET(net->socket_fd); net->socket_fd = INVALID_SOCKET;
+                    return;
+                }
                 net->state = KTERM_NET_STATE_AUTH;
                 net->auth_state = AUTH_STATE_USER;
                 net->auth_input_len = 0;
@@ -1782,6 +1788,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                                  const char* msg = "\r\nPassword: ";
                                  for(int j=0; msg[j]; j++) { net->tx_buffer[net->tx_head] = msg[j]; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; }
                              } else if (net->auth_state == AUTH_STATE_PASS) {
+                                 // SEC-FIX: Secondary check to ensure security layer for password processing
+                                 if (!net->security.read || !net->security.write) {
+                                     KTerm_Net_TriggerError(term, session, net, "Authentication requires security layer (TLS/SSL)");
+                                     CLOSE_SOCKET(net->socket_fd); net->socket_fd = INVALID_SOCKET;
+                                     return;
+                                 }
                                  bool ok = false;
                                  if (net->callbacks.on_auth) ok = net->callbacks.on_auth(term, session, net->auth_user_temp, net->auth_input_buf);
                                  if (ok) {
