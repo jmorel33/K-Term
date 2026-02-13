@@ -1,5 +1,10 @@
 # K-Term Update Log
 
+## [v2.6.12] - Diagnostics Expansion & Gateway Unification
+- **Speedtest Example:** Added `example/speedtest_client.c` showcasing multi-stream download/upload throughput testing and latency measurement.
+- **Gateway Commands:** Promoted `DNS`, `PING` (Response Time), `PORTSCAN`, and `WHOIS` to top-level Gateway commands (e.g., `DCS GATE;KTERM;ID;DNS;host ST`), simplifying access to network diagnostics.
+- **Refactoring:** Renamed `test_gateway_suite` to reflect expanded scope.
+
 ## [v2.6.11] - Diagnostics Expansion: Whois & Latency
 - **Whois Support:** Added `whois` command to Gateway Protocol (`EXT;net;whois;host=...`).
 - **Network API:** Implemented `KTerm_Net_Whois` with optimistic non-blocking resolution.

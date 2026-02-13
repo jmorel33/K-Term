@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.11
+# kterm.h - Technical Reference Manual v2.6.12
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.11)](#13-known-limitations-v2611)
+    *   [1.3. Known Limitations (v2.6.12)](#13-known-limitations-v2612)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -181,9 +181,10 @@ While K-Term is production-ready, users should be aware of the following limitat
     -   It lacks full `fribidi` parity for complex text shaping and implicit paragraph direction handling.
     -   This may affect rendering accuracy for Right-to-Left languages (e.g., Arabic, Hebrew) in complex contexts.
 
-2.  **Cryptography Stubs:**
-    -   The `ssh_client.c` reference implementation includes a full SSH-2 state machine and packet framer but uses **mock cryptographic primitives** by default.
-    -   Users must integrate a real crypto library (e.g., libsodium, OpenSSL, or BearSSL) into the provided hooks (`KTermNetSecurity`) for secure production use.
+2.  **SSH Security Modes:**
+    -   The `ssh_client.c` reference implementation supports two modes:
+        -   **Production (Recommended):** Compiling with `KTERM_USE_LIBSSH` links against `libssh`, providing industry-standard security (encryption, authentication, key exchange).
+        -   **Reference/Mock (Default):** Without this macro, it uses internal mock cryptographic primitives for testing and education. **This mode is not secure.**
 
 3.  **Unicode Coverage:**
     -   Glyph rendering relies on the `stb_truetype` rasterizer. While it supports the Basic Multilingual Plane (BMP), specialized rendering for complex scripts (Devanagari, etc.) beyond basic shaping is not yet fully implemented.
@@ -1495,6 +1496,13 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Returns `HOST=...;PORT=...;STATUS=...` for each port.
 *   `EXT;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
+
+**Top-Level Network Diagnostics (v2.6.12):**
+In addition to `EXT;net;...`, these diagnostics are available as top-level Gateway commands for easier access:
+*   `PING;host;[count;interval;timeout]`: Measures response time (same as `EXT;net;responsetime`).
+*   `DNS;host`: Resolves hostname.
+*   `PORTSCAN;host;ports;[timeout]`: Scans TCP ports.
+*   `WHOIS;host;[query]`: Performs WHOIS lookup.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
 
 #### 4.23.10. Standalone Networking API (kt_net.h)
