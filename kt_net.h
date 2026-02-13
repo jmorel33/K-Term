@@ -409,6 +409,9 @@ typedef struct KTermWhoisContext {
     struct sockaddr_in dest_addr;
     char buffer[4096];
 
+    int timeout_ms;
+    struct timeval start_time;
+
     KTermWhoisCallback callback;
     void* user_data;
 } KTermWhoisContext;
@@ -1408,8 +1411,19 @@ static void KTerm_Net_ProcessWhois(KTerm* term, KTermSession* session) {
                 if (ctx->callback) ctx->callback(term, session, "ERR;CONNECT_FAILED", 0, true, ctx->user_data);
                 ctx->state = 4;
             }
+        } else if (res < 0) {
+            if (ctx->callback) ctx->callback(term, session, "ERR;SELECT_FAILED", 0, true, ctx->user_data);
+            ctx->state = 4;
+        } else {
+            // Check timeout
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            double elapsed = (now.tv_sec - ctx->start_time.tv_sec) * 1000.0 + (now.tv_usec - ctx->start_time.tv_usec) / 1000.0;
+            if (elapsed > ctx->timeout_ms) {
+                if (ctx->callback) ctx->callback(term, session, "ERR;TIMEOUT", 0, true, ctx->user_data);
+                ctx->state = 4;
+            }
         }
-        // TODO: Timeout check
     }
     else if (ctx->state == 2) { // SENDING
         char buf[512];
@@ -2246,7 +2260,9 @@ bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const
     strncpy(ctx->query, query, sizeof(ctx->query)-1);
     ctx->callback = cb;
     ctx->user_data = user_data;
-
+    ctx->timeout_ms = 5000;
+    gettimeofday(&ctx->start_time, NULL);
+    
     // Resolve host
     // Optimistic: Check if it's already an IP address to avoid blocking getaddrinfo
     if (inet_pton(AF_INET, host, &ctx->dest_addr.sin_addr) == 1) {
