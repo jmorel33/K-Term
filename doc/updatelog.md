@@ -1,5 +1,14 @@
 # K-Term Update Log
 
+## [v2.6.7] - Response Time & Latency Monitoring
+- **Response Time Probe:** Added `RESPONSETIME` command to the `EXT;net` Gateway extension (`EXT;net;responsetime;host=x;count=10`).
+- **Metrics:** Measures Min/Avg/Max RTT, Jitter (Standard Deviation), and Packet Loss.
+- **Cross-Platform ICMP:**
+  - **Windows:** Uses `IcmpSendEcho2` for async ICMP pings.
+  - **Linux:** Supports unprivileged `SOCK_DGRAM` ICMP (ping sockets) with automatic fallback to `SOCK_RAW`.
+- **Architecture:** Implemented as a non-blocking state machine in `kt_net.h` (`KTerm_Net_ResponseTime`), integrating seamlessly with the existing event loop.
+- **Safety:** Hardened callback logic to ensure thread-safe user data management and prevent double-frees during synchronous failures.
+
 ## [v2.6.6] - Network Diagnostics & Traceroute
 - **Traceroute Support:** Added `TRACEROUTE` command to the `EXT;net` (or `ssh`) Gateway extension (`EXT;net;traceroute;host=x;maxhops=30`).
 - **Cross-Platform Implementation:**

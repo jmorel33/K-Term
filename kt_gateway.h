@@ -1491,6 +1491,30 @@ static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int ho
     KTerm_QueueSessionResponse(term, session, response);
 }
 
+// Callback for async response time results
+static void KTerm_ResponseTime_Callback(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[1024];
+    if (result->sent == 0) {
+        snprintf(payload, sizeof(payload), "ERR;FAILED_TO_START");
+    } else {
+        // Format: OK;SENT=n;RECV=n;LOST=n;MIN=x;AVG=x;MAX=x;JITTER=x
+        snprintf(payload, sizeof(payload), "OK;SENT=%d;RECV=%d;LOST=%d;MIN=%.3f;AVG=%.3f;MAX=%.3f;JITTER=%.3f",
+                 result->sent, result->received, result->lost,
+                 result->min_rtt_ms, result->avg_rtt_ms, result->max_rtt_ms, result->jitter_ms);
+    }
+
+    // Format full Gateway response: ESC P GATE ; KTERM ; ID ; RESPONSETIME ; payload ST
+    // Format full Gateway response: ESC P GATE ; KTERM ; ID ; RESPONSETIME ; payload ST
+    char response[2048];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;RESPONSETIME;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+    // Note: user_data is owned by the Net context and will be freed when the context is destroyed/reset.
+}
+
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
     if (respond) respond(term, session, "ERR;NET_DISABLED");
@@ -1577,6 +1601,40 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
                  if(output[i] == '\n' || output[i] == '\r') output[i] = '|';
              }
              if (respond) respond(term, session, output);
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
+    } else if (strcmp(cmd, "responsetime") == 0) {
+        char* host = NULL;
+        int count = 10;
+        int interval_sec = 1;
+        int timeout_ms = 2000;
+
+        char* arg = strtok(NULL, ";");
+        while(arg) {
+            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (strncmp(arg, "count=", 6) == 0) count = atoi(arg+6);
+            else if (strncmp(arg, "interval=", 9) == 0) interval_sec = atoi(arg+9);
+            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            else if (!host) host = arg; // Fallback positional if not keyed
+            arg = strtok(NULL, ";");
+        }
+
+        if (host) {
+             // Pass ID as user_data (must duplicate it as it needs to persist)
+             // KTerm_Net_ResponseTime will free it in DestroyContext
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 // Convert interval seconds to ms
+                 if (KTerm_Net_ResponseTime(term, session, host, count, interval_sec * 1000, timeout_ms, KTerm_ResponseTime_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     // Initialization failed synchronously; ownership of id_copy was not transferred.
+                     if (respond) respond(term, session, "ERR;INIT_FAILED");
+                     free(id_copy);
+                 }
+             }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
