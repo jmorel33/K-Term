@@ -1,5 +1,10 @@
 # K-Term Update Log
 
+## [v2.6.13] - Speedtest Enhancements: Auto-Server & Jitter
+- **Auto-Server Selection:** `speedtest_client.c` now fetches the server list from `c.speedtest.net` and auto-selects a server, with fallback to default.
+- **Jitter Visualization:** Implemented sequential latency probing (count=20) and a text-based bar chart in `speedtest_client` to visualize jitter history.
+- **Robustness:** Added timeouts to the config fetch state machine to prevent hangs during network issues.
+
 ## [v2.6.12] - Diagnostics Expansion & Gateway Unification
 - **Speedtest Example:** Added `example/speedtest_client.c` showcasing multi-stream download/upload throughput testing and latency measurement.
 - **Gateway Commands:** Promoted `DNS`, `PING` (Response Time), `PORTSCAN`, and `WHOIS` to top-level Gateway commands (e.g., `DCS GATE;KTERM;ID;DNS;host ST`), simplifying access to network diagnostics.

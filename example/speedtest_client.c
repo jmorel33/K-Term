@@ -40,12 +40,20 @@
 // --- Configuration ---
 #define DEFAULT_HOST "speedtest.tele2.net"
 #define DEFAULT_PORT 80
+#define CONFIG_HOST "c.speedtest.net"
+#define CONFIG_PATH "/speedtest-servers-static.php"
 #define TEST_DURATION_SEC 5.0
 #define NUM_STREAMS 4
+#define LATENCY_SAMPLES 20
 
 // --- State Machine ---
 typedef enum {
     STATE_IDLE = 0,
+    STATE_FETCH_CONFIG_INIT,
+    STATE_FETCH_CONFIG_CONNECTING,
+    STATE_FETCH_CONFIG_REQUEST,
+    STATE_FETCH_CONFIG_READING,
+    STATE_FETCH_CONFIG_DONE,
     STATE_LATENCY,
     STATE_LATENCY_DONE,
     STATE_DOWNLOAD_INIT,
@@ -75,6 +83,9 @@ typedef struct {
     double latency_max;
     double jitter;
     bool latency_finished;
+    double latency_samples[LATENCY_SAMPLES];
+    int latency_sample_count;
+    bool latency_probe_active;
 
     // Download
     double dl_speed_mbps;
@@ -92,6 +103,11 @@ typedef struct {
 
     // UI
     char status_msg[256];
+
+    // Config Fetch
+    bool use_auto_server;
+    char config_buffer[16384];
+    int config_len;
 
 } SpeedtestContext;
 
@@ -112,20 +128,52 @@ static int GetSessionIndex(KTerm* term, KTermSession* session) {
     return -1;
 }
 
+// --- Config Fetch Callbacks ---
+
+static void cb_config_on_connect(KTerm* term, KTermSession* session) {
+    (void)term; (void)session;
+    if (ctx.state == STATE_FETCH_CONFIG_CONNECTING) {
+        ctx.state = STATE_FETCH_CONFIG_REQUEST;
+    }
+}
+
+static bool cb_config_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
+    (void)term; (void)session;
+    if (ctx.config_len + len < sizeof(ctx.config_buffer) - 1) {
+        memcpy(ctx.config_buffer + ctx.config_len, data, len);
+        ctx.config_len += len;
+        ctx.config_buffer[ctx.config_len] = '\0';
+    }
+    return true;
+}
+
+static void cb_config_on_disconnect(KTerm* term, KTermSession* session) {
+    (void)term; (void)session;
+    if (ctx.state == STATE_FETCH_CONFIG_READING) {
+        ctx.state = STATE_FETCH_CONFIG_DONE;
+    }
+}
+
 // --- Callbacks ---
 
 static void cb_latency_result(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data) {
     (void)term; (void)session; (void)user_data;
     if (result->received > 0) {
-        ctx.latency_min = result->min_rtt_ms;
-        ctx.latency_avg = result->avg_rtt_ms;
-        ctx.latency_max = result->max_rtt_ms;
-        ctx.jitter = result->jitter_ms;
-        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Latency: %.1f ms | Jitter: %.1f ms", ctx.latency_avg, ctx.jitter);
+        if (ctx.latency_sample_count < LATENCY_SAMPLES) {
+            ctx.latency_samples[ctx.latency_sample_count++] = result->avg_rtt_ms; // Single probe avg = value
+        }
+        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Latency Probe %d/%d: %.1f ms",
+                 ctx.latency_sample_count, LATENCY_SAMPLES, result->avg_rtt_ms);
     } else {
-        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Latency Test Failed (Packet Loss)");
+        // Packet loss treated as 0 or handled? Let's just ignore for graph or add 0
+        // Or retry? For simplicity, we skip increment to retry or just log it.
+        // Let's increment but store 0 or NaN? 0.
+        if (ctx.latency_sample_count < LATENCY_SAMPLES) {
+            ctx.latency_samples[ctx.latency_sample_count++] = 0.0;
+        }
+        snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Latency Probe Failed");
     }
-    ctx.state = STATE_LATENCY_DONE;
+    ctx.latency_probe_active = false;
 }
 
 static bool cb_dl_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
@@ -266,17 +314,73 @@ static void DrawDashboard(KTerm* term) {
     if (ctx.state == STATE_FINISHED) {
         KTerm_WriteString(term, "\x1B[32mTEST COMPLETE. Press Ctrl+C to exit.\x1B[0m");
     }
+
+    // Jitter Graph
+    if (ctx.latency_sample_count > 0) {
+        SetCursor(term, 2, 17);
+        KTerm_WriteString(term, "Latency History (ms):");
+
+        // Find max for scaling
+        double max_val = 10.0; // Min scale
+        for(int i=0; i<ctx.latency_sample_count; i++) {
+            if (ctx.latency_samples[i] > max_val) max_val = ctx.latency_samples[i];
+        }
+
+        for(int i=0; i<ctx.latency_sample_count; i++) {
+            SetCursor(term, 2 + i*3, 18); // Spaced out horizontally
+            double val = ctx.latency_samples[i];
+
+            // Draw vertical bar (using char height logic simply)
+            // Or just a number? User asked for "text bars".
+            // Let's do a simple vertical bar using block chars if possible, or just magnitude char.
+            // Low effort text bar:
+            // 0-10ms: .
+            // 10-50ms: :
+            // 50-100ms: |
+            // >100ms: !
+
+            // Better: Horizontal bars one per line? No space.
+            // Vertical bar using extended ASCII might work but encoding issues.
+            // Let's use simple ASCII height.
+            // We have rows 19, 20, 21, 22 available. 4 rows height.
+
+            int height = (int)((val / max_val) * 4.0);
+            if (val > 0 && height == 0) height = 1;
+            if (val == 0) height = 0; // Loss
+
+            // Draw from bottom up (row 22 down to 19)
+            for(int h=0; h<4; h++) {
+                SetCursor(term, 2 + i*2, 22 - h);
+                if (h < height) KTerm_WriteString(term, "#");
+                else KTerm_WriteString(term, " ");
+            }
+
+            // Value at bottom?
+            // Too crowded.
+        }
+
+        // Show Jitter Stat
+        if (ctx.state >= STATE_LATENCY_DONE) {
+            SetCursor(term, 45, 17);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "Jitter: %.2f ms", ctx.jitter);
+            KTerm_WriteString(term, buf);
+        }
+    }
 }
 
 // --- Main ---
 
 int main(int argc, char** argv) {
+    // Default fallback
     strncpy(ctx.host, DEFAULT_HOST, sizeof(ctx.host));
     ctx.port = DEFAULT_PORT;
+    ctx.use_auto_server = true;
 
     if (argc > 1) {
         strncpy(ctx.host, argv[1], sizeof(ctx.host) - 1);
         ctx.host[sizeof(ctx.host) - 1] = '\0';
+        ctx.use_auto_server = false;
     }
     if (argc > 2) ctx.port = atoi(argv[2]);
 
@@ -306,7 +410,11 @@ int main(int argc, char** argv) {
     // Ensure sessions are initialized (KTerm_Create does it, but we use them explicitly)
     // Sessions 0-3 are available.
 
-    ctx.state = STATE_IDLE;
+    if (ctx.use_auto_server) {
+        ctx.state = STATE_FETCH_CONFIG_INIT;
+    } else {
+        ctx.state = STATE_IDLE;
+    }
     KTerm_WriteString(term, "\x1B[2J"); // Clear Screen Once
 
     // --- Loop ---
@@ -320,16 +428,127 @@ int main(int argc, char** argv) {
 
         // State Machine
         switch (ctx.state) {
-            case STATE_IDLE:
-                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Starting Latency Test...");
-                ctx.state = STATE_LATENCY;
-                if (!KTerm_Net_ResponseTime(term, &term->sessions[0], ctx.host, 10, 200, 2000, cb_latency_result, NULL)) {
-                    snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Failed to start Latency Test (Check Root/Permissions)");
-                    ctx.state = STATE_DOWNLOAD_INIT;
+            case STATE_FETCH_CONFIG_INIT:
+                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Fetching server list from %s...", CONFIG_HOST);
+
+                KTermNetCallbacks cfg_cb = {0};
+                cfg_cb.on_connect = cb_config_on_connect;
+                cfg_cb.on_data = cb_config_on_data;
+                cfg_cb.on_disconnect = cb_config_on_disconnect;
+
+                KTerm_Net_SetCallbacks(term, &term->sessions[0], cfg_cb);
+                KTerm_Net_Connect(term, &term->sessions[0], CONFIG_HOST, 80, "", "");
+
+                ctx.config_len = 0;
+                ctx.state = STATE_FETCH_CONFIG_CONNECTING;
+                break;
+
+            case STATE_FETCH_CONFIG_CONNECTING:
+                // Wait for connect callback
+                if (frames > 500 && ctx.state == STATE_FETCH_CONFIG_CONNECTING) { // 5s timeout approx
+                     snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Config Timeout. Using Default.");
+                     KTerm_Net_Disconnect(term, &term->sessions[0]);
+                     ctx.state = STATE_IDLE;
                 }
                 break;
 
+            case STATE_FETCH_CONFIG_REQUEST:
+                {
+                    char req[256];
+                    snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", CONFIG_PATH, CONFIG_HOST);
+                    int sock = (int)KTerm_Net_GetSocket(term, &term->sessions[0]);
+                    if (sock >= 0) {
+                        send(sock, req, strlen(req), 0);
+                        ctx.state = STATE_FETCH_CONFIG_READING;
+                    } else {
+                        ctx.state = STATE_IDLE;
+                    }
+                }
+                break;
+
+            case STATE_FETCH_CONFIG_READING:
+                 if (frames > 2000) {
+                     snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Config Fetch Timeout. Using Default.");
+                     KTerm_Net_Disconnect(term, &term->sessions[0]);
+                     ctx.state = STATE_IDLE;
+                 }
+                 break;
+
+            case STATE_FETCH_CONFIG_DONE:
+                 // Parse XML
+                 {
+                     char* start = strstr(ctx.config_buffer, "<server ");
+                     if (start) {
+                         char* url = strstr(start, "host=\"");
+                         if (url) {
+                             url += 6; // Skip host="
+                             char* end = strchr(url, '"');
+                             if (end) {
+                                 *end = '\0';
+                                 // Parse host:port
+                                 char* colon = strchr(url, ':');
+                                 if (colon) {
+                                     *colon = '\0';
+                                     strncpy(ctx.host, url, sizeof(ctx.host)-1);
+                                     ctx.port = atoi(colon + 1);
+                                 } else {
+                                     strncpy(ctx.host, url, sizeof(ctx.host)-1);
+                                     ctx.port = 80;
+                                 }
+                                 snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Auto-Selected: %s:%d", ctx.host, ctx.port);
+                             }
+                         }
+                     } else {
+                         snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Config Parse Failed. Using Default.");
+                     }
+                     KTerm_Net_Disconnect(term, &term->sessions[0]);
+                     ctx.state = STATE_IDLE;
+                 }
+                 break;
+
+            case STATE_IDLE:
+                snprintf(ctx.status_msg, sizeof(ctx.status_msg), "Starting Latency Test...");
+                ctx.latency_sample_count = 0;
+                ctx.latency_probe_active = false;
+                ctx.state = STATE_LATENCY;
+                break;
+
             case STATE_LATENCY:
+                if (!ctx.latency_probe_active) {
+                    if (ctx.latency_sample_count >= LATENCY_SAMPLES) {
+                        // Calculate Stats
+                        double sum = 0, sq_sum = 0, min = 999999, max = 0;
+                        int count = 0;
+                        for(int i=0; i<ctx.latency_sample_count; i++) {
+                            double val = ctx.latency_samples[i];
+                            if (val > 0) {
+                                sum += val;
+                                sq_sum += val * val;
+                                if (val < min) min = val;
+                                if (val > max) max = val;
+                                count++;
+                            }
+                        }
+
+                        if (count > 0) {
+                            ctx.latency_avg = sum / count;
+                            ctx.latency_min = min;
+                            ctx.latency_max = max;
+                            double variance = (sq_sum / count) - (ctx.latency_avg * ctx.latency_avg);
+                            ctx.jitter = (variance > 0) ? sqrt(variance) : 0;
+                        }
+
+                        ctx.state = STATE_LATENCY_DONE;
+                    } else {
+                        // Start Next Probe
+                        ctx.latency_probe_active = true;
+                        if (!KTerm_Net_ResponseTime(term, &term->sessions[0], ctx.host, 1, 0, 2000, cb_latency_result, NULL)) {
+                             // Fail
+                             ctx.latency_probe_active = false;
+                             ctx.latency_samples[ctx.latency_sample_count++] = 0; // Error
+                        }
+                    }
+                }
                 break;
 
             case STATE_LATENCY_DONE:
