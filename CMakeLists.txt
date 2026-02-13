@@ -16,8 +16,8 @@ find_library(M_LIB m)
 find_library(SITUATION_LIB situation)
 
 if (NOT SITUATION_LIB)
-    message(WARNING "Situation library not found. Examples requiring it may fail to link.")
-    set(SITUATION_LIB "situation") # Fallback to linker flag hoping it's in path
+    message(WARNING "Situation library not found. Assuming mock/headless build.")
+    set(SITUATION_LIB "")
 endif()
 
 # Include directories
@@ -58,3 +58,7 @@ else()
         message(STATUS "Building ssh_sodium example (libsodium found)")
     endif()
 endif()
+
+# Speedtest Client
+add_executable(speedtest_client example/speedtest_client.c)
+target_link_libraries(speedtest_client ${SITUATION_LIB} ${M_LIB})
