@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.0
+# kterm.h - Technical Reference Manual v2.6.6
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.0)](#13-known-limitations-v260)
+    *   [1.3. Known Limitations (v2.6.6)](#13-known-limitations-v266)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -71,6 +71,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.21. DEC Locator Support](#421-dec-locator-support)
     *   [4.22. VT Pipe (Gateway Protocol)](#422-vt-pipe-gateway-protocol)
     *   [4.23. Networking & SSH](#423-networking--ssh)
+    *   [4.24. Session Persistence](#424-session-persistence)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -878,7 +879,14 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;CONCEAL`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |
 | `PIPE;BANNER`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
 | `PIPE;VT`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
-| `EXT;net`    | `connect;...` | Control networking (connect, disconnect, ping). See Section 4.23. |
+| `EXT;net`    | `connect;<target>[;pass]`| Initiates connection. Target format: `[user[:pass]@]host[:port]`. |
+| `EXT;net`    | `disconnect` | Closes the connection. |
+| `EXT;net`    | `ping;<host>` | Checks system connectivity to a host. Returns command output. |
+| `EXT;net`    | `myip` | Returns the local public-facing IP address. |
+| `EXT;net`    | `traceroute` | `host=...;maxhops=30;timeout=2000`. Async traceroute (UDP/ICMP). Returns `HOP;...` events. |
+| `EXT;net`    | `responsetime`| `host=...;count=10;interval=1;timeout=2000`. Async latency/jitter test. Returns `OK;SENT=...` stats. |
+| `EXT;automate`| `trigger;add;pat;act`| Adds an automation trigger (Pattern -> Action). |
+| `EXT;automate`| `trigger;list`| Lists active triggers. |
 | `EXT;ssh`    | `connect;...` | Alias for `EXT;net`. |
 | `SET;SESSION`| `<ID>` | Sets the target session for subsequent Gateway commands. `<ID>` is the session index (0-3). Commands will apply to this session regardless of origin. |
 | `SET;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
@@ -1398,15 +1406,23 @@ KTerm_Net_SetCallbacks(term, session, cbs);
 KTerm_Net_Listen(term, session, 2323);
 ```
 
-#### 4.23.5. SSH & Custom Security Hooks
+#### 4.23.5. SSH Reference Client & Custom Security
 
-KTerm provides a "Bring Your Own Crypto" interface via `KTermNetSecurity`. This allows you to implement SSH or TLS without linking the core library to specific crypto implementations like OpenSSL or libssh.
+**Reference Implementation (`ssh_client.c`):**
+The `ssh_client.c` example serves as the official reference for a "Bring Your Own Crypto" SSH-2 client. It features a complete RFC 4253 state machine and supports:
+*   **Authentication:** Public Key (Probe/Sign) with fallback to Password (RFC 4252).
+*   **Transport:** Binary packet framing.
+*   **Command Line Arguments:**
+    *   `--durable`: Enables auto-reconnection on disconnect.
+    *   `--persist`: Saves session state to disk on exit and restores on start.
+    *   `--config <file>`: Loads a specific configuration file (default `ssh_config`).
+    *   `--term <type>`: Sets the terminal type string (e.g., `xterm-256color`).
+*   **Configuration File:**
+    *   Directives: `Host`, `HostName`, `User`, `Port`, `Durable`, `Term`.
+    *   **Triggers:** `Trigger "pattern" "action"` (v2.6.4+) allows simple automation by scanning incoming text.
 
-**SSH Reference Implementation:**
-See `example/ssh_sodium.c` (using libsodium) or `ssh_client.c` (skeleton) for a full implementation of the SSH-2 state machine (RFC 4253), covering:
-1.  **Handshake:** Algorithm negotiation (KEXINIT) and Key Exchange (ECDH).
-2.  **Authentication:** Public Key (Probe/Sign) and Password auth (RFC 4252).
-3.  **Transport:** Binary packet framing (Length + Padding + Payload).
+**Security Hooks:**
+KTerm provides an interface (`KTermNetSecurity`) for plugging in TLS/SSL (e.g., OpenSSL) or custom encryption (SSH).
 
 ```c
 KTermNetSecurity ssh_sec = {
@@ -1469,11 +1485,30 @@ Network connections are bound to specific `KTermSession` instances. In a multi-p
 
 Networking can be inspected and controlled via `DCS GATE` commands (Extension `EXT`):
 
-*   `EXT;net;connect;<host>:<port>`: Initiates a connection.
+*   `EXT;net;connect;<target>`: Initiates a connection. Target: `[user[:pass]@]host[:port]`.
 *   `EXT;net;disconnect`: Closes the connection.
 *   `EXT;net;ping;<host>`: Checks system connectivity to a host. Returns command output.
 *   `EXT;net;myip`: Returns the local public-facing IP address.
+*   `EXT;net;traceroute;host=...`: Runs an asynchronous traceroute.
+*   `EXT;net;responsetime;host=...`: Measures latency and jitter.
+*   `EXT;automate;trigger;...`: Manages automation triggers.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
+
+### 4.24. Session Persistence
+
+KTerm v2.6.1 introduces `kt_serialize.h`, a header-only library for persisting and restoring `KTermSession` state. This enables "Durable" sessions that survive application restarts.
+
+*   **Header:** `kt_serialize.h` (Must define `KTERM_SERIALIZE_IMPLEMENTATION` in one source file).
+*   **Format:** Custom binary format with "KTERM_SES_V1" header.
+*   **Data Saved:**
+    *   Screen Buffer (Text, Colors, Attributes)
+    *   Alternate Buffer
+    *   Cursor Position
+    *   Scrolling Region
+    *   View Offset / Scrollback
+*   **API:**
+    *   `bool KTerm_SerializeSession(KTermSession* session, void** out_buf, size_t* out_len);`
+    *   `bool KTerm_DeserializeSession(KTermSession* session, const void* buf, size_t len);`
 
 ---
 
