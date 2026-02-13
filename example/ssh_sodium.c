@@ -1,12 +1,24 @@
-// KTerm SSH Client with LibSodium Integration Example
-// A graphical SSH client demonstrating how to hook libsodium for crypto.
-//
-// Requires: libsodium (https://doc.libsodium.org/)
-// Compile: gcc ssh_sodium.c -o ssh_sodium -lsituation -lsodium -lm
-//
-// Note: This is a reference implementation showing where to hook sodium primitives.
-// A full SSH implementation requires careful handling of packet numbers,
-// key derivation (RFC 4253), and strict state validation.
+/*
+ * KTerm SSH Client with LibSodium Integration Example
+ * ---------------------------------------------------
+ * A graphical SSH client demonstrating how to hook libsodium for crypto.
+ *
+ * Requirements:
+ *   - libsodium (https://doc.libsodium.org/)
+ *
+ * Build Instructions:
+ *   mkdir build && cd build
+ *   cmake ..
+ *   make ssh_sodium
+ *
+ *   OR manually:
+ *   gcc ssh_sodium.c -o ssh_sodium -lsituation -lsodium -lm
+ *
+ * Note:
+ *   This is a reference implementation showing where to hook sodium primitives
+ *   (Curve25519, ChaCha20-Poly1305). A full SSH implementation requires careful
+ *   handling of packet numbers, key derivation (RFC 4253), and strict state validation.
+ */
 
 #define KTERM_IMPLEMENTATION
 #include "../kterm.h"

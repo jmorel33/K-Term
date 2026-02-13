@@ -1,5 +1,16 @@
 # K-Term Update Log
 
+## [v2.6.8] - Build Polish & Networking API Exposure
+
+### Added
+- **Build System**: Introduced `CMakeLists.txt` in the root directory for standardized, cross-platform builds.
+- **Networking API**: Exposed `KTerm_Net_SetAutoReconnect` in `kt_net.h` for configuring robust connection retry logic.
+- **Documentation**: Added a dedicated section "Standalone Networking API (kt_net.h)" to the reference manual.
+
+### Improved
+- **Examples**: Polished `telnet_client.c`, `ssh_client.c`, `net_server.c`, and `ssh_sodium.c` with comprehensive header comments and usage instructions.
+- **Robustness**: Enhanced internal networking error handling to respect user-configured auto-reconnect settings.
+
 ## [v2.6.7] - Response Time & Latency Monitoring
 - **Response Time Probe:** Added `RESPONSETIME` command to the `EXT;net` Gateway extension (`EXT;net;responsetime;host=x;count=10`).
 - **Metrics:** Measures Min/Avg/Max RTT, Jitter (Standard Deviation), and Packet Loss.

@@ -212,6 +212,7 @@ static inline void SituationBeginFrame() {}
 static inline void SituationShutdown() {}
 
 // Input
+static inline bool SituationIsKeyPressed(int key) { return false; }
 static inline bool SituationIsKeyDown(int key) { return false; }
 static inline int SituationGetKeyPressed() { return 0; }
 static inline int SituationGetCharPressed() { return 0; }

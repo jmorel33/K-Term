@@ -1,3 +1,27 @@
+/*
+ * KTerm Telnet Server Example
+ * ---------------------------
+ * A functional Telnet server demonstrating KTerm's networking server capabilities.
+ *
+ * Features:
+ * - Listens on port 8023.
+ * - Handles Telnet Negotiation (ECHO, SGA, NAWS).
+ * - Implements a simple command shell (help, status, resize, clear, exit).
+ * - Supports basic authentication (admin/password).
+ *
+ * Build Instructions:
+ *   mkdir build && cd build
+ *   cmake ..
+ *   make net_server
+ *
+ *   OR manually:
+ *   gcc example/net_server.c -o net_server -lsituation -lm
+ *
+ * Usage:
+ *   ./net_server
+ *   Connect via: telnet localhost 8023
+ */
+
 #define KTERM_IMPLEMENTATION
 // Define KTERM_TESTING to use mock_situation.h for headless compilation
 #define KTERM_TESTING
