@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.9
+# kterm.h - Technical Reference Manual v2.6.10
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.9)](#13-known-limitations-v269)
+    *   [1.3. Known Limitations (v2.6.10)](#13-known-limitations-v2610)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -172,9 +172,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.9)
+### 1.3. Known Limitations (v2.6.10)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.9 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.10 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
@@ -1491,6 +1491,8 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;myip`: Returns the local public-facing IP address.
 *   `EXT;net;traceroute;host=...`: Runs an asynchronous traceroute.
 *   `EXT;net;responsetime;host=...`: Measures latency and jitter.
+*   `EXT;net;dns;host`: Synchronously resolves a hostname to an IP address. Returns `OK;IP=...` or `ERR`.
+*   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Returns `HOST=...;PORT=...;STATUS=...` for each port.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
 
@@ -1500,6 +1502,8 @@ While Gateway commands provide easy access, `kt_net.h` offers a rich C API for d
 
 *   `KTerm_Net_Init(term)`: Initializes the network subsystem.
 *   `KTerm_Net_Connect(term, session, host, port, user, pass)`: Initiates an asynchronous connection.
+*   `KTerm_Net_Resolve(host, output_ip, max_len)`: Synchronously resolves a hostname to an IP address string.
+*   `KTerm_Net_PortScan(term, session, host, ports, timeout, cb, user_data)`: Initiates an asynchronous TCP port scan.
 *   `KTerm_Net_SetAutoReconnect(term, session, enable, max_retries, delay_ms)`: Configures automatic connection retry logic for transient errors (e.g., resolving failures).
 *   `KTerm_Net_SetCallbacks(term, session, callbacks)`: Registers hooks for data reception (`on_data`), connection state changes (`on_connect`, `on_disconnect`), and error reporting (`on_error`).
 *   `KTerm_Net_SetSecurity(term, session, security)`: Plugs in custom cryptographic providers (TLS/SSH) via function pointers.

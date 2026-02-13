@@ -143,6 +143,7 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
 // Utilities
 void KTerm_Net_GetLocalIP(char* buffer, size_t max_len);
 void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
+bool KTerm_Net_Resolve(const char* host, char* output_ip, size_t max_len); // Sync Resolve
 
 // Traceroute Callback
 typedef void (*KTermTracerouteCallback)(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
@@ -165,6 +166,14 @@ typedef void (*KTermResponseTimeCallback)(KTerm* term, KTermSession* session, co
 
 // Starts an async response time test (Ping-like).
 bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int timeout_ms, KTermResponseTimeCallback cb, void* user_data);
+
+// Port Scan Callback
+// Status: 0=CLOSED/TIMEOUT, 1=OPEN
+typedef void (*KTermPortScanCallback)(KTerm* term, KTermSession* session, const char* host, int port, int status, void* user_data);
+
+// Starts an async port scan. Ports string can be comma separated (e.g., "80,443,22,8080").
+// Timeout is per port.
+bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data);
 
 #ifdef __cplusplus
 }
@@ -223,6 +232,7 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
 // Forward declaration
 struct KTermTracerouteContext;
 struct KTermResponseTimeContext;
+struct KTermPortScanContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -299,6 +309,7 @@ typedef struct {
 
     struct KTermTracerouteContext* traceroute;
     struct KTermResponseTimeContext* response_time;
+    struct KTermPortScanContext* port_scan;
 
     int target_session_index;
 
@@ -363,6 +374,25 @@ typedef struct KTermResponseTimeContext {
 #endif
 } KTermResponseTimeContext;
 
+typedef struct KTermPortScanContext {
+    int state; // 0=IDLE, 1=CONNECTING, 2=NEXT
+    char host[256];
+    char ports_str[256];
+    int current_port;
+    int timeout_ms;
+
+    // Parser state for ports_str
+    char* ports_ptr;
+    char* ports_next;
+
+    socket_t sockfd;
+    struct timeval start_time;
+    struct sockaddr_in dest_addr;
+
+    KTermPortScanCallback callback;
+    void* user_data;
+} KTermPortScanContext;
+
 // --- Helper Functions ---
 
 static KTermNetSession* KTerm_Net_GetContext(KTermSession* session) {
@@ -420,6 +450,15 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
         if (net->response_time->user_data) free(net->response_time->user_data);
         free(net->response_time);
         net->response_time = NULL;
+    }
+
+    if (net->port_scan) {
+        if (IS_VALID_SOCKET(net->port_scan->sockfd)) {
+             CLOSE_SOCKET(net->port_scan->sockfd);
+        }
+        if (net->port_scan->user_data) free(net->port_scan->user_data);
+        free(net->port_scan);
+        net->port_scan = NULL;
     }
 
     if (net->security.close) {
@@ -1226,6 +1265,99 @@ static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
 #endif
 }
 
+static void KTerm_Net_ProcessPortScan(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->port_scan) return;
+    KTermPortScanContext* ps = net->port_scan;
+
+    // NEXT Port Logic
+    if (ps->state == 2) {
+        // Iterate to next port
+        while (ps->ports_ptr && *ps->ports_ptr) {
+             // Skip delimiters
+             if (*ps->ports_ptr == ',' || *ps->ports_ptr == ' ') {
+                 ps->ports_ptr++;
+                 continue;
+             }
+
+             // Found number
+             ps->current_port = atoi(ps->ports_ptr);
+
+             // Move ptr
+             char* next = strchr(ps->ports_ptr, ',');
+             if (next) {
+                 ps->ports_ptr = next + 1;
+             } else {
+                 ps->ports_ptr = NULL; // End
+             }
+
+             if (ps->current_port > 0 && ps->current_port < 65536) {
+                 // Start Connect
+                 ps->state = 1; // CONNECTING
+
+                 if (IS_VALID_SOCKET(ps->sockfd)) CLOSE_SOCKET(ps->sockfd);
+                 ps->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+                 if (!IS_VALID_SOCKET(ps->sockfd)) {
+                     // Fail this port?
+                     if (ps->callback) ps->callback(term, session, ps->host, ps->current_port, 0, ps->user_data);
+                     ps->state = 2; // Next
+                     return;
+                 }
+
+                 // Non-blocking
+#ifdef _WIN32
+                 u_long mode = 1; ioctlsocket(ps->sockfd, FIONBIO, &mode);
+#else
+                 fcntl(ps->sockfd, F_SETFL, fcntl(ps->sockfd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+
+                 ps->dest_addr.sin_port = htons(ps->current_port);
+                 connect(ps->sockfd, (struct sockaddr*)&ps->dest_addr, sizeof(ps->dest_addr));
+
+                 gettimeofday(&ps->start_time, NULL);
+                 return; // Wait for next tick
+             }
+        }
+
+        // Done
+        if (ps->user_data) free(ps->user_data);
+        free(ps);
+        net->port_scan = NULL;
+        return;
+    }
+    else if (ps->state == 1) { // CONNECTING
+        fd_set wfds; struct timeval tv = {0, 0};
+        FD_ZERO(&wfds);
+        FD_SET(ps->sockfd, &wfds);
+
+        int res = select(ps->sockfd + 1, NULL, &wfds, NULL, &tv);
+        if (res > 0) {
+            int opt = 0; socklen_t len = sizeof(opt);
+            if (getsockopt(ps->sockfd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
+                // Connected
+                if (ps->callback) ps->callback(term, session, ps->host, ps->current_port, 1, ps->user_data);
+                CLOSE_SOCKET(ps->sockfd); ps->sockfd = INVALID_SOCKET;
+                ps->state = 2; // Next
+            } else {
+                // Error / Refused
+                if (ps->callback) ps->callback(term, session, ps->host, ps->current_port, 0, ps->user_data);
+                CLOSE_SOCKET(ps->sockfd); ps->sockfd = INVALID_SOCKET;
+                ps->state = 2; // Next
+            }
+        } else {
+            // Check timeout
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            double elapsed = (now.tv_sec - ps->start_time.tv_sec) * 1000.0 + (now.tv_usec - ps->start_time.tv_usec) / 1000.0;
+            if (elapsed > ps->timeout_ms) {
+                if (ps->callback) ps->callback(term, session, ps->host, ps->current_port, 0, ps->user_data);
+                CLOSE_SOCKET(ps->sockfd); ps->sockfd = INVALID_SOCKET;
+                ps->state = 2; // Next
+            }
+        }
+    }
+}
+
 void KTerm_Net_Init(KTerm* term) {
     if (!term) return;
     KTerm_SetOutputSink(term, KTerm_Net_Sink, term);
@@ -1247,6 +1379,11 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
     // Process Async Response Time if active
     if (net && net->response_time) {
         KTerm_Net_ProcessResponseTime(term, session);
+    }
+
+    // Process Async Port Scan if active
+    if (net && net->port_scan) {
+        KTerm_Net_ProcessPortScan(term, session);
     }
 
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
@@ -1743,6 +1880,23 @@ void KTerm_Net_GetLocalIP(char* buffer, size_t max_len) {
     CLOSE_SOCKET(sock);
 }
 
+bool KTerm_Net_Resolve(const char* host, char* output_ip, size_t max_len) {
+    if (!host || !output_ip || max_len == 0) return false;
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET; // IPv4 for now
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(host, NULL, &hints, &res) == 0) {
+        struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
+        inet_ntop(AF_INET, &addr->sin_addr, output_ip, max_len);
+        freeaddrinfo(res);
+        return true;
+    }
+    return false;
+}
+
 void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
     if (!host || !output || max_len == 0) return;
     output[0] = '\0';
@@ -1962,6 +2116,49 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     free(rt); net->response_time = NULL;
     return false;
 #endif
+    return true;
+}
+
+bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data) {
+    if (!term || !session || !host || !ports) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    // Cleanup existing
+    if (net->port_scan) {
+        if (IS_VALID_SOCKET(net->port_scan->sockfd)) CLOSE_SOCKET(net->port_scan->sockfd);
+        if (net->port_scan->user_data) free(net->port_scan->user_data);
+        free(net->port_scan);
+        net->port_scan = NULL;
+    }
+
+    net->port_scan = (KTermPortScanContext*)calloc(1, sizeof(KTermPortScanContext));
+    if (!net->port_scan) return false;
+
+    KTermPortScanContext* ps = net->port_scan;
+    strncpy(ps->host, host, sizeof(ps->host)-1);
+    strncpy(ps->ports_str, ports, sizeof(ps->ports_str)-1);
+    ps->ports_ptr = ps->ports_str; // Start
+    ps->timeout_ms = (timeout_ms > 0) ? timeout_ms : 1000;
+    ps->callback = cb;
+    ps->user_data = user_data;
+
+    // Pre-resolve host (blocking, but just once)
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        free(ps); net->port_scan = NULL;
+        return false;
+    }
+    ps->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
+
+    ps->state = 2; // Ready for Next
+    ps->sockfd = INVALID_SOCKET;
+
     return true;
 }
 
