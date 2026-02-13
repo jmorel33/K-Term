@@ -676,7 +676,7 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
     if (debug_frame_count < 5) {  // Only first 5 frames
         fprintf(stderr, "[KTerm_CmdPresent] Push Constants (frame %d):\n", debug_frame_count);
         fprintf(stderr, "  - terminal_buffer_addr: 0x%llx\n", (unsigned long long)pc->terminal_buffer_addr);
-        fprintf(stderr, "  - font_texture_handle: %u\n", pc->font_texture_handle);
+        fprintf(stderr, "  - font_texture_handle: %llu\n", (unsigned long long)pc->font_texture_handle);
         fprintf(stderr, "  - atlas_cols: %d\n", pc->atlas_cols);
         fprintf(stderr, "  - grid_size: %.0fx%.0f\n", pc->grid_size.x, pc->grid_size.y);
         fprintf(stderr, "  - char_size: %.0fx%.0f\n", pc->char_size.x, pc->char_size.y);
@@ -867,7 +867,7 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
         if (err_msg) free(err_msg);
     } else {
         KTermCommandBuffer cmd = KTerm_GetCommandBuffer();
-        fprintf(stderr, "[KTerm] AcquireFrameCommandBuffer SUCCESS, cmd=%p\n", cmd); fflush(stderr);
+        fprintf(stderr, "[KTerm] AcquireFrameCommandBuffer SUCCESS, cmd=%llu\n", (unsigned long long)cmd.id); fflush(stderr);
 
         // 1. Sixel Graphics
         if (rb->sixel_active && rb->sixel_count > 0) {
@@ -974,7 +974,7 @@ void KTermCompositor_Render(KTermCompositor* comp, KTerm* term) {
             static bool bind_checked = false;
             if (!bind_checked) {
                 fprintf(stderr, "[KTerm] Pipeline and all resources bound successfully\n");
-                fprintf(stderr, "[KTerm] terminal_buffer.id=%u\n", term->terminal_buffer.id);
+                fprintf(stderr, "[KTerm] terminal_buffer.id=%llu\n", (unsigned long long)term->terminal_buffer.id);
                 fprintf(stderr, "[KTerm] output_texture.slot_index=%u, generation=%u\n", 
                         term->output_texture.slot_index, term->output_texture.generation);
                 fprintf(stderr, "[KTerm] font_texture.slot_index=%u, generation=%u\n",

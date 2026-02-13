@@ -234,7 +234,7 @@ static void DrawDashboard(KTerm* term) {
     SetCursor(term, 2, 1);
     KTerm_WriteString(term, "\x1B[1;37mK-TERM SPEEDTEST UTILITY (Multi-Stream)\x1B[0m");
     SetCursor(term, 2, 2);
-    char sub[128]; snprintf(sub, sizeof(sub), "Target: %s:%d | Streams: %d", ctx.host, ctx.port, NUM_STREAMS);
+    char sub[512]; snprintf(sub, sizeof(sub), "Target: %s:%d | Streams: %d", ctx.host, ctx.port, NUM_STREAMS);
     KTerm_WriteString(term, sub);
 
     // Status

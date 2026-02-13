@@ -1533,6 +1533,42 @@ static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const ch
     KTerm_QueueSessionResponse(term, session, response);
 }
 
+// Callback for async whois results
+static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data) {
+    if (!term || !session) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    if (data && len > 0) {
+        // Escape newlines and semicolons
+        char* buf = (char*)malloc(len * 2 + 1);
+        if (buf) {
+            size_t j = 0;
+            for(size_t i=0; i<len; i++) {
+                if (data[i] == '\n') { buf[j++] = '|'; }
+                else if (data[i] == '\r') {}
+                else if (data[i] == ';') { buf[j++] = ':'; }
+                else buf[j++] = data[i];
+            }
+            buf[j] = '\0';
+
+            // Limit chunk size
+            if (strlen(buf) > 1000) buf[1000] = '\0';
+
+            char response[1500];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;DATA;%s\x1B\\", id, buf);
+            KTerm_QueueSessionResponse(term, session, response);
+            free(buf);
+        }
+    }
+
+    if (done) {
+        char response[128];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;DONE\x1B\\", id);
+        KTerm_QueueSessionResponse(term, session, response);
+    }
+}
+
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
     if (respond) respond(term, session, "ERR;NET_DISABLED");
@@ -1728,6 +1764,23 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_ARGS");
+        }
+    } else if (strcmp(cmd, "whois") == 0) {
+        char* host = strtok(NULL, ";");
+        if (host) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 // Default query is same as host
+                 if (KTerm_Net_Whois(term, session, host, host, KTerm_Whois_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
