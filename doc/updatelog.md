@@ -4,6 +4,9 @@
 - **Auto-Server Selection:** `speedtest_client.c` now fetches the server list from `c.speedtest.net` and auto-selects a server, with fallback to default.
 - **Jitter Visualization:** Implemented sequential latency probing (count=20) and a text-based bar chart in `speedtest_client` to visualize jitter history.
 - **Robustness:** Added timeouts to the config fetch state machine to prevent hangs during network issues.
+- **Whois Timeout:** Implemented asynchronous connection timeout (default 5s) and error handling for `KTerm_Net_Whois` to prevent hangs during network failures.
+- **Diagnostics:** Improved `select` error reporting for asynchronous networking tasks.
+
 
 ## [v2.6.12] - Diagnostics Expansion & Gateway Unification
 - **Speedtest Example:** Added `example/speedtest_client.c` showcasing multi-stream download/upload throughput testing and latency measurement.
@@ -20,10 +23,8 @@
 - Enhanced `speedtest_client` example with multi-stream (x4) download/upload throughput support.
 - Added `dns` (synchronous resolution) and `portscan` (asynchronous TCP scan) commands to the Gateway Protocol (`EXT;net;...`).
 - Implemented `KTerm_Net_Resolve` and `KTerm_Net_PortScan` APIs in `kt_net.h`.
-- Bumped version to v2.6.10.
 
 ## [v2.6.9] - Auto-Terminfo Push & Session Persistence
-
 ### Added
 - **Auto-Terminfo Push:** SSH client now automatically attempts to install the `kterm` terminfo database on the remote host during connection, enabling advanced features (Kitty graphics) out of the box.
 - **Session Persistence:** Added session state saving and restoration on disconnection. The grid state is serialized to disk (`ssh_session_host_port.dat`) and automatically restored upon reconnection or client restart.
