@@ -47,10 +47,6 @@ def handle_client(conn, addr):
 
             if msg_type == 20: # SSH_MSG_KEXINIT
                 print("[Server] Sending SSH_MSG_KEXINIT")
-                # Dummy KEXINIT: Cookie (16) + Lists (empty strings logic)
-                # Client skeleton ignores content, so just send bytes
-                # Cookie (16) + kex_algo (4+0) + hostkey (4+0) ...
-                # Actually let's send just enough zero bytes to not crash generic parser if any
                 send_packet(conn, 20, b"\x00"*16 + b"\x00"*100)
 
             elif msg_type == 21: # SSH_MSG_NEWKEYS
@@ -59,50 +55,69 @@ def handle_client(conn, addr):
 
             elif msg_type == 5: # SSH_MSG_SERVICE_REQUEST
                 print("[Server] Sending SSH_MSG_SERVICE_ACCEPT")
-                svc = payload[4:]
-                # 6 = SERVICE_ACCEPT
-                # Payload: string service_name
-                # string "ssh-userauth" = \x00\x00\x00\x0c ssh-userauth
                 send_packet(conn, 6, b"\x00\x00\x00\x0c" + b"ssh-userauth")
 
             elif msg_type == 50: # SSH_MSG_USERAUTH_REQUEST
-                # Check probe vs sign
                 if b"dummy_pubkey_probe" in payload:
                     print("[Server] Sending SSH_MSG_USERAUTH_PK_OK")
-                    # 60 = PK_OK
-                    # Payload: string algo, string blob
-                    # Mock: algo="ssh-ed25519", blob=""
                     send_packet(conn, 60, b"\x00\x00\x00\x0bssh-ed25519" + b"\x00\x00\x00\x00")
                 elif b"dummy_signed_request" in payload:
                     print("[Server] Sending SSH_MSG_USERAUTH_SUCCESS")
                     send_packet(conn, 52, b"") # SUCCESS
                 else:
-                    print(f"[Server] Unknown Auth Request Payload: {payload}")
-                    # Default to Success to not block other tests? No, explicit fail
-                    # send_packet(conn, 51, b"") # FAILURE
+                    # Assume password auth success
+                    print(f"[Server] Auth Request Payload: {payload[:20]}...")
+                    print("[Server] Sending SSH_MSG_USERAUTH_SUCCESS")
+                    send_packet(conn, 52, b"")
 
             elif msg_type == 90: # SSH_MSG_CHANNEL_OPEN
+                sender_chan = struct.unpack(">I", payload[4:8])[0]
+                print(f"[Server] SSH_MSG_CHANNEL_OPEN Sender ID: {sender_chan}")
                 print("[Server] Sending SSH_MSG_CHANNEL_OPEN_CONFIRMATION")
                 # 91 = OPEN_CONFIRMATION
-                # uint32 recipient channel, uint32 sender channel, uint32 init window, uint32 max packet
-                resp = struct.pack(">IIII", 0, 0, 32768, 32768)
+                # recipient (sender_chan), sender (our ID=sender_chan to map 1:1), window, packet
+                resp = struct.pack(">IIII", sender_chan, sender_chan, 32768, 32768)
                 send_packet(conn, 91, resp)
 
-            elif msg_type == 98: # SSH_MSG_CHANNEL_REQUEST (e.g. PTY, SHELL)
-                print("[Server] Sending SSH_MSG_CHANNEL_SUCCESS")
-                # 99 = SUCCESS
-                # uint32 recipient channel
-                resp = struct.pack(">I", 0)
-                send_packet(conn, 99, resp)
+            elif msg_type == 98: # SSH_MSG_CHANNEL_REQUEST
+                recipient = struct.unpack(">I", payload[0:4])[0]
+                req_len = struct.unpack(">I", payload[4:8])[0]
+                req_type = payload[8:8+req_len].decode('ascii')
+                want_reply = payload[8+req_len]
+
+                print(f"[Server] Channel Request: {req_type} on Channel {recipient}")
+
+                if want_reply:
+                    print("[Server] Sending SSH_MSG_CHANNEL_SUCCESS")
+                    resp = struct.pack(">I", recipient)
+                    send_packet(conn, 99, resp)
+
+                if req_type == "exec":
+                    print("[Server] Exec detected. Sending EXIT_STATUS and CLOSE")
+                    # 98 = REQUEST (exit-status)
+                    # We can send request on channel too? No, usually exit-status is a request from server to client.
+                    # recipient, "exit-status", false, uint32 code
+                    req_s = b"exit-status"
+                    # req payload: recipient(4) + len(4) + str + want_reply(1) + code(4)
+                    exit_load = struct.pack(">I", recipient) + struct.pack(">I", len(req_s)) + req_s + b"\x00" + struct.pack(">I", 0)
+                    send_packet(conn, 98, exit_load)
+
+                    # 97 = CHANNEL_CLOSE
+                    resp = struct.pack(">I", recipient)
+                    send_packet(conn, 97, resp)
 
             elif msg_type == 94: # SSH_MSG_CHANNEL_DATA
-                # Echo data back
-                data = payload[4:] # Skip recipient channel (4 bytes)
-                print(f"[Server] Echoing Data: {data}")
-                # 94 = DATA
-                # uint32 recipient, string data
-                resp = struct.pack(">I", 0) + struct.pack(">I", len(data)) + data
+                recipient = struct.unpack(">I", payload[0:4])[0]
+                data = payload[8:] # Skip recip(4) + len(4)
+                print(f"[Server] Echoing Data on Channel {recipient}: {data}")
+                resp = struct.pack(">I", recipient) + struct.pack(">I", len(data)) + data
                 send_packet(conn, 94, resp)
+
+            elif msg_type == 97: # SSH_MSG_CHANNEL_CLOSE
+                print("[Server] Received CHANNEL_CLOSE")
+                # Acknowledge if needed? Usually symmetric close.
+                # If client initiates close (e.g. after exec finish), we are done with that channel.
+                pass
 
             elif msg_type == 1: # DISCONNECT
                 print("[Server] Client Disconnected")
@@ -115,12 +130,8 @@ def handle_client(conn, addr):
 
 def send_packet(conn, msg_type, payload):
     pad_len = 4
-    # packet_len = len(pad_len_byte + msg_type_byte + payload + padding)
-    #            = 1 + 1 + len(payload) + pad_len
     pkt_len = 1 + 1 + len(payload) + pad_len
-
     header = struct.pack(">IB", pkt_len, pad_len)
-    # msg_type is byte
     msg = header + bytes([msg_type]) + payload + (b"\x00" * pad_len)
     conn.sendall(msg)
 

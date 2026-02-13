@@ -1,5 +1,16 @@
 # K-Term Update Log
 
+## [v2.6.9] - Auto-Terminfo Push & Session Persistence
+
+### Added
+- **Auto-Terminfo Push:** SSH client now automatically attempts to install the `kterm` terminfo database on the remote host during connection, enabling advanced features (Kitty graphics) out of the box.
+- **Session Persistence:** Added session state saving and restoration on disconnection. The grid state is serialized to disk (`ssh_session_host_port.dat`) and automatically restored upon reconnection or client restart.
+- **Embedded Terminfo:** Included `kterm.ti` and its base64 representation within the binary for portability.
+
+### Improved
+- **SSH State Machine:** Refined handshake logic to handle auxiliary channels (exec) for terminfo deployment before interactive shell startup.
+- **Reliability:** Hardened `ssh_client.c` packet buffer handling and added `_POSIX_C_SOURCE` definitions for better compatibility.
+
 ## [v2.6.8] - Build Polish & Networking API Exposure
 
 ### Added

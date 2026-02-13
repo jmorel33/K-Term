@@ -1,3 +1,6 @@
+#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
+
 /*
  * KTerm SSH Client Reference Implementation
  * -----------------------------------------
@@ -12,7 +15,7 @@
  * - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254) - In Mock Mode
  * - "Bring Your Own Crypto": Pluggable hooks architecture
  * - Graphical Window via Situation
- * - Auto-Terminfo Injection (xterm-256color)
+ * - Auto-Terminfo Injection (kterm/xterm-kitty compatible)
  * - Automation (Triggers) & Scripting via Gateway
  * - Clipboard Integration (OSC 52)
  *
@@ -43,6 +46,9 @@
 
 #define KTERM_SERIALIZE_IMPLEMENTATION
 #include "kt_serialize.h"
+
+// Terminfo Data for Auto-Push
+#include "terminfo_data.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,15 +86,21 @@
 #define SSH_MSG_REQUEST_FAILURE 82
 #define SSH_MSG_CHANNEL_OPEN 90
 #define SSH_MSG_CHANNEL_OPEN_CONFIRMATION 91
+#define SSH_MSG_CHANNEL_OPEN_FAILURE 92
 #define SSH_MSG_CHANNEL_WINDOW_ADJUST 93
 #define SSH_MSG_CHANNEL_DATA 94
+#define SSH_MSG_CHANNEL_EOF 96
+#define SSH_MSG_CHANNEL_CLOSE 97
 #define SSH_MSG_CHANNEL_REQUEST 98
+#define SSH_MSG_CHANNEL_SUCCESS 99
+#define SSH_MSG_CHANNEL_FAILURE 100
 
 typedef enum {
     SSH_STATE_INIT = 0,
     SSH_STATE_VERSION_EXCHANGE,
     SSH_STATE_KEX_INIT,
     SSH_STATE_WAIT_KEX_INIT,
+    SSH_STATE_CHECK_HOSTKEY, // New state to avoid packet loss
     SSH_STATE_NEW_KEYS,
     SSH_STATE_WAIT_NEW_KEYS,
     SSH_STATE_SERVICE_REQUEST,
@@ -98,6 +110,12 @@ typedef enum {
     SSH_STATE_USERAUTH_PUBKEY_SIGN,
     SSH_STATE_USERAUTH_PASSWORD,
     SSH_STATE_WAIT_AUTH_SUCCESS,
+    // Terminfo Push States
+    SSH_STATE_CHANNEL_OPEN_EXEC,
+    SSH_STATE_WAIT_EXEC_OPEN,
+    SSH_STATE_SEND_EXEC_CMD,
+    SSH_STATE_WAIT_EXEC_RESULT,
+    // Interactive Shell States
     SSH_STATE_CHANNEL_OPEN,
     SSH_STATE_WAIT_CHANNEL_OPEN,
     SSH_STATE_PTY_REQ,
@@ -137,6 +155,9 @@ typedef struct {
     uint32_t remote_channel_id;
     bool try_pubkey;
     int socket_fd; // Cached for automation
+
+    // References
+    KTermSession* session_ref;
 
     // Configuration
     bool durable_mode;
@@ -355,6 +376,22 @@ void update_status(const char* msg) {
     snprintf(global_ssh_ctx.status_text, sizeof(global_ssh_ctx.status_text), "%s", msg);
 }
 
+static void save_session_state(MySSHContext* ctx) {
+    if (!ctx->persist_session || !ctx->session_ref) return;
+
+    void* buf = NULL;
+    size_t len = 0;
+    if (KTerm_SerializeSession(ctx->session_ref, &buf, &len)) {
+        FILE* f = fopen(ctx->session_file, "wb");
+        if (f) {
+            fwrite(buf, 1, len, f);
+            fclose(f);
+            printf("[Persist] Session saved to %s\n", ctx->session_file);
+        }
+        free(buf);
+    }
+}
+
 static void put_u32(uint8_t* buf, uint32_t v) {
     buf[0] = (v >> 24) & 0xFF; buf[1] = (v >> 16) & 0xFF; buf[2] = (v >> 8) & 0xFF; buf[3] = v & 0xFF;
 }
@@ -391,10 +428,6 @@ static bool ssh_write_cstring(uint8_t** ptr, size_t* rem, const char* str) {
 static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     if (fd < 0) return 0;
     uint8_t pad_len = 4; // Minimal padding (dummy)
-    // RFC 4253: packet_length (4) + padding_length (1) + payload (len) + padding (pad_len)
-    // payload includes type byte? No, usually payload arg is body.
-    // Let's construct body = type + payload.
-
     uint32_t pkt_len = 1 + 1 + len + pad_len; // 1(pad_len_byte) + 1(type) + body + pad
     uint8_t header[5];
     put_u32(header, pkt_len);
@@ -440,8 +473,9 @@ static int read_next_handshake_packet(MySSHContext* ssh, int fd, uint8_t* out_pa
 static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd) {
     MySSHContext* ssh = (MySSHContext*)ctx;
     ssh->socket_fd = fd; // Store for automation access
-    uint8_t buf[1024];
-    uint8_t scratch[1024];
+    ssh->session_ref = session;
+    uint8_t buf[4096]; // Increased for safety
+    uint8_t scratch[16384]; // Increased for Terminfo payload
     uint8_t* p;
     size_t rem;
     int type;
@@ -464,10 +498,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 if (n > 0) {
                     vbuf[n] = '\0';
                     strncpy(ssh->server_version, vbuf, sizeof(ssh->server_version));
-                    // Check for banner lines (RFC 4253 allows lines before version)
                     if (strncmp(vbuf, "SSH-", 4) != 0) {
-                        // Assume banner line, ignore and wait for version (simplified)
-                        // In real impl, buffer lines until SSH-2.0 is found
+                        // Assume banner line, ignore
                     }
                     update_status("Exchange KEXINIT...");
                     ssh->state = SSH_STATE_KEX_INIT;
@@ -476,28 +508,30 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_KEX_INIT:
-            // Send KEXINIT
-            // [MOCK MODE]: Sending dummy cookie and empty algo lists.
-            // In a real implementation (or libssh mode), this would negotiate algorithms.
             memset(scratch, 0, 16); // Cookie
-            send_packet(fd, SSH_MSG_KEXINIT, scratch, 16); // + empty lists (invalid but skeleton)
+            send_packet(fd, SSH_MSG_KEXINIT, scratch, 16);
             ssh->state = SSH_STATE_WAIT_KEX_INIT;
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_WAIT_KEX_INIT:
             type = read_next_handshake_packet(ssh, fd, buf, sizeof(buf));
             if (type == SSH_MSG_KEXINIT) {
-                // [MOCK MODE]: Simulating ECDH/DH exchange.
-                // Skipped: Parse server algorithms, select curve25519-sha256, generate keypair.
-                update_status("Mocking KEX (Host Key Verification)...");
-                // Simulate Host Key check
-                if (!ssh->show_hostkey_alert) {
-                    ssh->show_hostkey_alert = true;
-                    snprintf(ssh->hostkey_fingerprint, sizeof(ssh->hostkey_fingerprint), "SHA256:MOCK_FINGERPRINT_1234");
-                    return KTERM_SEC_AGAIN; // Stall until accepted
-                }
-                // Assuming accepted for demo
-                ssh->state = SSH_STATE_NEW_KEYS;
+                ssh->state = SSH_STATE_CHECK_HOSTKEY;
+            }
+            return KTERM_SEC_AGAIN;
+
+        case SSH_STATE_CHECK_HOSTKEY:
+            update_status("Mocking KEX (Host Key Verification)...");
+            if (ssh->hostkey_fingerprint[0] == '\0') {
+                 // First time
+                 ssh->show_hostkey_alert = true;
+                 snprintf(ssh->hostkey_fingerprint, sizeof(ssh->hostkey_fingerprint), "SHA256:MOCK_FINGERPRINT_1234");
+                 return KTERM_SEC_AGAIN;
+            } else {
+                 // Fingerprint set, means we prompted.
+                 if (ssh->show_hostkey_alert) return KTERM_SEC_AGAIN; // Still waiting
+                 // Alert cleared -> Accepted
+                 ssh->state = SSH_STATE_NEW_KEYS;
             }
             return KTERM_SEC_AGAIN;
 
@@ -510,7 +544,6 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
         case SSH_STATE_WAIT_NEW_KEYS:
             type = read_next_handshake_packet(ssh, fd, NULL, 0);
             if (type == SSH_MSG_NEWKEYS) {
-                // [MOCK MODE]: Ciphers (AES/ChaCha) and MACs would be initialized here.
                 ssh->state = SSH_STATE_SERVICE_REQUEST;
             }
             return KTERM_SEC_AGAIN;
@@ -531,11 +564,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_USERAUTH_PUBKEY_PROBE:
-            // Skip actual probe for demo, fallback to password immediately if no key logic
-            // But show the state
             update_status("Auth: Probing Pubkey...");
-            // ... Probe logic ...
-            // Fallback
             ssh->state = SSH_STATE_USERAUTH_PASSWORD;
             return KTERM_SEC_AGAIN;
 
@@ -554,13 +583,73 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
         case SSH_STATE_WAIT_AUTH_SUCCESS:
             type = read_next_handshake_packet(ssh, fd, NULL, 0);
             if (type == SSH_MSG_USERAUTH_SUCCESS) {
-                update_status("Auth Success! Opening Channel...");
-                ssh->state = SSH_STATE_CHANNEL_OPEN;
+                update_status("Auth Success! Checking Terminfo...");
+                // Start Terminfo Push Phase
+                ssh->state = SSH_STATE_CHANNEL_OPEN_EXEC;
             } else if (type == SSH_MSG_USERAUTH_FAILURE) {
                 update_status("Auth Failed!");
                 return KTERM_SEC_ERROR;
             }
             return KTERM_SEC_AGAIN;
+
+        // --- Terminfo Push Phases ---
+        case SSH_STATE_CHANNEL_OPEN_EXEC:
+            p = scratch; rem = sizeof(scratch);
+            ssh_write_cstring(&p, &rem, "session");
+            ssh_write_u32(&p, &rem, ssh->local_channel_id + 1); // Use ID+1 for Exec
+            ssh_write_u32(&p, &rem, 2097152);
+            ssh_write_u32(&p, &rem, 32768);
+            send_packet(fd, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
+            ssh->state = SSH_STATE_WAIT_EXEC_OPEN;
+            return KTERM_SEC_AGAIN;
+
+        case SSH_STATE_WAIT_EXEC_OPEN:
+            type = read_next_handshake_packet(ssh, fd, buf, sizeof(buf));
+            if (type == SSH_MSG_CHANNEL_OPEN_CONFIRMATION) {
+                ssh->remote_channel_id = get_u32(buf);
+                ssh->state = SSH_STATE_SEND_EXEC_CMD;
+            } else if (type == SSH_MSG_CHANNEL_OPEN_FAILURE) {
+                // Failed, skip to Shell
+                update_status("Terminfo Push Skipped (Channel Fail)");
+                ssh->state = SSH_STATE_CHANNEL_OPEN;
+            }
+            return KTERM_SEC_AGAIN;
+
+        case SSH_STATE_SEND_EXEC_CMD:
+            {
+                update_status("Pushing Terminfo...");
+                p = scratch; rem = sizeof(scratch);
+                ssh_write_u32(&p, &rem, ssh->remote_channel_id);
+                ssh_write_cstring(&p, &rem, "exec");
+                ssh_write_bool(&p, &rem, true); // Want reply
+
+                char cmd[12000]; // Large buffer for base64
+                // kterm_terminfo_base64 is ~2KB, so 12KB is plenty
+                snprintf(cmd, sizeof(cmd), "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
+
+                ssh_write_cstring(&p, &rem, cmd);
+                send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+                ssh->state = SSH_STATE_WAIT_EXEC_RESULT;
+            }
+            return KTERM_SEC_AGAIN;
+
+        case SSH_STATE_WAIT_EXEC_RESULT:
+            type = read_next_handshake_packet(ssh, fd, buf, sizeof(buf));
+            // Just consume until Close or EOF or Failure
+            if (type == SSH_MSG_CHANNEL_CLOSE || type == SSH_MSG_CHANNEL_EOF) {
+                // Done
+                p = scratch; rem = sizeof(scratch);
+                ssh_write_u32(&p, &rem, ssh->remote_channel_id);
+                send_packet(fd, SSH_MSG_CHANNEL_CLOSE, scratch, p - scratch);
+                ssh->state = SSH_STATE_CHANNEL_OPEN; // Proceed to Shell
+            } else if (type == SSH_MSG_CHANNEL_FAILURE) {
+                // Command failed? proceed
+                ssh->state = SSH_STATE_CHANNEL_OPEN;
+            }
+            // Ignore other packets (SUCCESS, DATA)
+            return KTERM_SEC_AGAIN;
+
+        // --- Interactive Shell ---
 
         case SSH_STATE_CHANNEL_OPEN:
             p = scratch; rem = sizeof(scratch);
@@ -586,7 +675,12 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, ssh->remote_channel_id);
             ssh_write_cstring(&p, &rem, "pty-req");
             ssh_write_bool(&p, &rem, true); // Want reply
-            ssh_write_cstring(&p, &rem, ssh->term_type[0] ? ssh->term_type : "xterm-256color");
+
+            // Auto-detect term type: use kterm unless explicit override or default
+            const char* ttype = ssh->term_type[0] ? ssh->term_type : "kterm";
+            if (strcmp(ttype, "xterm-256color") == 0) ttype = "kterm"; // Upgrade default
+
+            ssh_write_cstring(&p, &rem, ttype);
             ssh_write_u32(&p, &rem, 80); // Width chars
             ssh_write_u32(&p, &rem, 24); // Height chars
             ssh_write_u32(&p, &rem, 0);
@@ -600,7 +694,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_cstring(&p, &rem, "env");
             ssh_write_bool(&p, &rem, false);
             ssh_write_cstring(&p, &rem, "TERM");
-            ssh_write_cstring(&p, &rem, "xterm-256color");
+            ssh_write_cstring(&p, &rem, ttype);
             send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
 
             ssh->state = SSH_STATE_SHELL;
@@ -657,6 +751,10 @@ static int my_ssh_read(void* ctx, int fd, char* buf, size_t len) {
                 return to_copy;
             }
         }
+        else if (type == SSH_MSG_DISCONNECT) {
+            // Disconnect detected
+            save_session_state(ssh);
+        }
 
         // Consume non-data packet
         memmove(ssh->in_buf, ssh->in_buf + total_frame, ssh->in_len - total_frame);
@@ -679,11 +777,12 @@ static int my_ssh_write(void* ctx, int fd, const char* buf, size_t len) {
 }
 
 static void my_ssh_close(void* ctx) {
-    // Cleanup
+    MySSHContext* ssh = (MySSHContext*)ctx;
+    save_session_state(ssh);
 }
 
 // --- Config Parser ---
-
+// ... (Unchanged) ...
 typedef struct {
     char host_pattern[256];
     char hostname[256];
@@ -1110,6 +1209,10 @@ int main(int argc, char** argv) {
             if (strstr(status_buf, "STATE=DISCONNECTED") || strstr(status_buf, "STATE=ERROR")) {
                 time_t now = time(NULL);
                 if (now - global_ssh_ctx.last_reconnect_attempt > 3) {
+
+                    // Save session before reconnecting/clearing
+                    save_session_state(&global_ssh_ctx);
+
                     global_ssh_ctx.last_reconnect_attempt = now;
                     update_status("Reconnecting (Durable)...");
 
@@ -1143,19 +1246,7 @@ int main(int argc, char** argv) {
     KTerm_Net_Disconnect(term, session);
 
     // Persist session state on exit
-    if (global_ssh_ctx.persist_session) {
-        void* buf = NULL;
-        size_t len = 0;
-        if (KTerm_SerializeSession(session, &buf, &len)) {
-            FILE* f = fopen(global_ssh_ctx.session_file, "wb");
-            if (f) {
-                fwrite(buf, 1, len, f);
-                fclose(f);
-                printf("Session saved to %s\n", global_ssh_ctx.session_file);
-            }
-            free(buf);
-        }
-    }
+    save_session_state(&global_ssh_ctx);
 
     KTerm_Destroy(term);
     KTerm_Platform_Shutdown();
