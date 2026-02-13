@@ -1,14 +1,30 @@
-// KTerm Telnet Client Example
-// A full-featured, graphical Telnet client showcasing KTerm's networking and rendering capabilities.
-//
-// Features:
-// - Graphical Window (via Situation) with Resizing
-// - Telnet Negotiation: NAWS (Window Size), TTYPE (Terminal Type), ECHO, SGA
-// - CRT Retro Effects (Toggle with F12)
-// - Status Bar with Connection Info
-// - Auto-connects to 'towel.blinkenlights.nl' for Star Wars fun
-//
-// Compile: gcc telnet_client.c -o telnet_client -lkterm -lsituation -lm
+/*
+ * KTerm Telnet Client Example
+ * ---------------------------
+ * A full-featured, graphical Telnet client showcasing KTerm's networking and rendering capabilities.
+ *
+ * Features:
+ * - Graphical Window (via Situation) with Resizing
+ * - Telnet Negotiation: NAWS (Window Size), TTYPE (Terminal Type), ECHO, SGA
+ * - CRT Retro Effects (Toggle with F12)
+ * - Status Bar with Connection Info
+ * - Auto-connects to 'towel.blinkenlights.nl' for Star Wars fun
+ *
+ * Build Instructions:
+ *   mkdir build && cd build
+ *   cmake ..
+ *   make telnet_client
+ *
+ *   OR manually:
+ *   gcc telnet_client.c -o telnet_client -lsituation -lm
+ *
+ * Usage:
+ *   ./telnet_client [host] [port]
+ *   Default: towel.blinkenlights.nl 23
+ *
+ * Controls:
+ *   F12: Toggle CRT Effects (Scanlines, Curvature, Glow)
+ */
 
 #define KTERM_IMPLEMENTATION
 #include "kterm.h"
@@ -207,7 +223,7 @@ int main(int argc, char** argv) {
         .window_width = 1024,
         .window_height = 768,
         .window_title = "K-Term Telnet Client",
-        .initial_active_window_flags = KTERM_WINDOW_STATE_RESIZABLE | KTERM_WINDOW_STATE_VSYNC_HINT
+        .initial_active_window_flags = KTERM_WINDOW_STATE_RESIZABLE
     };
 
     if (KTerm_Platform_Init(0, NULL, &init_info) != KTERM_SUCCESS) {

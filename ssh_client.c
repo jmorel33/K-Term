@@ -1,25 +1,38 @@
-// KTerm SSH Client Reference Implementation
-// A graphical, standalone SSH-2 client demonstrating KTerm's custom security transport layer.
-//
-// KTerm SSH Client Reference Implementation
-// A graphical, standalone SSH-2 client.
-//
-// MODES:
-// 1. PRODUCTION (KTERM_USE_LIBSSH): Uses libssh for real, secure connections.
-// 2. REFERENCE/MOCK: Uses internal stubbed crypto for testing/educational purposes.
-//    ⚠️ WARNING: MOCK MODE IS NOT SECURE. DO NOT USE FOR REAL SENSITIVE CONNECTIONS.
-//
-// Features:
-// - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254) - In Mock Mode
-// - "Bring Your Own Crypto": Pluggable hooks architecture
-// - Graphical Window via Situation
-// - Auto-Terminfo Injection (xterm-256color)
-// - Automation (Triggers) & Scripting via Gateway
-// - Clipboard Integration (OSC 52)
-//
-// Usage: ./ssh_client [user@]host [port]
-// Compile (Mock): gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm
-// Compile (LibSSH): gcc ssh_client.c -o ssh_client -lkterm -lsituation -lm -lssh -DKTERM_USE_LIBSSH
+/*
+ * KTerm SSH Client Reference Implementation
+ * -----------------------------------------
+ * A graphical, standalone SSH-2 client demonstrating KTerm's custom security transport layer.
+ *
+ * MODES:
+ * 1. PRODUCTION (KTERM_USE_LIBSSH): Uses libssh for real, secure connections.
+ * 2. REFERENCE/MOCK (Default): Uses internal stubbed crypto for testing/educational purposes.
+ *    ⚠️ WARNING: MOCK MODE IS NOT SECURE. DO NOT USE FOR REAL SENSITIVE CONNECTIONS.
+ *
+ * Features:
+ * - Full SSH-2 Protocol State Machine (RFC 4253/4252/4254) - In Mock Mode
+ * - "Bring Your Own Crypto": Pluggable hooks architecture
+ * - Graphical Window via Situation
+ * - Auto-Terminfo Injection (xterm-256color)
+ * - Automation (Triggers) & Scripting via Gateway
+ * - Clipboard Integration (OSC 52)
+ *
+ * Build Instructions:
+ *   mkdir build && cd build
+ *   cmake ..
+ *   make ssh_client
+ *
+ *   OR manually:
+ *   gcc ssh_client.c -o ssh_client -lsituation -lm
+ *   (For LibSSH mode, add -lssh -DKTERM_USE_LIBSSH)
+ *
+ * Usage:
+ *   ./ssh_client [user@]host [port]
+ *   ./ssh_client --config my_config
+ *
+ * Configuration:
+ *   Supports a subset of ssh_config (Host, HostName, User, Port).
+ *   Plus 'Trigger' directive for automation.
+ */
 
 #define KTERM_IMPLEMENTATION
 #include "kterm.h"

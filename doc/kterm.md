@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.7
+# kterm.h - Technical Reference Manual v2.6.8
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.7)](#13-known-limitations-v267)
+    *   [1.3. Known Limitations (v2.6.8)](#13-known-limitations-v268)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -172,9 +172,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.7)
+### 1.3. Known Limitations (v2.6.8)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.7 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.8 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
@@ -1493,6 +1493,17 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;responsetime;host=...`: Measures latency and jitter.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
+
+#### 4.23.10. Standalone Networking API (kt_net.h)
+
+While Gateway commands provide easy access, `kt_net.h` offers a rich C API for deeper integration without relying on escape sequences.
+
+*   `KTerm_Net_Init(term)`: Initializes the network subsystem.
+*   `KTerm_Net_Connect(term, session, host, port, user, pass)`: Initiates an asynchronous connection.
+*   `KTerm_Net_SetAutoReconnect(term, session, enable, max_retries, delay_ms)`: Configures automatic connection retry logic for transient errors (e.g., resolving failures).
+*   `KTerm_Net_SetCallbacks(term, session, callbacks)`: Registers hooks for data reception (`on_data`), connection state changes (`on_connect`, `on_disconnect`), and error reporting (`on_error`).
+*   `KTerm_Net_SetSecurity(term, session, security)`: Plugs in custom cryptographic providers (TLS/SSH) via function pointers.
+*   `KTerm_Net_SetProtocol(term, session, proto)`: Selects the active protocol mode: `KTERM_NET_PROTO_RAW` (TCP), `KTERM_NET_PROTO_FRAMED` (Binary Packet), or `KTERM_NET_PROTO_TELNET` (RFC 854).
 
 ### 4.24. Session Persistence
 

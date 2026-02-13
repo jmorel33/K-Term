@@ -126,6 +126,7 @@ void KTerm_Net_SetCallbacks(KTerm* term, KTermSession* session, KTermNetCallback
 void KTerm_Net_SetSecurity(KTerm* term, KTermSession* session, KTermNetSecurity security);
 void KTerm_Net_SetProtocol(KTerm* term, KTermSession* session, KTermNetProtocol protocol);
 void KTerm_Net_SetKeepAlive(KTerm* term, KTermSession* session, bool enable, int idle_sec);
+void KTerm_Net_SetAutoReconnect(KTerm* term, KTermSession* session, bool enable, int max_retries, int delay_ms);
 intptr_t KTerm_Net_GetSocket(KTerm* term, KTermSession* session); // Returns socket_fd or -1
 
 // Session Control
@@ -277,6 +278,11 @@ typedef struct {
     bool keep_alive;
     int keep_alive_idle;
 
+    // Auto-Reconnect
+    bool auto_reconnect;
+    int max_retries;
+    int retry_delay_ms;
+
 #ifndef KTERM_DISABLE_TELNET
     // Telnet State
     TelnetParseState telnet_state;
@@ -378,6 +384,8 @@ static KTermNetSession* KTerm_Net_CreateContext(KTermSession* session) {
         net->ssh_channel = NULL;
 #endif
         net->target_session_index = -1;
+        net->max_retries = 3; // Default
+        net->retry_delay_ms = 1000;
         session->user_data = net;
     }
     return net;
@@ -467,15 +475,18 @@ static void KTerm_Net_TriggerError(KTerm* term, KTermSession* session, KTermNetS
     if (net) snprintf(net->last_error, sizeof(net->last_error), "%s", msg);
 
     // Retry Logic for Connection Errors
-    if (net->state == KTERM_NET_STATE_CONNECTING || net->state == KTERM_NET_STATE_RESOLVING) {
-        if (net->retry_count < 3) {
+    if ((net->state == KTERM_NET_STATE_CONNECTING || net->state == KTERM_NET_STATE_RESOLVING) && net->auto_reconnect) {
+        if (net->retry_count < net->max_retries) {
             net->retry_count++;
             net->state = KTERM_NET_STATE_RESOLVING;
             if (IS_VALID_SOCKET(net->socket_fd)) {
                 CLOSE_SOCKET(net->socket_fd);
                 net->socket_fd = INVALID_SOCKET;
             }
-            KTerm_Net_Log(term, (int)(session - term->sessions), "Retrying...");
+            char retry_msg[64];
+            snprintf(retry_msg, sizeof(retry_msg), "Retrying (%d/%d)...", net->retry_count, net->max_retries);
+            KTerm_Net_Log(term, (int)(session - term->sessions), retry_msg);
+
             // Reset start time to give retry a fresh window
             net->connect_start_time = time(NULL);
             return;
@@ -747,6 +758,16 @@ void KTerm_Net_SetKeepAlive(KTerm* term, KTermSession* session, bool enable, int
     if (net) {
         net->keep_alive = enable;
         net->keep_alive_idle = idle_sec;
+    }
+}
+
+void KTerm_Net_SetAutoReconnect(KTerm* term, KTermSession* session, bool enable, int max_retries, int delay_ms) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (net) {
+        net->auto_reconnect = enable;
+        net->max_retries = (max_retries > 0) ? max_retries : 3;
+        net->retry_delay_ms = (delay_ms > 0) ? delay_ms : 1000;
     }
 }
 
