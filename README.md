@@ -617,7 +617,7 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
 
 ```mermaid
 stateDiagram-v2
-    subgraph NetSession [KTermNetSession (Main State Machine)]
+    state "KTermNetSession (Main State Machine)" as NetSession {
         [*] --> DISCONNECTED
         DISCONNECTED --> RESOLVING : Connect()
         RESOLVING --> CONNECTING : DNS OK
@@ -630,9 +630,9 @@ stateDiagram-v2
             IDLE --> SENDING : Write()
             IDLE --> RECEIVING : Read()
         }
-    end
+    }
 
-    subgraph AsyncDiagnostics [Async Diagnostics Suite (Non-Blocking)]
+    state "Async Diagnostics Suite (Non-Blocking)" as AsyncDiagnostics {
         state Speedtest {
             [*] --> AUTO_SELECT
             AUTO_SELECT --> LATENCY
@@ -653,7 +653,7 @@ stateDiagram-v2
         state Traceroute
         state PortScan
         state Whois
-    end
+    }
 
     NetSession --> AsyncDiagnostics : Manages Contexts
 ```
