@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 14
+#define KTERM_VERSION_PATCH 15
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.6.14"
+#define KTERM_VERSION_STRING "2.6.15"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -4342,25 +4342,38 @@ void ExecuteDECRQLP(KTerm* term, KTermSession* session) {
 
     char response[64]; // Increased buffer size for longer response
 
-    if (!session->locator_enabled || session->mouse.cursor_x < 1 || session->mouse.cursor_y < 1) {
-        // Locator not enabled or position unknown, respond with "no locator"
-        snprintf(response, sizeof(response), "\x1B[0!|");
+    if (!session->locator_enabled) {
+        // Locator not enabled, respond with "locator unavailable" (Pe=0)
+        // Format: CSI Pe & w
+        snprintf(response, sizeof(response), "\x1B[0&w");
     } else {
-        // Locator enabled and position is known, report position.
-        // Format: CSI Pe;Pr;Pc;Pp!|
-        // Pe = 1 (request response)
-        // Pr = row
-        // Pc = column
-        // Pp = page (hardcoded to 1)
+        // Locator enabled, report status (Pe=2 'Event')
+        // Format: CSI Pe ; Pb ; Pr ; Pc ; Pp & w
+
+        int buttons = 0;
+        // DEC Button Mapping:
+        // Bit 0: Button 1 (Left)
+        // Bit 1: Button 2 (Middle)
+        // Bit 2: Button 3 (Right)
+        // Bit 3: Button 4
+        if (session->mouse.buttons[0]) buttons |= 1;
+        if (session->mouse.buttons[1]) buttons |= 2;
+        if (session->mouse.buttons[2]) buttons |= 4;
+
         int row = session->mouse.cursor_y;
         int col = session->mouse.cursor_x;
 
+        // Adjust for split screen if necessary
         if (term->split_screen_active && term->active_session == term->session_bottom) {
             row -= (term->split_row + 1);
         }
 
-        int page = 1; // Page memory not implemented, so hardcode to 1.
-        snprintf(response, sizeof(response), "\x1B[1;%d;%d;%d!|", row, col, page);
+        // Safety clamp
+        if (row < 1) row = 1;
+        if (col < 1) col = 1;
+
+        int page = 1;
+        snprintf(response, sizeof(response), "\x1B[2;%d;%d;%d;%d&w", buttons, row, col, page);
     }
 
     KTerm_QueueResponse(term, response);
@@ -15759,10 +15772,6 @@ bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* ev
              // But for now, since KTerm_QueueResponse is internal/public, we can just defer to caller?
              // No, the requirement is "KTERM_EVENT_MOUSE: Update state + generate reports".
              // So we should implement generation here.
-
-             // TODO: Implement full mouse report generation here to decouple from Sit.
-             // For now, if KTermSit is still generating, this might double report if we implement it.
-             // I will implement it here and remove it from KTermSit in the next step.
 
              {
                 KTermMouseEvent m = event->mouse;
