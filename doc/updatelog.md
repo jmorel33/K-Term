@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.19] - Diagnostics Usability & Enhancements
+- **Help Command:** Added `EXT;net;help` Gateway command to list available network diagnostics commands and their parameters.
+- **Continuous Traceroute:** Extended `traceroute` command with `continuous=1` parameter for MTR-like indefinite looping.
+- **Benchmarks:** Added `tests/benchmark_diagnostics.c` to measure overhead of Speedtest Graph Rendering and Traceroute Gateway Parsing.
+- **Documentation:** Updated technical reference manual with usage examples for new diagnostics features.
+
 ## [v2.6.18] - Diagnostics Suite Completion & Visualization
 - **Diagnostics Suite**: Completed the full implementation of the Diagnostics Suite v2.6.18.
   - **Speedtest Visualization**: Added `graph=1` support to `EXT;net;speedtest`, enabling ASCII-based visual progress bars and jitter graphs.
