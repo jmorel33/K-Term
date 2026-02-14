@@ -1,9 +1,15 @@
 # K-Term Update Log
 
+## [v2.6.15] - Encryption & Input Reporting
+- **SSH Encryption**: Replaced placeholder encryption/decryption logic in `example/ssh_sodium.c` with functional `libsodium` integration (`crypto_aead_chacha20poly1305_ietf`). Implemented full sequence number tracking and AAD verification for SSH packet length integrity.
+- **Mouse Reporting**: Implemented `DECRQLP` (Request Locator Position) in `kterm.h`, enabling host applications to query the exact mouse position and button state using the DEC Locator protocol (`CSI ... & w`).
+- **Telnet Negotiation**: Added support for `NEW-ENVIRON` option negotiation in `kt_net.h`, improving compatibility with advanced Telnet servers.
+- **Cleanup**: Removed stale TODO comments and placeholders across the networking stack.
+
 ## [v2.6.14] - Performance & Network Hardening
 - **Resize Optimization:** Optimized buffer initialization during resize operations (`KTerm_ApplyResizeOp`) to eliminate redundant O(N) writes. Implemented targeted initialization for gap and margin regions, significantly reducing memory bandwidth usage during resize events (especially with large scrollback history).
 - **Network Hardening:** Added explicit `select` error handling and connection timeout logic to the asynchronous `WHOIS` query implementation (`KTerm_Net_ProcessWhois`) to prevent state machine hangs during network failures.
-- **BiDi Parity:** Documented known limitation regarding lack of `fribidi` parity affecting complex Right-to-Left text rendering.
+- **BiDi Parity:** Documented known limitation regarding lack of `fribidi` parity affecting complex Right-to-Left text rendering (e.g., Arabic, Hebrew).
 
 ## [v2.6.13] - Speedtest Enhancements: Auto-Server & Jitter
 - **Auto-Server Selection:** `speedtest_client.c` now fetches the server list from `c.speedtest.net` and auto-selects a server, with fallback to default.

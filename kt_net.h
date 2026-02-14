@@ -1922,9 +1922,30 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
                                             net->callbacks.on_telnet_sb(term, session, net->sb_option, net->sb_buffer + 1, safe_len - 1);
                                         }
                                     }
-                                    // Default NEW-ENVIRON handling (internal stub)
+
+                                    // Default NEW-ENVIRON handling
                                     if (net->sb_option == 39) { // NEW-ENVIRON
-                                        // Simple Parsing logic could go here or user callback
+                                        if (net->sb_len > 1 && net->sb_buffer[1] == 1) { // SEND (01)
+                                            // Reply IS: IAC SB NEW-ENVIRON IS VAR "USER" VAL "user" IAC SE
+                                            // IS = 0, VAR = 0, VAL = 1
+                                            unsigned char resp_head[] = { KTERM_TELNET_IAC, KTERM_TELNET_SB, 39, 0 }; // IS
+                                            for(int k=0; k<4; k++) { net->tx_buffer[net->tx_head] = resp_head[k]; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; if(net->tx_head==net->tx_tail) net->tx_tail=(net->tx_tail+1)%NET_BUFFER_SIZE; }
+
+                                            // VAR "USER"
+                                            unsigned char var_user[] = { 0, 'U', 'S', 'E', 'R' };
+                                            for(int k=0; k<5; k++) { net->tx_buffer[net->tx_head] = var_user[k]; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; if(net->tx_head==net->tx_tail) net->tx_tail=(net->tx_tail+1)%NET_BUFFER_SIZE; }
+
+                                            // VAL "name"
+                                            unsigned char val_tag = 1;
+                                            net->tx_buffer[net->tx_head] = val_tag; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; if(net->tx_head==net->tx_tail) net->tx_tail=(net->tx_tail+1)%NET_BUFFER_SIZE;
+
+                                            const char* u = net->user[0] ? net->user : "guest";
+                                            for(int k=0; u[k]; k++) { net->tx_buffer[net->tx_head] = u[k]; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; if(net->tx_head==net->tx_tail) net->tx_tail=(net->tx_tail+1)%NET_BUFFER_SIZE; }
+
+                                            // IAC SE
+                                            unsigned char resp_tail[] = { KTERM_TELNET_IAC, KTERM_TELNET_SE };
+                                            for(int k=0; k<2; k++) { net->tx_buffer[net->tx_head] = resp_tail[k]; net->tx_head = (net->tx_head + 1) % NET_BUFFER_SIZE; if(net->tx_head==net->tx_tail) net->tx_tail=(net->tx_tail+1)%NET_BUFFER_SIZE; }
+                                        }
                                     }
                                 }
                                 net->telnet_state = TELNET_STATE_NORMAL;

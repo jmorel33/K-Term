@@ -103,6 +103,11 @@ typedef struct {
     uint8_t hs_rx_buf[4096];
     int hs_rx_len;
 
+    // Decrypted Data Buffer (for partial reads)
+    uint8_t read_buf[8192];
+    int read_len;
+    int read_pos;
+
     // Session State
     uint32_t window_size;
     uint32_t local_channel_id;
@@ -146,6 +151,11 @@ static uint32_t get_u32(const uint8_t* buf) {
     return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
 }
 
+static void put_u64(uint8_t* buf, uint64_t v) {
+    put_u32(buf, (uint32_t)(v >> 32));
+    put_u32(buf + 4, (uint32_t)(v & 0xFFFFFFFF));
+}
+
 // Send Framed Packet
 static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     if (fd < 0) return 0;
@@ -174,14 +184,22 @@ static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
     // 2. Encrypt if keys negotiated
     if (global_ssh_ctx.encrypted) {
 #ifdef HAVE_LIBSODIUM
-        // crypto_stream_chacha20_xor(...) on packet + 4 (length is usually encrypted too in some modes, or not)
-        // Note: Standard SSH uses specific modes (ctr) or AEAD (chacha20-poly1305)
-        // If chacha20-poly1305@openssh.com:
-        //   packet length is encrypted with a separate header key
-        //   payload is encrypted with main key + mac tag appended
+        unsigned char nonce[crypto_aead_chacha20poly1305_ietf_NPUBBYTES];
+        memset(nonce, 0, sizeof(nonce));
+        put_u64(nonce + 4, global_ssh_ctx.seq_c2s);
 
-        // This is a placeholder for where the Sodium call goes
-        // crypto_aead_chacha20poly1305_ietf_encrypt(...)
+        unsigned long long clen;
+        // Encrypt payload (packet body) in-place
+        // packet[0..3] is length (AAD), packet[4...] is body
+        if (crypto_aead_chacha20poly1305_ietf_encrypt(packet + 4, &clen,
+                                                      packet + 4, pkt_len,
+                                                      packet, 4,
+                                                      NULL, nonce, global_ssh_ctx.enc_key_c2s) == 0) {
+             pkt_len += 16; // Tag appended
+             global_ssh_ctx.seq_c2s++;
+        }
+#else
+        // Mock Encryption (No-op or XOR)
 #endif
     }
 
@@ -198,9 +216,28 @@ static int read_next_handshake_packet(MySSHContext* ssh, int fd, uint8_t* out_pa
     uint32_t pkt_len = get_u32(ssh->hs_rx_buf);
     int total_frame = 4 + pkt_len;
 
+    if (ssh->encrypted) total_frame += 16; // Add tag length
+
     if (ssh->hs_rx_len < total_frame) return -1;
 
-    // Decrypt would happen here if encrypted
+    // Decrypt if encrypted
+    if (ssh->encrypted) {
+#ifdef HAVE_LIBSODIUM
+        unsigned char nonce[crypto_aead_chacha20poly1305_ietf_NPUBBYTES];
+        memset(nonce, 0, sizeof(nonce));
+        put_u64(nonce + 4, ssh->seq_s2c);
+
+        unsigned long long mlen;
+        if (crypto_aead_chacha20poly1305_ietf_decrypt(ssh->hs_rx_buf + 4, &mlen,
+                                                      NULL,
+                                                      ssh->hs_rx_buf + 4, pkt_len + 16,
+                                                      ssh->hs_rx_buf, 4,
+                                                      nonce, ssh->enc_key_s2c) != 0) {
+             return -1; // Decryption failure
+        }
+        ssh->seq_s2c++;
+#endif
+    }
 
     uint8_t pad_len = ssh->hs_rx_buf[4];
     uint8_t type = ssh->hs_rx_buf[5];
@@ -317,19 +354,148 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 }
 
 static int my_ssh_read(void* ctx, int fd, char* buf, size_t len) {
-    // Decrypt and read loop
-    // crypto_stream_chacha20_xor(...)
-    return recv(fd, buf, len, 0);
+    MySSHContext* ssh = (MySSHContext*)ctx;
+
+    // 0. Serve from decrypted buffer if available
+    if (ssh->read_len > 0) {
+        size_t available = ssh->read_len - ssh->read_pos;
+        size_t to_copy = (len < available) ? len : available;
+        memcpy(buf, ssh->read_buf + ssh->read_pos, to_copy);
+        ssh->read_pos += to_copy;
+        if (ssh->read_pos >= ssh->read_len) {
+            ssh->read_len = 0;
+            ssh->read_pos = 0;
+        }
+        return to_copy;
+    }
+
+    // 1. Read from network into assembly buffer
+    if (ssh->in_len < sizeof(ssh->in_buf)) {
+        ssize_t n = recv(fd, ssh->in_buf + ssh->in_len, sizeof(ssh->in_buf) - ssh->in_len, 0);
+        if (n > 0) ssh->in_len += n;
+        else if (n == 0) return -1; // EOF
+        // Non-blocking handling: if n < 0 and EAGAIN, continue processing buffer
+    }
+
+    // 2. Process Packets
+    while (ssh->in_len >= 4) {
+        uint32_t pkt_len = get_u32(ssh->in_buf);
+
+        // Security: DoS Protection (Packet size limit)
+        if (pkt_len > 35000) return -1; // Max SSH packet is usually 35k
+
+        uint64_t total_frame = 4 + pkt_len; // Use 64-bit to prevent overflow
+        if (ssh->encrypted) total_frame += 16;
+
+        if (total_frame > sizeof(ssh->in_buf)) return -1; // Buffer too small for packet
+        if (ssh->in_len < total_frame) break; // Need more data
+
+        // Decrypt
+        if (ssh->encrypted) {
+#ifdef HAVE_LIBSODIUM
+            unsigned char nonce[crypto_aead_chacha20poly1305_ietf_NPUBBYTES];
+            memset(nonce, 0, sizeof(nonce));
+            put_u64(nonce + 4, ssh->seq_s2c);
+
+            unsigned long long mlen;
+            if (crypto_aead_chacha20poly1305_ietf_decrypt(ssh->in_buf + 4, &mlen,
+                                                          NULL,
+                                                          ssh->in_buf + 4, pkt_len + 16,
+                                                          ssh->in_buf, 4,
+                                                          nonce, ssh->enc_key_s2c) != 0) {
+                 return -1; // Crypto Fail
+            }
+            ssh->seq_s2c++;
+#endif
+        }
+
+        uint8_t type = ssh->in_buf[5]; // [Len:4][PadLen:1][Type:1]
+
+        // Handle Channel Data
+        if (type == SSH_MSG_CHANNEL_DATA) {
+            // Payload: [Channel:4][DataLen:4][Data...]
+            // Offset: 4(Len)+1(Pad)+1(Type) = 6.
+            // Body starts at 6.
+            // Body: [Channel:4][StrLen:4][Str...]
+            if (total_frame >= 14) {
+                uint32_t data_len = get_u32(ssh->in_buf + 10);
+
+                // Security: Bounds Check
+                // 14 header bytes + data_len must <= total_frame (minus encryption overhead if any, but pkt_len includes it?)
+                // pkt_len = pad_len(1) + type(1) + payload + padding
+                // payload = [Channel:4][StrLen:4][Data]
+                // So total plaintext size = pkt_len + 4 (length field)
+                // 14 = 4(Len)+1(Pad)+1(Type)+4(Chan)+4(StrLen)
+                // We must ensure 14 + data_len <= 4 + pkt_len
+
+                if (14 + data_len <= 4 + pkt_len) {
+                    const uint8_t* data_ptr = ssh->in_buf + 14;
+
+                    // Buffer decrypted data
+                    size_t space = sizeof(ssh->read_buf) - ssh->read_len;
+                    if (data_len <= space) {
+                        memcpy(ssh->read_buf + ssh->read_len, data_ptr, data_len);
+                        ssh->read_len += data_len;
+                    } else {
+                        // Buffer full - drop or error?
+                        // For robustness in this example, we return error.
+                        return -1;
+                    }
+                } else {
+                    return -1; // Malformed packet
+                }
+            }
+        }
+
+        // Consume packet
+        memmove(ssh->in_buf, ssh->in_buf + total_frame, ssh->in_len - total_frame);
+        ssh->in_len -= total_frame;
+    }
+
+    // Serve buffered data if any was added
+    if (ssh->read_len > 0) {
+        size_t available = ssh->read_len - ssh->read_pos;
+        size_t to_copy = (len < available) ? len : available;
+        memcpy(buf, ssh->read_buf + ssh->read_pos, to_copy);
+        ssh->read_pos += to_copy;
+        if (ssh->read_pos >= ssh->read_len) {
+            ssh->read_len = 0;
+            ssh->read_pos = 0;
+        }
+        return to_copy;
+    }
+
+    return 0; // No data available yet
 }
 
 static int my_ssh_write(void* ctx, int fd, const char* buf, size_t len) {
-    // Encrypt and write loop
-    return send(fd, buf, len, 0);
+    MySSHContext* ssh = (MySSHContext*)ctx;
+    // Wrap in SSH_MSG_CHANNEL_DATA
+    // 94 (SSH_MSG_CHANNEL_DATA) + Recipient Channel (4) + Data Len (4) + Data
+    uint8_t payload[8192];
+
+    put_u32(payload, ssh->remote_channel_id);
+    put_u32(payload + 4, (uint32_t)len);
+
+    size_t copy_len = len;
+    if (copy_len > sizeof(payload) - 8) copy_len = sizeof(payload) - 8;
+    memcpy(payload + 8, buf, copy_len);
+
+    send_packet(fd, SSH_MSG_CHANNEL_DATA, payload, 8 + copy_len);
+    return copy_len;
 }
 
 static void my_ssh_close(void* ctx) {
     // Cleanup sodium
-    // sodium_memzero(...)
+#ifdef HAVE_LIBSODIUM
+    MySSHContext* ssh = (MySSHContext*)ctx;
+    sodium_memzero(ssh->enc_key_c2s, sizeof(ssh->enc_key_c2s));
+    sodium_memzero(ssh->enc_key_s2c, sizeof(ssh->enc_key_s2c));
+    sodium_memzero(ssh->mac_key_c2s, sizeof(ssh->mac_key_c2s));
+    sodium_memzero(ssh->mac_key_s2c, sizeof(ssh->mac_key_s2c));
+    sodium_memzero(ssh->kex_sk, sizeof(ssh->kex_sk));
+    sodium_memzero(ssh->shared_secret, sizeof(ssh->shared_secret));
+#endif
 }
 
 int main(int argc, char** argv) {
