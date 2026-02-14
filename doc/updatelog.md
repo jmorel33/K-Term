@@ -1,5 +1,17 @@
 # K-Term Update Log
 
+## [v2.6.18] - Diagnostics Suite Completion & Visualization
+- **Diagnostics Suite**: Completed the full implementation of the Diagnostics Suite v2.6.18.
+  - **Speedtest Visualization**: Added `graph=1` support to `EXT;net;speedtest`, enabling ASCII-based visual progress bars and jitter graphs.
+  - **Connections**: Implemented `EXT;net;connections` to list all active network sessions and their status (State, Host, Port).
+  - **HttpProbe**: Implemented `EXT;net;httpprobe` for detailed HTTP timing diagnostics (DNS, TCP, TTFB, Download).
+- **Networking API**: Added `KTerm_Net_DumpConnections` to `kt_net.h` with robust safety checks for exposing active connection state.
+- **Verification**:
+  - Renamed `tests/verify_diagnostics.c` to `tests/verify_suite.c` per AGENTS.md instructions.
+  - Verified all features pass (Connections OK, HttpProbe OK+ACK, Speedtest Graph OK).
+  - Verified CMake build and tests pass.
+- **Examples**: Updated `example/speedtest_client.c` and `example/ssh_sodium.c` with version comments.
+
 ## [v2.6.17] - HTTP Probe Diagnostic Tool
 - **HTTP Probe**: Added `EXT;net;httpprobe;url` Gateway command for detailed HTTP timing diagnostics.
   - Measures DNS resolution, TCP connection, Time To First Byte (TTFB), and Download time.
