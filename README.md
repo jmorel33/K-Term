@@ -474,6 +474,55 @@ The **Gateway Protocol** enables configuration via `DCS` sequences sent to the t
 -   **Reset:** `RESET;GRAPHICS` (Clears Sixel/ReGIS/Kitty state)
 -   **Query:** `GET;VERSION` (Returns `DCS ... REPORT;VERSION=... ST`)
 
+```mermaid
+graph TD
+    DCS["DCS GATE Sequence"] -->|Parse| Router{"Class ID?"}
+    Router -->|KTERM| Dispatch["Command Dispatcher"]
+    Router -->|User/Other| Callback["User Callback"]
+
+    subgraph Core_Handlers [Core Handlers]
+        SET["SET (Config)"]
+        GET["GET (State/Info)"]
+        PIPE["PIPE (Banner/Stream)"]
+        RESET["RESET"]
+        INIT["INIT"]
+    end
+
+    subgraph Diag_Handlers [Diagnostics Wrappers]
+        PING
+        DNS
+        TRACEROUTE
+        PORTSCAN
+        WHOIS
+    end
+
+    subgraph Ext_Handlers [Extension System]
+        EXT{EXT Name?}
+        EXT -->|net| NET["Net (SSH/Telnet)"]
+        EXT -->|grid| GRID["Grid (Drawing)"]
+        EXT -->|broadcast| BCAST["Broadcast"]
+        EXT -->|rawdump| DUMP["RawDump"]
+        EXT -->|themes| THEME["Themes"]
+        EXT -->|clipboard| CLIP["Clipboard"]
+        EXT -->|icat| ICAT["ICat (Images)"]
+        EXT -->|direct| DIRECT["Direct Input"]
+    end
+
+    Dispatch --> SET
+    Dispatch --> GET
+    Dispatch --> PIPE
+    Dispatch --> RESET
+    Dispatch --> INIT
+
+    Dispatch --> PING
+    Dispatch --> DNS
+    Dispatch --> TRACEROUTE
+    Dispatch --> PORTSCAN
+    Dispatch --> WHOIS
+
+    Dispatch -->|EXT| EXT
+```
+
 ### 4.5. Advanced Features
 
 -   **Graphics Protocols:**
@@ -565,6 +614,49 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
     *   `WHOIS`: Domain registration queries.
     *   `DNS`: Synchronous hostname resolution.
     *   `MYIP`: Retrieve the local public-facing IP address.
+
+```mermaid
+stateDiagram-v2
+    subgraph NetSession [KTermNetSession (Main State Machine)]
+        [*] --> DISCONNECTED
+        DISCONNECTED --> RESOLVING : Connect()
+        RESOLVING --> CONNECTING : DNS OK
+        CONNECTING --> HANDSHAKE : Socket Open
+        HANDSHAKE --> AUTH : Security OK
+        AUTH --> CONNECTED : Auth OK
+
+        state CONNECTED {
+            [*] --> IDLE
+            IDLE --> SENDING : Write()
+            IDLE --> RECEIVING : Read()
+        }
+    end
+
+    subgraph AsyncDiagnostics [Async Diagnostics Suite (Non-Blocking)]
+        state Speedtest {
+            [*] --> AUTO_SELECT
+            AUTO_SELECT --> LATENCY
+            LATENCY --> DL_PHASE
+            DL_PHASE --> UL_PHASE
+            UL_PHASE --> DONE
+        }
+
+        state HttpProbe {
+            [*] --> DNS
+            DNS --> TCP_CONNECT
+            TCP_CONNECT --> SEND_REQ
+            SEND_REQ --> WAIT_HEAD
+            WAIT_HEAD --> READ_BODY
+            READ_BODY --> DONE
+        }
+
+        state Traceroute
+        state PortScan
+        state Whois
+    end
+
+    NetSession --> AsyncDiagnostics : Manages Contexts
+```
 
 **Examples:**
 *   `telnet_client.c`: A complete graphical Telnet client with negotiation support.
