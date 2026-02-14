@@ -1832,6 +1832,27 @@ static void KTerm_Speedtest_Callback(KTerm* term, KTermSession* session, const S
     KTerm_QueueSessionResponse(term, session, response);
 }
 
+static void KTerm_HttpProbe_Callback(KTerm* term, KTermSession* session, const KTermHttpProbeResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[1024];
+    if (result->error) {
+        snprintf(payload, sizeof(payload), "ERR;%s", result->error_msg);
+    } else {
+        // OK;STATUS=200;DNS=10.0;TCP=20.0;TTFB=50.0;DL=100.0;TOTAL=150.0;SIZE=1024;SPEED=1.50
+        snprintf(payload, sizeof(payload),
+            "OK;STATUS=%d;DNS=%.1f;TCP=%.1f;TTFB=%.1f;DL=%.1f;TOTAL=%.1f;SIZE=%llu;SPEED=%.2f",
+            result->status_code, result->dns_ms, result->connect_ms, result->ttfb_ms,
+            result->download_ms, result->total_ms, (unsigned long long)result->size_bytes, result->speed_mbps);
+    }
+
+    char response[2048];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;HTTPPROBE;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+}
+
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
     if (respond) respond(term, session, "ERR;NET_DISABLED");
@@ -2089,6 +2110,22 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             char msg[1200];
             snprintf(msg, sizeof(msg), "OK;%s", list);
             respond(term, session, msg);
+        }
+    } else if (strcmp(cmd, "httpprobe") == 0) {
+        char* url = strtok(NULL, ";");
+        if (url) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 if (KTerm_Net_HttpProbe(term, session, url, KTerm_HttpProbe_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_URL");
         }
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
