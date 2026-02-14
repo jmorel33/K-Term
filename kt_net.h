@@ -181,6 +181,25 @@ typedef void (*KTermWhoisCallback)(KTerm* term, KTermSession* session, const cha
 // Starts an async whois query.
 bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data);
 
+// Speedtest Result
+typedef struct {
+    double dl_mbps;
+    double ul_mbps;
+    double jitter_ms;
+    bool done;
+    // Progress
+    double dl_progress;
+    double ul_progress;
+    int phase; // 0=INIT, 1=DL, 2=UL, 3=DONE
+} SpeedtestResult;
+
+typedef void (*KTermSpeedtestCallback)(KTerm* term, KTermSession* session, const SpeedtestResult* result, void* user_data);
+
+// Starts an async speedtest (Download/Upload).
+// Streams: number of parallel connections (default 4).
+// Path: URL path for download test (default "/100MB.zip").
+bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data);
+
 #ifdef __cplusplus
 }
 #endif
@@ -235,11 +254,18 @@ bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const
     #define INVALID_SOCKET -1
 #endif
 
+#ifdef _WIN32
+    #define KTERM_MSG_DONTWAIT 0
+#else
+    #define KTERM_MSG_DONTWAIT MSG_DONTWAIT
+#endif
+
 // Forward declaration
 struct KTermTracerouteContext;
 struct KTermResponseTimeContext;
 struct KTermPortScanContext;
 struct KTermWhoisContext;
+struct KTermSpeedtestContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -318,6 +344,7 @@ typedef struct {
     struct KTermResponseTimeContext* response_time;
     struct KTermPortScanContext* port_scan;
     struct KTermWhoisContext* whois;
+    struct KTermSpeedtestContext* speedtest;
 
     int target_session_index;
 
@@ -416,6 +443,46 @@ typedef struct KTermWhoisContext {
     void* user_data;
 } KTermWhoisContext;
 
+typedef struct {
+    socket_t fd;
+    bool connected;
+    uint64_t bytes;
+} SpeedtestStream;
+
+#define MAX_ST_STREAMS 8
+
+typedef struct KTermSpeedtestContext {
+    int state; // 0=AUTO_SELECT, 1=LATENCY, 2=CONNECT_DL, 3=RUN_DL, 4=CONNECT_UL, 5=RUN_UL, 6=DONE
+    char host[256];
+    int port;
+    char dl_path[256];
+    int num_streams;
+    struct sockaddr_in dest_addr;
+
+    // Auto-Select State
+    int auto_state; // 0=CONNECT, 1=SEND, 2=READ, 3=PARSE
+    socket_t config_fd;
+    char config_buffer[16384];
+    int config_len;
+
+    SpeedtestStream streams[MAX_ST_STREAMS];
+    int connected_count;
+
+    double start_time;
+    double phase_start_time;
+    double duration_sec;
+
+    double dl_mbps;
+    double ul_mbps;
+    double jitter_ms;
+
+    bool latency_started;
+    bool latency_done;
+
+    KTermSpeedtestCallback callback;
+    void* user_data;
+} KTermSpeedtestContext;
+
 // --- Helper Functions ---
 
 static KTermNetSession* KTerm_Net_GetContext(KTermSession* session) {
@@ -491,6 +558,17 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
         if (net->whois->user_data) free(net->whois->user_data);
         free(net->whois);
         net->whois = NULL;
+    }
+
+    if (net->speedtest) {
+        for(int i=0; i<net->speedtest->num_streams; i++) {
+            if (IS_VALID_SOCKET(net->speedtest->streams[i].fd)) {
+                 CLOSE_SOCKET(net->speedtest->streams[i].fd);
+            }
+        }
+        if (net->speedtest->user_data) free(net->speedtest->user_data);
+        free(net->speedtest);
+        net->speedtest = NULL;
     }
 
     if (net->security.close) {
@@ -1506,6 +1584,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         KTerm_Net_ProcessWhois(term, session);
     }
 
+    // Process Async Speedtest if active
+    if (net && net->speedtest) {
+        void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessSpeedtest(term, session);
+    }
+
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
 
     if (net->target_session_index == -1) net->target_session_index = session_idx;
@@ -2269,6 +2353,468 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     free(rt); net->response_time = NULL;
     return false;
 #endif
+    return true;
+}
+
+static double KTerm_GetTime() {
+#ifdef _WIN32
+    return (double)GetTickCount() / 1000.0;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
+#endif
+}
+
+static void KTerm_Speedtest_LatencyCB(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data) {
+    (void)term; (void)session;
+    KTermSpeedtestContext* st = (KTermSpeedtestContext*)user_data;
+    if (st) {
+        st->jitter_ms = result->jitter_ms;
+        st->latency_done = true;
+    }
+}
+
+void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->speedtest) return;
+    KTermSpeedtestContext* st = net->speedtest;
+
+    if (st->state == 6) return; // DONE
+
+    // STATE 0: AUTO_SELECT
+    if (st->state == 0) {
+        if (st->auto_state == 0) { // CONNECT
+            if (st->config_fd == INVALID_SOCKET) {
+                struct addrinfo hints = {0}, *res;
+                memset(&hints, 0, sizeof(hints));
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+                // Try c.speedtest.net
+                if (getaddrinfo("c.speedtest.net", "80", &hints, &res) != 0) {
+                    // Fallback to default immediately
+                    strncpy(st->host, "speedtest.tele2.net", sizeof(st->host)-1);
+                    st->port = 80;
+                    // Need to resolve default
+                    if (getaddrinfo(st->host, "80", &hints, &res) == 0) {
+                        st->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+                        freeaddrinfo(res);
+                        st->state = 1; // LATENCY
+                        return;
+                    }
+                    // Fatal if default fails
+                    st->state = 6; return;
+                }
+                st->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+                freeaddrinfo(res);
+
+                st->config_fd = socket(AF_INET, SOCK_STREAM, 0);
+                if (IS_VALID_SOCKET(st->config_fd)) {
+                    #ifdef _WIN32
+                    u_long mode = 1; ioctlsocket(st->config_fd, FIONBIO, &mode);
+                    #else
+                    fcntl(st->config_fd, F_SETFL, fcntl(st->config_fd, F_GETFL, 0) | O_NONBLOCK);
+                    #endif
+                    connect(st->config_fd, (struct sockaddr*)&st->dest_addr, sizeof(st->dest_addr));
+                } else {
+                    // Fail
+                    st->state = 6; return;
+                }
+            }
+
+            fd_set wfds; struct timeval tv = {0, 0};
+            FD_ZERO(&wfds); FD_SET(st->config_fd, &wfds);
+            if (select(st->config_fd + 1, NULL, &wfds, NULL, &tv) > 0) {
+                st->auto_state = 1; // SEND
+            }
+            // Timeout check
+            if (KTerm_GetTime() - st->start_time > 5.0) { st->state = 6; return; }
+        }
+        else if (st->auto_state == 1) { // SEND
+            const char* req = "GET /speedtest-servers-static.php HTTP/1.1\r\nHost: c.speedtest.net\r\nConnection: close\r\n\r\n";
+            send(st->config_fd, req, strlen(req), 0);
+            st->auto_state = 2; // READ
+        }
+        else if (st->auto_state == 2) { // READ
+            char buf[1024];
+            int n = recv(st->config_fd, buf, sizeof(buf), 0);
+            if (n > 0) {
+                if (st->config_len + n < (int)sizeof(st->config_buffer) - 1) {
+                    memcpy(st->config_buffer + st->config_len, buf, n);
+                    st->config_len += n;
+                    st->config_buffer[st->config_len] = '\0';
+                }
+            } else if (n == 0) {
+                st->auto_state = 3; // PARSE
+            }
+            if (KTerm_GetTime() - st->start_time > 10.0) st->auto_state = 3; // Force Parse on timeout
+        }
+        else if (st->auto_state == 3) { // PARSE
+            CLOSE_SOCKET(st->config_fd); st->config_fd = INVALID_SOCKET;
+
+            char* start = strstr(st->config_buffer, "<server ");
+            bool found = false;
+            if (start) {
+                char* url = strstr(start, "host=\"");
+                if (url) {
+                    url += 6;
+                    char* end = strchr(url, '"');
+                    if (end) {
+                        *end = '\0';
+                        char* colon = strchr(url, ':');
+                        if (colon) {
+                            *colon = '\0';
+                            strncpy(st->host, url, sizeof(st->host)-1);
+                            st->port = atoi(colon + 1);
+                        } else {
+                            strncpy(st->host, url, sizeof(st->host)-1);
+                            st->port = 80;
+                        }
+                        found = true;
+
+                        // Notify UI
+                        if (st->callback) {
+                            SpeedtestResult res = {0}; res.phase = 0;
+                            st->callback(term, session, &res, st->user_data);
+                        }
+                    }
+                }
+            }
+
+            if (!found) {
+                strncpy(st->host, "speedtest.tele2.net", sizeof(st->host)-1);
+                st->port = 80;
+            }
+
+            // Resolve selected host for actual test
+            struct addrinfo hints = {0}, *res;
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", st->port);
+
+            if (getaddrinfo(st->host, port_str, &hints, &res) == 0) {
+                st->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+                freeaddrinfo(res);
+                st->state = 1; // PROCEED
+            } else {
+                st->state = 6; // FAIL
+            }
+        }
+        return;
+    }
+
+    // STATE 1: LATENCY
+    if (st->state == 1) {
+        if (!st->latency_started) {
+            st->latency_started = true;
+            // 4 probes, 200ms interval, 1000ms timeout
+            if (!KTerm_Net_ResponseTime(term, session, st->host, 4, 200, 1000, KTerm_Speedtest_LatencyCB, st)) {
+                // If failed to start, skip latency
+                st->latency_done = true;
+            }
+        }
+        if (st->latency_done) {
+            st->state = 2; // CONNECT_DL
+            st->start_time = KTerm_GetTime();
+        }
+        return; // Wait next tick
+    }
+
+    if (st->state == 2) { // CONNECT_DL
+        // Init Sockets if needed
+        if (st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
+             for(int i=0; i<st->num_streams; i++) {
+                  st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
+                  if (IS_VALID_SOCKET(st->streams[i].fd)) {
+#ifdef _WIN32
+                      u_long mode = 1; ioctlsocket(st->streams[i].fd, FIONBIO, &mode);
+#else
+                      fcntl(st->streams[i].fd, F_SETFL, fcntl(st->streams[i].fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+                      connect(st->streams[i].fd, (struct sockaddr*)&st->dest_addr, sizeof(st->dest_addr));
+                  }
+             }
+        }
+
+        // Check connection status
+        fd_set wfds; struct timeval tv = {0, 0};
+        FD_ZERO(&wfds);
+        int max_fd = -1;
+        for(int i=0; i<st->num_streams; i++) {
+            if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+                FD_SET(st->streams[i].fd, &wfds);
+                if (st->streams[i].fd > max_fd) max_fd = st->streams[i].fd;
+            }
+        }
+
+        if (max_fd > -1) {
+            int res = select(max_fd + 1, NULL, &wfds, NULL, &tv);
+            if (res > 0) {
+                 for(int i=0; i<st->num_streams; i++) {
+                     if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+                         if (FD_ISSET(st->streams[i].fd, &wfds)) {
+                             int opt = 0; socklen_t len = sizeof(opt);
+                             if (getsockopt(st->streams[i].fd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
+                                 st->streams[i].connected = true;
+                                 st->connected_count++;
+                                 // Send GET
+                                 char req[1024];
+                                 snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", st->dl_path, st->host);
+                                 send(st->streams[i].fd, req, strlen(req), 0);
+                             } else {
+                                 // Fail this stream
+                                 CLOSE_SOCKET(st->streams[i].fd);
+                                 st->streams[i].fd = INVALID_SOCKET;
+                             }
+                         }
+                     }
+                 }
+            }
+        }
+
+        // Check timeout (5s for connect phase)
+        double now = KTerm_GetTime();
+        if (now - st->start_time > 5.0 || st->connected_count == st->num_streams) {
+             if (st->connected_count == 0) {
+                 // All failed
+                 if (st->callback) {
+                     SpeedtestResult res = {0}; res.done = true;
+                     st->callback(term, session, &res, st->user_data);
+                 }
+                 st->state = 6;
+                 return;
+             }
+             st->state = 3; // RUN_DL
+             st->phase_start_time = KTerm_GetTime();
+        }
+    }
+    else if (st->state == 3) { // RUN_DL
+        // Read data
+        char buf[16384];
+        for(int i=0; i<st->num_streams; i++) {
+             if (st->streams[i].connected && IS_VALID_SOCKET(st->streams[i].fd)) {
+                 int n = recv(st->streams[i].fd, buf, sizeof(buf), KTERM_MSG_DONTWAIT);
+                 if (n > 0) {
+                     st->streams[i].bytes += n;
+                 } else if (n == 0) {
+                     st->streams[i].connected = false;
+                     CLOSE_SOCKET(st->streams[i].fd);
+                     st->streams[i].fd = INVALID_SOCKET;
+                 }
+             }
+        }
+
+        double now = KTerm_GetTime();
+        double elapsed = now - st->phase_start_time;
+
+        // Calc Speed
+        uint64_t total = 0;
+        for(int i=0; i<st->num_streams; i++) total += st->streams[i].bytes;
+
+        if (elapsed > 0) st->dl_mbps = ((double)total * 8.0) / (elapsed * 1000000.0);
+
+        if (st->callback) {
+             SpeedtestResult res = {0};
+             res.dl_mbps = st->dl_mbps;
+             res.phase = 1;
+             res.dl_progress = elapsed / st->duration_sec;
+             if (res.dl_progress > 1.0) res.dl_progress = 1.0;
+             st->callback(term, session, &res, st->user_data);
+        }
+
+        if (elapsed >= st->duration_sec) {
+             // Close DL streams
+             for(int i=0; i<st->num_streams; i++) {
+                 if (IS_VALID_SOCKET(st->streams[i].fd)) { CLOSE_SOCKET(st->streams[i].fd); st->streams[i].fd = INVALID_SOCKET; }
+                 st->streams[i].connected = false;
+                 st->streams[i].bytes = 0;
+             }
+             st->connected_count = 0;
+             st->state = 4; // CONNECT_UL
+             st->start_time = KTerm_GetTime();
+        }
+    }
+    else if (st->state == 4) { // CONNECT_UL
+         // Initiate Upload connections
+         if (st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
+              // Start connections if not already started
+              // (Wait, we need to re-open sockets)
+              for(int i=0; i<st->num_streams; i++) {
+                   st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
+                   if (IS_VALID_SOCKET(st->streams[i].fd)) {
+#ifdef _WIN32
+                       u_long mode = 1; ioctlsocket(st->streams[i].fd, FIONBIO, &mode);
+#else
+                       fcntl(st->streams[i].fd, F_SETFL, fcntl(st->streams[i].fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+                       connect(st->streams[i].fd, (struct sockaddr*)&st->dest_addr, sizeof(st->dest_addr));
+                   }
+              }
+         }
+
+        fd_set wfds; struct timeval tv = {0, 0};
+        FD_ZERO(&wfds);
+        int max_fd = -1;
+        for(int i=0; i<st->num_streams; i++) {
+            if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+                FD_SET(st->streams[i].fd, &wfds);
+                if (st->streams[i].fd > max_fd) max_fd = st->streams[i].fd;
+            }
+        }
+
+        if (max_fd > -1) {
+            int res = select(max_fd + 1, NULL, &wfds, NULL, &tv);
+            if (res > 0) {
+                 for(int i=0; i<st->num_streams; i++) {
+                     if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+                         if (FD_ISSET(st->streams[i].fd, &wfds)) {
+                             int opt = 0; socklen_t len = sizeof(opt);
+                             if (getsockopt(st->streams[i].fd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
+                                 st->streams[i].connected = true;
+                                 st->connected_count++;
+                                 // Send POST Header
+                                 char req[512];
+                                 snprintf(req, sizeof(req), "POST /upload.php HTTP/1.1\r\nHost: %s\r\nContent-Length: 104857600\r\n\r\n", st->host);
+                                 send(st->streams[i].fd, req, strlen(req), 0);
+                             } else {
+                                 CLOSE_SOCKET(st->streams[i].fd);
+                                 st->streams[i].fd = INVALID_SOCKET;
+                             }
+                         }
+                     }
+                 }
+            }
+        }
+
+        double now = KTerm_GetTime();
+        if (now - st->start_time > 5.0 || st->connected_count == st->num_streams) {
+             if (st->connected_count == 0) {
+                 // Fail
+                 st->state = 6;
+                 if (st->callback) { SpeedtestResult res={0}; res.done=true; st->callback(term, session, &res, st->user_data); }
+                 return;
+             }
+             st->state = 5; // RUN_UL
+             st->phase_start_time = KTerm_GetTime();
+        }
+    }
+    else if (st->state == 5) { // RUN_UL
+        // Send data
+        char chunk[8192]; // Dummy data
+        memset(chunk, 'X', sizeof(chunk));
+
+        for(int i=0; i<st->num_streams; i++) {
+             if (st->streams[i].connected && IS_VALID_SOCKET(st->streams[i].fd)) {
+                 int sent = send(st->streams[i].fd, chunk, sizeof(chunk), KTERM_MSG_DONTWAIT);
+                 if (sent > 0) {
+                     st->streams[i].bytes += sent;
+                 }
+             }
+        }
+
+        double now = KTerm_GetTime();
+        double elapsed = now - st->phase_start_time;
+
+        uint64_t total = 0;
+        for(int i=0; i<st->num_streams; i++) total += st->streams[i].bytes;
+
+        if (elapsed > 0) st->ul_mbps = ((double)total * 8.0) / (elapsed * 1000000.0);
+
+        if (st->callback) {
+             SpeedtestResult res = {0};
+             res.dl_mbps = st->dl_mbps;
+             res.ul_mbps = st->ul_mbps;
+             res.phase = 2;
+             res.ul_progress = elapsed / st->duration_sec;
+             if (res.ul_progress > 1.0) res.ul_progress = 1.0;
+             st->callback(term, session, &res, st->user_data);
+        }
+
+        if (elapsed >= st->duration_sec) {
+             st->state = 6; // DONE
+             // Final callback
+             if (st->callback) {
+                 SpeedtestResult res = {0};
+                 res.dl_mbps = st->dl_mbps;
+                 res.ul_mbps = st->ul_mbps;
+                 res.phase = 3;
+                 res.done = true;
+                 st->callback(term, session, &res, st->user_data);
+             }
+        }
+    }
+
+    if (st->state == 6) {
+         // Cleanup
+         if (IS_VALID_SOCKET(st->config_fd)) { CLOSE_SOCKET(st->config_fd); st->config_fd = INVALID_SOCKET; }
+         for(int i=0; i<st->num_streams; i++) {
+             if (IS_VALID_SOCKET(st->streams[i].fd)) { CLOSE_SOCKET(st->streams[i].fd); st->streams[i].fd = INVALID_SOCKET; }
+         }
+    }
+}
+
+bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data) {
+    if (!term || !session) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->speedtest) {
+        // Cleanup existing
+        if (IS_VALID_SOCKET(net->speedtest->config_fd)) CLOSE_SOCKET(net->speedtest->config_fd);
+        for(int i=0; i<net->speedtest->num_streams; i++) {
+            if (IS_VALID_SOCKET(net->speedtest->streams[i].fd)) CLOSE_SOCKET(net->speedtest->streams[i].fd);
+        }
+        if (net->speedtest->user_data) free(net->speedtest->user_data);
+        free(net->speedtest);
+    }
+
+    net->speedtest = (KTermSpeedtestContext*)calloc(1, sizeof(KTermSpeedtestContext));
+    if (!net->speedtest) return false;
+
+    KTermSpeedtestContext* st = net->speedtest;
+    st->config_fd = INVALID_SOCKET;
+
+    st->num_streams = (streams > 0 && streams <= MAX_ST_STREAMS) ? streams : 4;
+    st->callback = cb;
+    st->user_data = user_data;
+    st->duration_sec = 5.0; // Fixed duration for now
+
+    if (path && path[0]) strncpy(st->dl_path, path, sizeof(st->dl_path)-1);
+    else strcpy(st->dl_path, "/100MB.zip");
+
+    // Check for Auto-Select
+    if (!host || strcmp(host, "auto") == 0) {
+        st->state = 0; // AUTO_SELECT
+        st->auto_state = 0; // CONNECT
+        st->start_time = KTerm_GetTime(); // Use for timeout
+    } else {
+        strncpy(st->host, host, sizeof(st->host)-1);
+        st->port = (port > 0) ? port : 80;
+
+        // Resolve
+        struct addrinfo hints, *res;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", st->port);
+
+        if (getaddrinfo(host, port_str, &hints, &res) != 0) {
+            free(st); net->speedtest = NULL;
+            return false;
+        }
+        st->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+        freeaddrinfo(res);
+        st->state = 1; // LATENCY
+    }
+
+    // Streams init on demand in state CONNECT_DL/CONNECT_UL
+    for(int i=0; i<MAX_ST_STREAMS; i++) st->streams[i].fd = INVALID_SOCKET;
+
+    st->latency_started = false;
+    st->latency_done = false;
+
     return true;
 }
 

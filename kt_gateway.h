@@ -685,6 +685,7 @@ static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int ho
 static void KTerm_ResponseTime_Callback(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data);
 static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const char* host, int port, int status, void* user_data);
 static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data);
+static void KTerm_Speedtest_Callback(KTerm* term, KTermSession* session, const SpeedtestResult* result, void* user_data);
 
 static void KTerm_Gateway_HandleDNS(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
 #ifdef KTERM_DISABLE_NET
@@ -1805,6 +1806,32 @@ static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char*
     }
 }
 
+static void KTerm_Speedtest_Callback(KTerm* term, KTermSession* session, const SpeedtestResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[256];
+    if (result->done) {
+        // Final Result
+        snprintf(payload, sizeof(payload), "RESULT;DL=%.2f;UL=%.2f;JITTER=%.2f",
+                 result->dl_mbps, result->ul_mbps, result->jitter_ms);
+    } else {
+        // Progress
+        if (result->phase == 1) { // DL
+             snprintf(payload, sizeof(payload), "PROGRESS;PHASE=DL;VAL=%.2f;PCT=%.2f", result->dl_mbps, result->dl_progress);
+        } else if (result->phase == 2) { // UL
+             snprintf(payload, sizeof(payload), "PROGRESS;PHASE=UL;VAL=%.2f;PCT=%.2f", result->ul_mbps, result->ul_progress);
+        } else {
+             snprintf(payload, sizeof(payload), "PROGRESS;PHASE=INIT");
+        }
+    }
+
+    char response[512];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;SPEEDTEST;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+}
+
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
     if (respond) respond(term, session, "ERR;NET_DISABLED");
@@ -2017,6 +2044,51 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
+        }
+    } else if (strcmp(cmd, "speedtest") == 0) {
+        char* host = NULL;
+        int port = 80;
+        int streams = 4;
+        char* path = NULL;
+
+        char* arg = strtok(NULL, ";");
+        while(arg) {
+            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (strncmp(arg, "port=", 5) == 0) port = atoi(arg+5);
+            else if (strncmp(arg, "streams=", 8) == 0) streams = atoi(arg+8);
+            else if (strncmp(arg, "path=", 5) == 0) path = arg + 5;
+            else if (!host) host = arg; // 1st Positional
+            arg = strtok(NULL, ";");
+        }
+
+        // Default host: NULL implies auto-select in KTerm_Net_Speedtest
+
+        char* id_copy = (char*)malloc(strlen(id) + 1);
+        if (id_copy) {
+            strcpy(id_copy, id);
+            if (KTerm_Net_Speedtest(term, session, host, port, streams, path, KTerm_Speedtest_Callback, id_copy)) {
+                if (respond) respond(term, session, "OK;STARTED");
+            } else {
+                if (respond) respond(term, session, "ERR;START_FAILED");
+                free(id_copy);
+            }
+        }
+    } else if (strcmp(cmd, "connections") == 0) {
+        char list[1024];
+        list[0] = '\0';
+        for(int i=0; i<MAX_SESSIONS; i++) {
+            char status[256];
+            KTerm_Net_GetStatus(term, &term->sessions[i], status, sizeof(status));
+            char entry[300];
+            snprintf(entry, sizeof(entry), "[%d]:%s|", i, status);
+            if (strlen(list) + strlen(entry) < sizeof(list) - 1) {
+                strcat(list, entry);
+            }
+        }
+        if (respond) {
+            char msg[1200];
+            snprintf(msg, sizeof(msg), "OK;%s", list);
+            respond(term, session, msg);
         }
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
