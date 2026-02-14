@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.15
+# kterm.h - Technical Reference Manual v2.6.16
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.15)](#13-known-limitations-v2615)
+    *   [1.3. Known Limitations (v2.6.16)](#13-known-limitations-v2616)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -172,9 +172,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.15)
+### 1.3. Known Limitations (v2.6.16)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.15 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.16 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
@@ -1505,7 +1505,7 @@ In addition to `EXT;net;...`, these diagnostics are available as top-level Gatew
 *   `WHOIS;host;[query]`: Performs WHOIS lookup.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
 
-**Speedtest Client (v2.6.15):**
+**Speedtest Client (v2.6.16):**
 The `speedtest_client` example demonstrates a full network diagnostic application:
 *   **Auto-Server List:** Fetches server list via HTTP from `c.speedtest.net` and auto-selects a target.
 *   **Jitter Graph:** Visualizes latency variance using a text-based bar chart of sequential probes.

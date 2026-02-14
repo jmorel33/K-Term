@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.6.16] - Speedtest Gateway Integration & Network Diagnostics
+- **Speedtest Gateway Command:** Promoted `speedtest` logic to a native Gateway command (`EXT;net;speedtest;...`).
+  - Added auto-server selection logic: If no host is provided (or "auto"), the client fetches the server list from `c.speedtest.net` and selects a target.
+  - Fully integrated into the non-blocking network state machine (`kt_net.h`).
+- **Connection Visibility:** Added `EXT;net;connections` command to list all active network sessions and their status (State, Host, Port).
+- **Hardening:** Enhanced `KTerm_Net_Speedtest` cleanup logic to ensure configuration sockets are properly closed.
+
 ## [v2.6.15] - Encryption & Input Reporting
 - **SSH Encryption**: Replaced placeholder encryption/decryption logic in `example/ssh_sodium.c` with functional `libsodium` integration (`crypto_aead_chacha20poly1305_ietf`). Implemented full sequence number tracking and AAD verification for SSH packet length integrity.
 - **Mouse Reporting**: Implemented `DECRQLP` (Request Locator Position) in `kterm.h`, enabling host applications to query the exact mouse position and button state using the DEC Locator protocol (`CSI ... & w`).
