@@ -1497,7 +1497,7 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;dns;host`: Synchronously resolves a hostname to an IP address. Returns `OK;IP=...` or `ERR`.
 *   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Returns `HOST=...;PORT=...;STATUS=...` for each port.
 *   `EXT;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
-*   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted.
+*   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted. `graph=1` enables ASCII visualization.
 *   `EXT;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics.
 *   `EXT;net;connections`: Lists active network sessions.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
@@ -1510,7 +1510,7 @@ In addition to `EXT;net;...`, these diagnostics are available as top-level Gatew
 *   `WHOIS;host;[query]`: Performs WHOIS lookup.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
 
-**Speedtest Client (v2.6.17):**
+**Speedtest Client (v2.6.18):**
 The `speedtest_client` example demonstrates a full network diagnostic application:
 *   **Auto-Server List:** Fetches server list via HTTP from `c.speedtest.net` and auto-selects a target.
 *   **Jitter Graph:** Visualizes latency variance using a text-based bar chart of sequential probes.
