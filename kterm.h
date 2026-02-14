@@ -57,9 +57,9 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 13
+#define KTERM_VERSION_PATCH 14
 #define KTERM_VERSION_REVISION ""
-#define KTERM_VERSION_STRING "2.6.13"
+#define KTERM_VERSION_STRING "2.6.14"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
 #ifndef KTERM_DISABLE_GATEWAY
@@ -14080,9 +14080,6 @@ static void KTerm_ApplyResizeOp(KTerm* term, KTermSession* session, KTermOp* op)
         .flags = KTERM_FLAG_DIRTY
     };
 
-    // Initialize new buffer
-    for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
-
     // Copy visible viewport AND history from old buffer
     int copy_rows = (old_rows < rows) ? old_rows : rows;
     int copy_cols = (old_cols < cols) ? old_cols : cols;
@@ -14090,6 +14087,40 @@ static void KTerm_ApplyResizeOp(KTerm* term, KTermSession* session, KTermOp* op)
     // Optimize: Only copy populated history
     int start_y = -session->history_rows_populated;
     if (start_y < -MAX_SCROLLBACK_LINES) start_y = -MAX_SCROLLBACK_LINES;
+
+    // Initialize new buffer (Optimized: Only init areas not covered by copy)
+    // 1. Initialize Gap (Rows that will not be touched by copy loop)
+    // The copy loop covers:
+    //   Viewport: [0, copy_rows)
+    //   History:  [new_buffer_height + start_y, new_buffer_height)
+    // So the gap is [copy_rows, new_buffer_height + start_y)
+
+    int history_start_idx = new_buffer_height + start_y;
+    // Safety clamp
+    if (history_start_idx < copy_rows) history_start_idx = copy_rows;
+
+    for (int r = copy_rows; r < history_start_idx; r++) {
+        for (int c = 0; c < cols; c++) {
+            new_screen_buffer[r * cols + c] = default_char;
+        }
+    }
+
+    // 2. Initialize Right Margin for Copied Rows (if expanded horizontally)
+    if (cols > copy_cols) {
+        // For Viewport rows [0, copy_rows)
+        for (int r = 0; r < copy_rows; r++) {
+            for (int c = copy_cols; c < cols; c++) {
+                new_screen_buffer[r * cols + c] = default_char;
+            }
+        }
+
+        // For History rows [history_start_idx, new_buffer_height)
+        for (int r = history_start_idx; r < new_buffer_height; r++) {
+            for (int c = copy_cols; c < cols; c++) {
+                new_screen_buffer[r * cols + c] = default_char;
+            }
+        }
+    }
 
     // Iterate from oldest history line to bottom of visible viewport
     for (int y = start_y; y < copy_rows; y++) {
@@ -15024,9 +15055,6 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
         .flags = KTERM_FLAG_DIRTY
     };
 
-    // Initialize new buffer
-    for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
-
     // Copy visible viewport AND history from old buffer
     int copy_rows = (old_rows < rows) ? old_rows : rows;
     int copy_cols = (old_cols < cols) ? old_cols : cols;
@@ -15034,6 +15062,40 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
     // Optimize: Only copy populated history
     int start_y = -session->history_rows_populated;
     if (start_y < -MAX_SCROLLBACK_LINES) start_y = -MAX_SCROLLBACK_LINES;
+
+    // Initialize new buffer (Optimized: Only init areas not covered by copy)
+    // 1. Initialize Gap (Rows that will not be touched by copy loop)
+    // The copy loop covers:
+    //   Viewport: [0, copy_rows)
+    //   History:  [new_buffer_height + start_y, new_buffer_height)
+    // So the gap is [copy_rows, new_buffer_height + start_y)
+
+    int history_start_idx = new_buffer_height + start_y;
+    // Safety clamp
+    if (history_start_idx < copy_rows) history_start_idx = copy_rows;
+
+    for (int r = copy_rows; r < history_start_idx; r++) {
+        for (int c = 0; c < cols; c++) {
+            new_screen_buffer[r * cols + c] = default_char;
+        }
+    }
+
+    // 2. Initialize Right Margin for Copied Rows (if expanded horizontally)
+    if (cols > copy_cols) {
+        // For Viewport rows [0, copy_rows)
+        for (int r = 0; r < copy_rows; r++) {
+            for (int c = copy_cols; c < cols; c++) {
+                new_screen_buffer[r * cols + c] = default_char;
+            }
+        }
+
+        // For History rows [history_start_idx, new_buffer_height)
+        for (int r = history_start_idx; r < new_buffer_height; r++) {
+            for (int c = copy_cols; c < cols; c++) {
+                new_screen_buffer[r * cols + c] = default_char;
+            }
+        }
+    }
 
     // Iterate from oldest history line to bottom of visible viewport
     for (int y = start_y; y < copy_rows; y++) {

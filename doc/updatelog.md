@@ -1,5 +1,10 @@
 # K-Term Update Log
 
+## [v2.6.14] - Performance & Network Hardening
+- **Resize Optimization:** Optimized buffer initialization during resize operations (`KTerm_ApplyResizeOp`) to eliminate redundant O(N) writes. Implemented targeted initialization for gap and margin regions, significantly reducing memory bandwidth usage during resize events (especially with large scrollback history).
+- **Network Hardening:** Added explicit `select` error handling and connection timeout logic to the asynchronous `WHOIS` query implementation (`KTerm_Net_ProcessWhois`) to prevent state machine hangs during network failures.
+- **BiDi Parity:** Documented known limitation regarding lack of `fribidi` parity affecting complex Right-to-Left text rendering.
+
 ## [v2.6.13] - Speedtest Enhancements: Auto-Server & Jitter
 - **Auto-Server Selection:** `speedtest_client.c` now fetches the server list from `c.speedtest.net` and auto-selects a server, with fallback to default.
 - **Jitter Visualization:** Implemented sequential latency probing (count=20) and a text-based bar chart in `speedtest_client` to visualize jitter history.
