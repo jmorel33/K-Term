@@ -144,6 +144,7 @@ void KTerm_Net_SendTelnetCommand(KTerm* term, KTermSession* session, uint8_t com
 void KTerm_Net_GetLocalIP(char* buffer, size_t max_len);
 void KTerm_Net_Ping(const char* host, char* output, size_t max_len);
 bool KTerm_Net_Resolve(const char* host, char* output_ip, size_t max_len); // Sync Resolve
+void KTerm_Net_DumpConnections(KTerm* term, char* buffer, size_t max_len); // Detailed socket list
 
 // Traceroute Callback
 typedef void (*KTermTracerouteCallback)(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
@@ -931,6 +932,68 @@ void KTerm_Net_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_
         snprintf(buffer, max_len, "STATE=%s", state_str);
     }
 }
+
+void KTerm_Net_DumpConnections(KTerm* term, char* buffer, size_t max_len) {
+    if (!buffer || max_len == 0) return;
+    buffer[0] = '\0';
+    size_t offset = 0;
+
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        KTermSession* session = &term->sessions[i];
+        KTermNetSession* net = KTerm_Net_GetContext(session);
+        if (!net) continue;
+
+        // Main Connection
+        if (net->state != KTERM_NET_STATE_DISCONNECTED) {
+            char status[256];
+            KTerm_Net_GetStatus(term, session, status, sizeof(status));
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:MAIN] %s|", i, status);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+
+        // Sub-contexts
+        if (net->traceroute) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:TRACE] HOST=%s;TTL=%d;STATE=%d|", i, net->traceroute->host, net->traceroute->current_ttl, net->traceroute->state);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+        if (net->response_time) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:PING] HOST=%s;SENT=%d;RECV=%d|", i, net->response_time->host, net->response_time->sent_count, net->response_time->recv_count);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+        if (net->port_scan) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:SCAN] HOST=%s;PORT=%d;STATE=%d|", i, net->port_scan->host, net->port_scan->current_port, net->port_scan->state);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+        if (net->whois) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:WHOIS] HOST=%s;STATE=%d|", i, net->whois->host, net->whois->state);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+        if (net->http_probe) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:HTTP] HOST=%s;STATE=%d|", i, net->http_probe->host, net->http_probe->state);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+        }
+        if (net->speedtest) {
+            int n = snprintf(buffer + offset, max_len - offset, "[%d:SPEED] HOST=%s;STATE=%d;DL=%.2f;UL=%.2f|", i, net->speedtest->host, net->speedtest->state, net->speedtest->dl_mbps, net->speedtest->ul_mbps);
+            if (n > 0) offset += n;
+            if (offset >= max_len) return;
+            // Streams
+            for (int s = 0; s < net->speedtest->num_streams; s++) {
+                if (IS_VALID_SOCKET(net->speedtest->streams[s].fd)) {
+                    int n = snprintf(buffer + offset, max_len - offset, "[%d:SPEED:S%d] SOCKET=%d;BYTES=%llu|", i, s, (int)net->speedtest->streams[s].fd, (unsigned long long)net->speedtest->streams[s].bytes);
+                    if (n > 0) offset += n;
+                    if (offset >= max_len) return;
+                }
+            }
+        }
+    }
+}
+
 
 void KTerm_Net_GetCredentials(KTerm* term, KTermSession* session, char* user_out, size_t user_max, char* pass_out, size_t pass_max) {
     KTermNetSession* net = KTerm_Net_GetContext(session);

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.17
+# K-Term Emulation Library v2.6.18
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -555,8 +555,15 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
     *   **Authentication:** Full state machine for **Public Key** (Probe & Sign) and **Password** authentication.
     *   **Pluggable Crypto:** Clear `TODO` hooks for integrating your preferred crypto library (e.g., Sodium, BearSSL, OpenSSL) to create a fully working, dependency-free client.
     *   **Security Hooks:** `KTermNetSecurity` interface for plugging in custom transport layers.
-*   **Gateway Extensions:** Built-in `EXT;net` commands for runtime network diagnostics:
-    *   `PING`: Check connectivity to a host.
+*   **Gateway Extensions:** Built-in `EXT;net` commands for runtime network diagnostics (Diagnostics Suite):
+    *   `PING`: Check connectivity to a host (Alias: `responsetime`).
+    *   `TRACEROUTE`: Asynchronous traceroute with per-hop reporting.
+    *   `SPEEDTEST`: Multi-stream throughput (DL/UL) and jitter measurement with auto-server selection.
+    *   `HTTPPROBE`: Detailed HTTP timing metrics (DNS, TCP, TTFB, Download).
+    *   `CONNECTIONS`: List active network sessions and their states.
+    *   `PORTSCAN`: Asynchronous TCP port scanner.
+    *   `WHOIS`: Domain registration queries.
+    *   `DNS`: Synchronous hostname resolution.
     *   `MYIP`: Retrieve the local public-facing IP address.
 
 **Examples:**
