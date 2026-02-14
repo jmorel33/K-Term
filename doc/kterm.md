@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.16
+# kterm.h - Technical Reference Manual v2.6.17
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.16)](#13-known-limitations-v2616)
+    *   [1.3. Known Limitations (v2.6.17)](#13-known-limitations-v2617)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -172,9 +172,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.16)
+### 1.3. Known Limitations (v2.6.17)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.16 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.17 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
@@ -1498,6 +1498,7 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Returns `HOST=...;PORT=...;STATUS=...` for each port.
 *   `EXT;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
 *   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted.
+*   `EXT;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics.
 *   `EXT;net;connections`: Lists active network sessions.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
 
@@ -1509,7 +1510,7 @@ In addition to `EXT;net;...`, these diagnostics are available as top-level Gatew
 *   `WHOIS;host;[query]`: Performs WHOIS lookup.
 *   `EXT;ssh;...`: Alias for `EXT;net`.
 
-**Speedtest Client (v2.6.16):**
+**Speedtest Client (v2.6.17):**
 The `speedtest_client` example demonstrates a full network diagnostic application:
 *   **Auto-Server List:** Fetches server list via HTTP from `c.speedtest.net` and auto-selects a target.
 *   **Jitter Graph:** Visualizes latency variance using a text-based bar chart of sequential probes.
@@ -1524,6 +1525,7 @@ While Gateway commands provide easy access, `kt_net.h` offers a rich C API for d
 *   `KTerm_Net_Resolve(host, output_ip, max_len)`: Synchronously resolves a hostname to an IP address string.
 *   `KTerm_Net_PortScan(term, session, host, ports, timeout, cb, user_data)`: Initiates an asynchronous TCP port scan.
 *   `KTerm_Net_Whois(term, session, host, query, cb, user_data)`: Initiates an asynchronous WHOIS query.
+*   `KTerm_Net_HttpProbe(term, session, url, cb, user_data)`: Initiates an asynchronous HTTP timing probe (DNS/TCP/TTFB/DL).
 *   `KTerm_Net_SetAutoReconnect(term, session, enable, max_retries, delay_ms)`: Configures automatic connection retry logic for transient errors (e.g., resolving failures).
 *   `KTerm_Net_SetCallbacks(term, session, callbacks)`: Registers hooks for data reception (`on_data`), connection state changes (`on_connect`, `on_disconnect`), and error reporting (`on_error`).
 *   `KTerm_Net_SetSecurity(term, session, security)`: Plugs in custom cryptographic providers (TLS/SSH) via function pointers.

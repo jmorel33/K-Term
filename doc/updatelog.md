@@ -1,5 +1,13 @@
 # K-Term Update Log
 
+## [v2.6.17] - HTTP Probe Diagnostic Tool
+- **HTTP Probe**: Added `EXT;net;httpprobe;url` Gateway command for detailed HTTP timing diagnostics.
+  - Measures DNS resolution, TCP connection, Time To First Byte (TTFB), and Download time.
+  - Returns structured metrics: `OK;STATUS=200;DNS=...;TCP=...;TTFB=...;DL=...;SIZE=...;SPEED=...`.
+  - Built on the existing non-blocking network stack (`kt_net.h`) using raw TCP sockets (no external dependencies).
+  - Includes a 10-second read timeout for robustness against stalled servers.
+- **Documentation**: Updated technical reference manual to include the new `httpprobe` command.
+
 ## [v2.6.16] - Speedtest Gateway Integration & Network Diagnostics
 - **Speedtest Gateway Command:** Promoted `speedtest` logic to a native Gateway command (`EXT;net;speedtest;...`).
   - Added auto-server selection logic: If no host is provided (or "auto"), the client fetches the server list from `c.speedtest.net` and selects a target.

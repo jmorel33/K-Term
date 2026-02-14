@@ -200,6 +200,25 @@ typedef void (*KTermSpeedtestCallback)(KTerm* term, KTermSession* session, const
 // Path: URL path for download test (default "/100MB.zip").
 bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data);
 
+// HTTP Probe Result
+typedef struct {
+    int status_code;
+    double dns_ms;
+    double connect_ms;
+    double ttfb_ms;
+    double download_ms;
+    double total_ms;
+    uint64_t size_bytes;
+    double speed_mbps;
+    bool error;
+    char error_msg[64];
+} KTermHttpProbeResult;
+
+typedef void (*KTermHttpProbeCallback)(KTerm* term, KTermSession* session, const KTermHttpProbeResult* result, void* user_data);
+
+// Starts an async HTTP probe.
+bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data);
+
 #ifdef __cplusplus
 }
 #endif
@@ -266,6 +285,7 @@ struct KTermResponseTimeContext;
 struct KTermPortScanContext;
 struct KTermWhoisContext;
 struct KTermSpeedtestContext;
+struct KTermHttpProbeContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -345,6 +365,7 @@ typedef struct {
     struct KTermPortScanContext* port_scan;
     struct KTermWhoisContext* whois;
     struct KTermSpeedtestContext* speedtest;
+    struct KTermHttpProbeContext* http_probe;
 
     int target_session_index;
 
@@ -483,6 +504,35 @@ typedef struct KTermSpeedtestContext {
     void* user_data;
 } KTermSpeedtestContext;
 
+typedef struct KTermHttpProbeContext {
+    int state; // 0=IDLE, 1=RESOLVE, 2=CONNECT, 3=SEND, 4=WAIT_HEAD, 5=READ_BODY, 6=DONE
+    char host[256];
+    int port;
+    char path[1024];
+    struct sockaddr_in dest_addr;
+    socket_t sockfd;
+
+    double start_time;
+    double dns_start_time;
+    double connect_start_time;
+    double request_start_time;
+    double first_byte_time;
+
+    // Metrics
+    double dns_ms;
+    double connect_ms;
+    double ttfb_ms;
+
+    char buffer[8192];
+    int buffer_len;
+
+    int status_code;
+    uint64_t size_bytes;
+
+    KTermHttpProbeCallback callback;
+    void* user_data;
+} KTermHttpProbeContext;
+
 // --- Helper Functions ---
 
 static KTermNetSession* KTerm_Net_GetContext(KTermSession* session) {
@@ -569,6 +619,15 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
         if (net->speedtest->user_data) free(net->speedtest->user_data);
         free(net->speedtest);
         net->speedtest = NULL;
+    }
+
+    if (net->http_probe) {
+        if (IS_VALID_SOCKET(net->http_probe->sockfd)) {
+             CLOSE_SOCKET(net->http_probe->sockfd);
+        }
+        if (net->http_probe->user_data) free(net->http_probe->user_data);
+        free(net->http_probe);
+        net->http_probe = NULL;
     }
 
     if (net->security.close) {
@@ -1588,6 +1647,12 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
     if (net && net->speedtest) {
         void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session); // Forward
         KTerm_Net_ProcessSpeedtest(term, session);
+    }
+
+    // Process Async HttpProbe if active
+    if (net && net->http_probe) {
+        void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessHttpProbe(term, session);
     }
 
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
@@ -2934,6 +2999,252 @@ bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, co
 
     ps->state = 2; // Ready for Next
     ps->sockfd = INVALID_SOCKET;
+
+    return true;
+}
+
+void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->http_probe) return;
+    KTermHttpProbeContext* ctx = net->http_probe;
+
+    if (ctx->state == 6) return; // DONE
+
+    if (ctx->state == 2) { // CONNECT
+        fd_set wfds; struct timeval tv = {0, 0};
+        FD_ZERO(&wfds);
+        FD_SET(ctx->sockfd, &wfds);
+
+        int res = select(ctx->sockfd + 1, NULL, &wfds, NULL, &tv);
+        if (res > 0) {
+            int opt = 0; socklen_t len = sizeof(opt);
+            if (getsockopt(ctx->sockfd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
+                // Connected
+                ctx->connect_ms = (KTerm_GetTime() - ctx->connect_start_time) * 1000.0;
+                ctx->state = 3; // SEND
+            } else {
+                // Fail
+                if (ctx->callback) {
+                    KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Connect Failed");
+                    ctx->callback(term, session, &r, ctx->user_data);
+                }
+                ctx->state = 6;
+            }
+        } else {
+            // Timeout check (5s fixed for now)
+            if (KTerm_GetTime() - ctx->connect_start_time > 5.0) {
+                if (ctx->callback) {
+                    KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Connect Timeout");
+                    ctx->callback(term, session, &r, ctx->user_data);
+                }
+                ctx->state = 6;
+            }
+        }
+    }
+    else if (ctx->state == 3) { // SEND
+        char req[2048];
+        snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KTerm/2.6\r\nConnection: close\r\n\r\n", ctx->path, ctx->host);
+
+        ctx->request_start_time = KTerm_GetTime();
+        ssize_t sent = send(ctx->sockfd, req, strlen(req), 0);
+        if (sent > 0) {
+            ctx->state = 4; // WAIT_HEAD
+        } else {
+             if (ctx->callback) {
+                 KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Send Failed");
+                 ctx->callback(term, session, &r, ctx->user_data);
+             }
+             ctx->state = 6;
+        }
+    }
+    else if (ctx->state == 4) { // WAIT_HEAD
+        // Check for readability
+        fd_set rfds; struct timeval tv = {0, 0};
+        FD_ZERO(&rfds); FD_SET(ctx->sockfd, &rfds);
+
+        if (select(ctx->sockfd + 1, &rfds, NULL, NULL, &tv) > 0) {
+            ctx->first_byte_time = KTerm_GetTime();
+            ctx->ttfb_ms = (ctx->first_byte_time - ctx->request_start_time) * 1000.0;
+            ctx->state = 5; // READ_BODY
+        } else {
+             if (KTerm_GetTime() - ctx->request_start_time > 5.0) {
+                 if (ctx->callback) {
+                     KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Response Timeout");
+                     ctx->callback(term, session, &r, ctx->user_data);
+                 }
+                 ctx->state = 6;
+             }
+        }
+    }
+    else if (ctx->state == 5) { // READ_BODY
+        char buf[4096];
+        ssize_t n = recv(ctx->sockfd, buf, sizeof(buf), KTERM_MSG_DONTWAIT);
+        if (n > 0) {
+            ctx->size_bytes += n;
+            // Parse Status Code if not done
+            if (ctx->status_code == 0) {
+                // Append to internal small buffer for parsing
+                if (ctx->buffer_len < (int)sizeof(ctx->buffer) - 1) {
+                    int space = sizeof(ctx->buffer) - ctx->buffer_len - 1;
+                    int copy = (n < space) ? n : space;
+                    memcpy(ctx->buffer + ctx->buffer_len, buf, copy);
+                    ctx->buffer_len += copy;
+                    ctx->buffer[ctx->buffer_len] = '\0';
+
+                    if (strncmp(ctx->buffer, "HTTP/", 5) == 0) {
+                        char* space1 = strchr(ctx->buffer, ' ');
+                        if (space1) {
+                            ctx->status_code = atoi(space1 + 1);
+                        }
+                    }
+                }
+            }
+        } else if (n == 0) {
+            // Done
+            double end_time = KTerm_GetTime();
+
+            KTermHttpProbeResult r = {0};
+            r.status_code = ctx->status_code;
+            r.dns_ms = ctx->dns_ms;
+            r.connect_ms = ctx->connect_ms;
+            r.ttfb_ms = ctx->ttfb_ms;
+            r.download_ms = (end_time - ctx->first_byte_time) * 1000.0;
+            r.total_ms = (end_time - ctx->start_time) * 1000.0;
+            r.size_bytes = ctx->size_bytes;
+            r.speed_mbps = 0;
+            if (r.download_ms > 0) {
+                r.speed_mbps = ((double)ctx->size_bytes * 8.0) / (r.download_ms * 1000.0);
+            }
+
+            if (ctx->callback) ctx->callback(term, session, &r, ctx->user_data);
+            ctx->state = 6;
+
+        } else {
+             #ifdef _WIN32
+             if (WSAGetLastError() != WSAEWOULDBLOCK)
+             #else
+             if (errno != EAGAIN && errno != EWOULDBLOCK)
+             #endif
+             {
+                 // Error
+                 if (ctx->callback) {
+                     KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Read Error");
+                     ctx->callback(term, session, &r, ctx->user_data);
+                 }
+                 ctx->state = 6;
+             }
+        }
+
+        // Read Timeout (10s total from first byte)
+        if (ctx->state == 5 && (KTerm_GetTime() - ctx->first_byte_time > 10.0)) {
+             if (ctx->callback) {
+                 KTermHttpProbeResult r = {0}; r.error = true; snprintf(r.error_msg, sizeof(r.error_msg), "Read Timeout");
+                 ctx->callback(term, session, &r, ctx->user_data);
+             }
+             ctx->state = 6;
+        }
+    }
+
+    if (ctx->state == 6) {
+        if (IS_VALID_SOCKET(ctx->sockfd)) {
+             CLOSE_SOCKET(ctx->sockfd);
+             ctx->sockfd = INVALID_SOCKET;
+        }
+    }
+}
+
+bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data) {
+    if (!term || !session || !url) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->http_probe) {
+        if (IS_VALID_SOCKET(net->http_probe->sockfd)) CLOSE_SOCKET(net->http_probe->sockfd);
+        if (net->http_probe->user_data) free(net->http_probe->user_data);
+        free(net->http_probe);
+    }
+
+    net->http_probe = (KTermHttpProbeContext*)calloc(1, sizeof(KTermHttpProbeContext));
+    if (!net->http_probe) return false;
+
+    KTermHttpProbeContext* ctx = net->http_probe;
+    ctx->callback = cb;
+    ctx->user_data = user_data;
+    ctx->sockfd = INVALID_SOCKET;
+
+    // Parse URL
+    const char* p = url;
+    if (strncmp(p, "http://", 7) == 0) p += 7;
+    else if (strncmp(p, "https://", 8) == 0) p += 8; // We don't support SSL in this lightweight probe yet? Or assume raw?
+    // Note: This probe uses raw sockets, so HTTPS will fail or return garbage unless we use SSL context.
+    // Ideally we should reject HTTPS or use KTerm's security layer if configured.
+    // For now, assume HTTP or raw TCP.
+
+    const char* slash = strchr(p, '/');
+    const char* colon = strchr(p, ':');
+
+    int host_len = 0;
+    if (slash) {
+        host_len = (int)(slash - p);
+        if (colon && colon < slash) host_len = (int)(colon - p);
+    } else {
+        host_len = strlen(p);
+        if (colon) host_len = (int)(colon - p);
+    }
+
+    if (host_len >= (int)sizeof(ctx->host)) host_len = sizeof(ctx->host) - 1;
+    strncpy(ctx->host, p, host_len);
+    ctx->host[host_len] = '\0';
+
+    if (colon && (!slash || colon < slash)) {
+        ctx->port = atoi(colon + 1);
+    } else {
+        ctx->port = 80;
+    }
+
+    if (slash) {
+        strncpy(ctx->path, slash, sizeof(ctx->path)-1);
+    } else {
+        strcpy(ctx->path, "/");
+    }
+
+    ctx->start_time = KTerm_GetTime();
+
+    // DNS
+    ctx->dns_start_time = KTerm_GetTime();
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    char port_str[16]; snprintf(port_str, sizeof(port_str), "%d", ctx->port);
+
+    if (getaddrinfo(ctx->host, port_str, &hints, &res) != 0) {
+        free(ctx); net->http_probe = NULL;
+        return false;
+    }
+    ctx->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
+
+    ctx->dns_ms = (KTerm_GetTime() - ctx->dns_start_time) * 1000.0;
+
+    // Connect
+    ctx->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!IS_VALID_SOCKET(ctx->sockfd)) {
+        free(ctx); net->http_probe = NULL;
+        return false;
+    }
+
+    #ifdef _WIN32
+    u_long mode = 1; ioctlsocket(ctx->sockfd, FIONBIO, &mode);
+    #else
+    fcntl(ctx->sockfd, F_SETFL, fcntl(ctx->sockfd, F_GETFL, 0) | O_NONBLOCK);
+    #endif
+
+    ctx->connect_start_time = KTerm_GetTime();
+    connect(ctx->sockfd, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr));
+
+    ctx->state = 2; // CONNECT
 
     return true;
 }
