@@ -886,6 +886,8 @@ The class ID `KTERM` is reserved for internal configuration.
 | `EXT;net`    | `myip` | Returns the local public-facing IP address. |
 | `EXT;net`    | `traceroute` | `host=...;maxhops=30;timeout=2000`. Async traceroute (UDP/ICMP). Returns `HOP;...` events. |
 | `EXT;net`    | `responsetime`| `host=...;count=10;interval=1;timeout=2000`. Async latency/jitter test. Returns `OK;SENT=...` stats. |
+| `EXT;net`    | `speedtest`   | `host=...;streams=4`. Multi-stream throughput test. Auto-selects server if host is omitted or `auto`. |
+| `EXT;net`    | `connections` | Lists active network sessions and their status. |
 | `EXT;automate`| `trigger;add;pat;act`| Adds an automation trigger (Pattern -> Action). |
 | `EXT;automate`| `trigger;list`| Lists active triggers. |
 | `EXT;ssh`    | `connect;...` | Alias for `EXT;net`. |
@@ -1495,6 +1497,8 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;dns;host`: Synchronously resolves a hostname to an IP address. Returns `OK;IP=...` or `ERR`.
 *   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Returns `HOST=...;PORT=...;STATUS=...` for each port.
 *   `EXT;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
+*   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted.
+*   `EXT;net;connections`: Lists active network sessions.
 *   `EXT;automate;trigger;...`: Manages automation triggers.
 
 **Top-Level Network Diagnostics (v2.6.12):**
