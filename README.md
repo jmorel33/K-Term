@@ -558,7 +558,7 @@ The `kt_net.h` module provides a lightweight, non-blocking networking stack for 
 *   **Gateway Extensions:** Built-in `EXT;net` commands for runtime network diagnostics (Diagnostics Suite):
     *   `PING`: Check connectivity to a host (Alias: `responsetime`).
     *   `TRACEROUTE`: Asynchronous traceroute with per-hop reporting.
-    *   `SPEEDTEST`: Multi-stream throughput (DL/UL) and jitter measurement with auto-server selection.
+    *   `SPEEDTEST`: Multi-stream throughput (DL/UL) and jitter measurement with auto-server selection and visualization (`graph=1`).
     *   `HTTPPROBE`: Detailed HTTP timing metrics (DNS, TCP, TTFB, Download).
     *   `CONNECTIONS`: List active network sessions and their states.
     *   `PORTSCAN`: Asynchronous TCP port scanner.
