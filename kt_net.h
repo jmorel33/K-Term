@@ -2605,6 +2605,12 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
              }
         }
 
+        // Check if any stream is still active
+        bool any_connected = false;
+        for(int i=0; i<st->num_streams; i++) {
+             if (st->streams[i].connected) any_connected = true;
+        }
+
         double now = KTerm_GetTime();
         double elapsed = now - st->phase_start_time;
 
@@ -2623,7 +2629,8 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
              st->callback(term, session, &res, st->user_data);
         }
 
-        if (elapsed >= st->duration_sec) {
+        // Finish if duration expired OR all streams finished (e.g. file downloaded)
+        if (elapsed >= st->duration_sec || (!any_connected && total > 0)) {
              // Close DL streams
              for(int i=0; i<st->num_streams; i++) {
                  if (IS_VALID_SOCKET(st->streams[i].fd)) { CLOSE_SOCKET(st->streams[i].fd); st->streams[i].fd = INVALID_SOCKET; }
@@ -2637,6 +2644,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
     }
     else if (st->state == 4) { // CONNECT_UL
          // Initiate Upload connections
+         // Fix: Guard against infinite socket creation loop if connection is pending
          if (st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
               // Start connections if not already started
               // (Wait, we need to re-open sockets)
@@ -2713,6 +2721,12 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
              }
         }
 
+        // Check if any stream is still active
+        bool any_connected = false;
+        for(int i=0; i<st->num_streams; i++) {
+             if (st->streams[i].connected) any_connected = true;
+        }
+
         double now = KTerm_GetTime();
         double elapsed = now - st->phase_start_time;
 
@@ -2731,7 +2745,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
              st->callback(term, session, &res, st->user_data);
         }
 
-        if (elapsed >= st->duration_sec) {
+        if (elapsed >= st->duration_sec || (!any_connected && total > 0)) {
              st->state = 6; // DONE
              // Final callback
              if (st->callback) {
