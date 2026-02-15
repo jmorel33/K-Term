@@ -151,6 +151,7 @@ typedef void (*KTermTracerouteCallback)(KTerm* term, KTermSession* session, int 
 
 // Starts an async traceroute. Use NULL callback for default Gateway output if integrated.
 void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data);
+void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data);
 
 // Response Time / Latency Test Result
 typedef struct {
@@ -391,6 +392,7 @@ typedef struct KTermTracerouteContext {
 
     KTermTracerouteCallback callback;
     void* user_data;
+    bool continuous;
 
 #ifdef _WIN32
     HANDLE icmp_handle;
@@ -1336,6 +1338,12 @@ static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
 
     if (tr->state == 2) { // SEND
         if (tr->current_ttl > tr->max_hops) {
+             if (tr->continuous) {
+                 tr->current_ttl = 1;
+                 tr->state = 5; // WAIT_LOOP
+                 gettimeofday(&tr->probe_start_time, NULL);
+                 return;
+             }
              tr->state = 4; // DONE
              // Optional: Callback with hop=0 to signal finish?
              return;
@@ -1404,7 +1412,13 @@ static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
             }
 
             if (reached) {
-                tr->state = 4; // DONE
+                if (tr->continuous) {
+                    tr->current_ttl = 1;
+                    tr->state = 5; // WAIT_LOOP
+                    gettimeofday(&tr->probe_start_time, NULL);
+                } else {
+                    tr->state = 4; // DONE
+                }
             } else {
                 tr->current_ttl++;
                 tr->state = 2; // SEND next
@@ -1422,9 +1436,23 @@ static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
              }
         }
     }
+    else if (tr->state == 5) { // WAIT_LOOP
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        double elapsed = (now.tv_sec - tr->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - tr->probe_start_time.tv_usec) / 1000.0;
+        if (elapsed > 1000.0) { // 1 second delay
+             tr->state = 2;
+        }
+    }
 #elif defined(_WIN32)
     if (tr->state == 2) { // SEND
         if (tr->current_ttl > tr->max_hops) {
+             if (tr->continuous) {
+                 tr->current_ttl = 1;
+                 tr->state = 5; // WAIT_LOOP
+                 tr->probe_start_time.tv_sec = GetTickCount();
+                 return;
+             }
              tr->state = 4; // DONE
              return;
         }
@@ -1473,19 +1501,32 @@ static void KTerm_Net_ProcessTraceroute(KTerm* term, KTermSession* session) {
                  if (tr->callback) tr->callback(term, session, tr->current_ttl, "*", 0, false, tr->user_data);
              }
 
-             if (reached) tr->state = 4;
-             else {
+             if (reached) {
+                 if (tr->continuous) {
+                     tr->current_ttl = 1;
+                     tr->state = 5; // WAIT_LOOP
+                     tr->probe_start_time.tv_sec = GetTickCount();
+                 } else {
+                     tr->state = 4; // DONE
+                 }
+             } else {
                  tr->current_ttl++;
                  tr->state = 2;
              }
         } else {
              // Timeout Check
              DWORD now = GetTickCount();
-             if (now - tr->probe_start_time.tv_sec > (DWORD)tr->timeout_ms) {
+             if (now - (DWORD)tr->probe_start_time.tv_sec > (DWORD)tr->timeout_ms) {
                  if (tr->callback) tr->callback(term, session, tr->current_ttl, "*", 0, false, tr->user_data);
                  tr->current_ttl++;
                  tr->state = 2;
              }
+        }
+    }
+    else if (tr->state == 5) { // WAIT_LOOP
+        DWORD now = GetTickCount();
+        if (now - (DWORD)tr->probe_start_time.tv_sec > 1000) {
+             tr->state = 2;
         }
     }
 #else
@@ -2299,6 +2340,10 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
 }
 
 void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data) {
+    KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, false, cb, user_data);
+}
+
+void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data) {
     if (!term || !session || !host) return;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
@@ -2318,6 +2363,7 @@ void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, 
     strncpy(tr->host, host, sizeof(tr->host)-1);
     tr->max_hops = (max_hops > 0) ? max_hops : 30;
     tr->timeout_ms = (timeout_ms > 0) ? timeout_ms : 2000;
+    tr->continuous = continuous;
     tr->callback = cb;
     tr->user_data = user_data;
     tr->current_ttl = 1;

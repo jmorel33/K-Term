@@ -2029,12 +2029,14 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         char* host = NULL;
         int max_hops = 30;
         int timeout_ms = 2000;
+        bool continuous = false;
 
         char* arg = strtok(NULL, ";");
         while(arg) {
             if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
             else if (strncmp(arg, "maxhops=", 8) == 0) max_hops = atoi(arg+8);
             else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            else if (strncmp(arg, "continuous=", 11) == 0) continuous = (atoi(arg+11) != 0);
             else if (!host) host = arg; // Fallback positional if not keyed
             arg = strtok(NULL, ";");
         }
@@ -2045,7 +2047,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              char* id_copy = (char*)malloc(strlen(id) + 1);
              if (id_copy) {
                  strcpy(id_copy, id);
-                 KTerm_Net_Traceroute(term, session, host, max_hops, timeout_ms, KTerm_Traceroute_Callback, id_copy);
+                 KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, continuous, KTerm_Traceroute_Callback, id_copy);
                  if (respond) respond(term, session, "OK;STARTED");
              }
         } else {
@@ -2169,6 +2171,23 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_URL");
         }
+    } else if (strcmp(cmd, "help") == 0) {
+        const char* help =
+            "OK;"
+            "connect;[user@]host[:port]|"
+            "disconnect|"
+            "status|"
+            "ping;host|"
+            "responsetime;host[;count;interval;timeout]|"
+            "myip|"
+            "traceroute;host[;maxhops;timeout]|"
+            "dns;host|"
+            "portscan;host;ports|"
+            "whois;host|"
+            "speedtest;[host][;streams;graph=1]|"
+            "connections|"
+            "httpprobe;url";
+        if (respond) respond(term, session, help);
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
     }
@@ -2864,7 +2883,6 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
-    printf("GatewayProcess: %s %s %s\n", class_id, id, command);
     // Input Hardening
     if (!term || !session || !class_id || !id || !command) return;
     if (!params) params = "";
