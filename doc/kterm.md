@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.19
+# kterm.h - Technical Reference Manual v2.6.20
 
 **(c) 2026 Jacques Morel**
 
@@ -122,7 +122,22 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 
 ### 1.1. Description
 
-`kterm.h` is a comprehensive, single-header C library for terminal emulation. It is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. The library uses [Situation](https://www.Situation.com/) for rendering, windowing, and input handling, providing a complete solution out of the box.
+K-Term is a comprehensive C library for terminal emulation, designed with a modular architecture for easy integration. The library is organized into three files:
+
+- **`kterm_api.h`**: Public API declarations (types, structs, function prototypes)
+- **`kterm_impl.h`**: Core implementation code
+- **`kterm.h`**: Implementation orchestrator that coordinates all modules when `KTERM_IMPLEMENTATION` is defined
+
+When `KTERM_IMPLEMENTATION` is defined, `kterm.h` includes implementations in the following order:
+1. Font data (font_data.h)
+2. Parser module (kt_parser.h)
+3. Layout module (kt_layout.h)
+4. Core implementation (kterm_impl.h)
+5. Gateway module (kt_gateway.h) - if KTERM_ENABLE_GATEWAY is defined
+6. Networking module (kt_net.h) - unless KTERM_DISABLE_NET is defined
+7. Compositor module (kt_composite_sit.h)
+
+The library is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. It uses [Situation](https://www.Situation.com/) for rendering, windowing, and input handling, providing a complete solution out of the box.
 
 The library emulates a wide range of historical and modern terminal standards, from the DEC VT52 to contemporary xterm extensions. It processes a stream of bytes, interprets control codes and escape sequences, and maintains an internal model of the terminal screen, which is then rendered to the display.
 
@@ -168,13 +183,18 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
     -   Debugging utilities for logging unsupported sequences.
+-   **Modular Architecture:**
+    -   Split into API (`kterm_api.h`), core implementation (`kterm_impl.h`), and orchestrator (`kterm.h`)
+    -   Can be built as part of a shared library (DLL) or used as header-only
+    -   Clean module separation: parser, layout, core, gateway, networking, compositor
+    -   Proper dependency management with ordered includes
 -   **Device Support:**
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.19)
+### 1.3. Known Limitations (v2.6.20)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.19 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.20 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).

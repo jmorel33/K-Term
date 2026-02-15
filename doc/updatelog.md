@@ -1,5 +1,21 @@
 # K-Term Update Log
 
+## [v2.6.20] - Library Structure Refactoring
+- **Modular Architecture:** Split monolithic `kterm.h` into three files for better maintainability:
+  - `kterm_api.h`: Public API declarations (types, structs, function prototypes)
+  - `kterm_impl.h`: Core implementation code (when `KTERM_IMPLEMENTATION` is defined)
+  - `kterm.h`: Orchestrator that includes API and coordinates all module implementations
+- **Implementation Organization:** Clean separation of concerns in kterm.h:
+  - Font data implementation (font_data.h)
+  - Parser module (kt_parser.h)
+  - Layout module (kt_layout.h) with KTERM_LAYOUT_IMPLEMENTATION
+  - Core implementation (kterm_impl.h)
+  - Gateway module (kt_gateway.h) with KTERM_GATEWAY_IMPLEMENTATION
+  - Networking module (kt_net.h) with KTERM_NET_IMPLEMENTATION
+  - Compositor module (kt_composite_sit.h) with KTERM_COMPOSITE_IMPLEMENTATION
+- **DLL Integration:** New structure enables building K-Term directly into Situation DLL alongside the rendering framework
+- **Dependency Management:** Proper include order ensures all dependencies are resolved correctly
+
 ## [v2.6.19] - Diagnostics Usability & Enhancements
 - **Help Command:** Added `EXT;net;help` Gateway command to list available network diagnostics commands and their parameters.
 - **Continuous Traceroute:** Extended `traceroute` command with `continuous=1` parameter for MTR-like indefinite looping.
