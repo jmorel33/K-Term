@@ -90,7 +90,7 @@
 void* KTerm_Malloc(size_t size);
 void* KTerm_Calloc(size_t nmemb, size_t size);
 void* KTerm_Realloc(void* ptr, size_t size);
-void KTerm_Free(void* ptr);
+KTERM_API void KTerm_Free(void* ptr);
 
 // --- Threading Support Configuration ---
 #if !defined(__STDC_NO_THREADS__)
@@ -1155,7 +1155,7 @@ typedef struct {
 // =============================================================================
 // VT COMPLIANCE LEVELS
 // =============================================================================
-void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags);
+KTERM_API void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags);
 
 #ifdef KTERM_ENABLE_GATEWAY
 #include "kt_gateway.h"
@@ -1192,225 +1192,225 @@ typedef struct {
     bool strict_mode;          // Enable strict parsing mode
 } KTermConfig;
 
-KTerm* KTerm_Create(KTermConfig config);
-void KTerm_Destroy(KTerm* term);
+KTERM_API KTerm* KTerm_Create(KTermConfig config);
+KTERM_API void KTerm_Destroy(KTerm* term);
 
 // Session Management
-void KTerm_SetActiveSession(KTerm* term, int index);
-void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
-void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
-void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable);
-bool KTerm_InitSession(KTerm* term, int index);
+KTERM_API void KTerm_SetActiveSession(KTerm* term, int index);
+KTERM_API void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
+KTERM_API void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
+KTERM_API void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable);
+KTERM_API bool KTerm_InitSession(KTerm* term, int index);
 
 // KTerm lifecycle
-bool KTerm_Init(KTerm* term);
-void KTerm_Cleanup(KTerm* term);
-void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor blink)
-void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
+KTERM_API bool KTerm_Init(KTerm* term);
+KTERM_API void KTerm_Cleanup(KTerm* term);
+KTERM_API void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor blink)
+KTERM_API void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
 
 // VT compliance and identification
-bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event); // Retrieve buffered event
-void KTerm_QueueInputEvent(KTerm* term, KTermKeyEvent event); // Push event to buffer
-void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level);
+KTERM_API bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event); // Retrieve buffered event
+KTERM_API void KTerm_QueueInputEvent(KTerm* term, KTermKeyEvent event); // Push event to buffer
+KTERM_API void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level);
 VTLevel KTerm_GetLevel(KTerm* term);
 // void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by KTerm_SetLevel
 // bool IsVTFeatureSupported(const char* feature); - Deprecated by direct struct access
 void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buffer_size);
 
 // Enhanced pipeline management (for host input)
-bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* event);
-bool KTerm_WriteChar(KTerm* term, unsigned char ch);
-size_t KTerm_PushInput(KTerm* term, const void* data, size_t length);
-bool KTerm_WriteString(KTerm* term, const char* str);
-bool KTerm_WriteFormat(KTerm* term, const char* format, ...);
+KTERM_API bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* event);
+KTERM_API bool KTerm_WriteChar(KTerm* term, unsigned char ch);
+KTERM_API size_t KTerm_PushInput(KTerm* term, const void* data, size_t length);
+KTERM_API bool KTerm_WriteString(KTerm* term, const char* str);
+KTERM_API bool KTerm_WriteFormat(KTerm* term, const char* format, ...);
 // bool PipelineWriteUTF8(const char* utf8_str); // Requires UTF-8 decoding logic
-void KTerm_ProcessEvents(KTerm* term); // Process characters from the pipeline
-void KTerm_ClearEvents(KTerm* term);
-int KTerm_GetPendingEventCount(KTerm* term);
-bool KTerm_IsEventOverflow(KTerm* term);
+KTERM_API void KTerm_ProcessEvents(KTerm* term); // Process characters from the pipeline
+KTERM_API void KTerm_ClearEvents(KTerm* term);
+KTERM_API int KTerm_GetPendingEventCount(KTerm* term);
+KTERM_API bool KTerm_IsEventOverflow(KTerm* term);
 
 // Performance management
-void KTerm_SetPipelineTargetFPS(KTerm* term, int fps);    // Helps tune processing budget
-void KTerm_SetPipelineTimeBudget(KTerm* term, double pct); // Percentage of frame time for pipeline
+KTERM_API void KTerm_SetPipelineTargetFPS(KTerm* term, int fps);    // Helps tune processing budget
+KTERM_API void KTerm_SetPipelineTimeBudget(KTerm* term, double pct); // Percentage of frame time for pipeline
 
 // Mouse support (enhanced)
-void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode); // Explicitly set a mouse mode
-void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); // e.g., "focus", "sgr"
+KTERM_API void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode); // Explicitly set a mouse mode
+KTERM_API void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); // e.g., "focus", "sgr"
 // void KTerm_UpdateMouse(KTerm* term); // Removed in v2.1
 // void KTerm_UpdateKeyboard(KTerm* term); // Removed in v2.1
 // void UpdateKeyboard(KTerm* term);  // Removed in v2.1
 // bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Removed in v2.1
-void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
-void KTerm_SetFocus(KTerm* term, bool focused); // Report focus state (CSI I/O)
-void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24
+KTERM_API void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
+KTERM_API void KTerm_SetFocus(KTerm* term, bool focused); // Report focus state (CSI I/O)
+KTERM_API void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24
 
 // KTerm control and modes
-void KTerm_SetMode(KTerm* term, const char* mode, bool enable); // Generic mode setting by name
-void KTerm_SetCursorShape(KTerm* term, CursorShape shape);
-void KTerm_SetCursorKTermColor(KTerm* term, ExtendedKTermColor color);
+KTERM_API void KTerm_SetMode(KTerm* term, const char* mode, bool enable); // Generic mode setting by name
+KTERM_API void KTerm_SetCursorShape(KTerm* term, CursorShape shape);
+KTERM_API void KTerm_SetCursorKTermColor(KTerm* term, ExtendedKTermColor color);
 
 // Character sets and encoding
-void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset); // Designate G0-G3
-void KTerm_SetCharacterSet(KTerm* term, CharacterSet charset); // Set current GL (usually G0)
+KTERM_API void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset); // Designate G0-G3
+KTERM_API void KTerm_SetCharacterSet(KTerm* term, CharacterSet charset); // Set current GL (usually G0)
 unsigned int TranslateCharacter(KTerm* term, unsigned char ch, CharsetState* state); // Translate based on active CS
 
 // Tab stops
-void KTerm_SetTabStop(KTerm* term, int column);
-void KTerm_ClearTabStop(KTerm* term, int column);
-void KTerm_ClearAllTabStops(KTerm* term);
+KTERM_API void KTerm_SetTabStop(KTerm* term, int column);
+KTERM_API void KTerm_ClearTabStop(KTerm* term, int column);
+KTERM_API void KTerm_ClearAllTabStops(KTerm* term);
 int NextTabStop(KTerm* term, int current_column);
 int PreviousTabStop(KTerm* term, int current_column); // Added for CBT
 
 // Bracketed paste
-void KTerm_EnableBracketedPaste(KTerm* term, bool enable); // Enable/disable CSI ? 2004 h/l
+KTERM_API void KTerm_EnableBracketedPaste(KTerm* term, bool enable); // Enable/disable CSI ? 2004 h/l
 bool IsBracketedPasteActive(KTerm* term);
 void ProcessPasteData(KTerm* term, const char* data, size_t length); // Handle pasted data
 
 // Rectangular operations (VT420+)
-void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
-void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char);
-void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y);
-void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session);  // DECCRA Implementation
-void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session); // DECRQCRA Implementation
+KTERM_API void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
+KTERM_API void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char);
+KTERM_API void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y);
+KTERM_API void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session);  // DECCRA Implementation
+KTERM_API void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session); // DECRQCRA Implementation
 
 // Sixel graphics
-void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session);
-void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length); // Process raw Sixel string
-void KTerm_DrawSixelGraphics(KTerm* term); // Render current Sixel image
+KTERM_API void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length); // Process raw Sixel string
+KTERM_API void KTerm_DrawSixelGraphics(KTerm* term); // Render current Sixel image
 
 // Soft fonts
-void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count); // DECDLD
-void KTerm_SelectSoftFont(KTerm* term, bool enable); // Enable/disable use of loaded soft font
+KTERM_API void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count); // DECDLD
+KTERM_API void KTerm_SelectSoftFont(KTerm* term, bool enable); // Enable/disable use of loaded soft font
 
 // Title management
-void KTerm_SetWindowTitle(KTerm* term, const char* title); // Set window title (OSC 0, OSC 2)
-void KTerm_SetIconTitle(KTerm* term, const char* title);   // Set icon title (OSC 1)
-const char* KTerm_GetWindowTitle(KTerm* term);
-const char* KTerm_GetIconTitle(KTerm* term);
+KTERM_API void KTerm_SetWindowTitle(KTerm* term, const char* title); // Set window title (OSC 0, OSC 2)
+KTERM_API void KTerm_SetIconTitle(KTerm* term, const char* title);   // Set icon title (OSC 1)
+KTERM_API const char* KTerm_GetWindowTitle(KTerm* term);
+KTERM_API const char* KTerm_GetIconTitle(KTerm* term);
 
 // Callbacks
-void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);
-void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);
-void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
-void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
-void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
-void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
-void KTerm_SetErrorCallback(KTerm* term, KTermErrorCallback callback, void* user_data);
+KTERM_API void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);
+KTERM_API void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);
+KTERM_API void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
+KTERM_API void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
+KTERM_API void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
+KTERM_API void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
+KTERM_API void KTerm_SetErrorCallback(KTerm* term, KTermErrorCallback callback, void* user_data);
 #ifdef KTERM_ENABLE_GATEWAY
-void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
-void KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler);
+KTERM_API void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
+KTERM_API void KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler);
 #endif
-void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
+KTERM_API void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
 
 // Testing and diagnostics
-void KTerm_RunTest(KTerm* term, const char* test_name); // Run predefined test sequences
-void KTerm_ShowInfo(KTerm* term);           // Display current terminal state/info
-void KTerm_EnableDebug(KTerm* term, bool enable);     // Toggle verbose debug logging
-void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence); // Log an unsupported sequence
-void KTerm_ReportError(KTerm* term, KTermErrorLevel level, KTermErrorSource source, const char* format, ...);
+KTERM_API void KTerm_RunTest(KTerm* term, const char* test_name); // Run predefined test sequences
+KTERM_API void KTerm_ShowInfo(KTerm* term);           // Display current terminal state/info
+KTERM_API void KTerm_EnableDebug(KTerm* term, bool enable);     // Toggle verbose debug logging
+KTERM_API void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence); // Log an unsupported sequence
+KTERM_API void KTerm_ReportError(KTerm* term, KTermErrorLevel level, KTermErrorSource source, const char* format, ...);
 KTermStatus KTerm_GetStatus(KTerm* term);
-void KTerm_ShowDiagnostics(KTerm* term);      // Display buffer usage info
+KTERM_API void KTerm_ShowDiagnostics(KTerm* term);      // Display buffer usage info
 
 // Screen buffer management
-void KTerm_SwapScreenBuffer(KTerm* term); // Handles 1047/1049 logic
+KTERM_API void KTerm_SwapScreenBuffer(KTerm* term); // Handles 1047/1049 logic
 
-void KTerm_LoadFont(KTerm* term, const char* filepath);
-void KTerm_CalculateFontMetrics(const void* data, int count, int width, int height, int stride, bool is_16bit, KTermFontMetric* metrics_out);
+KTERM_API void KTerm_LoadFont(KTerm* term, const char* filepath);
+KTERM_API void KTerm_CalculateFontMetrics(const void* data, int count, int width, int height, int stride, bool is_16bit, KTermFontMetric* metrics_out);
 
 // Clipboard
-void KTerm_CopySelectionToClipboard(KTerm* term);
+KTERM_API void KTerm_CopySelectionToClipboard(KTerm* term);
 
 // Direct Write (Bypasses Input Queue - For High-Throughput Graphics)
-void KTerm_WriteRawGraphics(KTerm* term, int session_index, const char* data, size_t len);
+KTERM_API void KTerm_WriteRawGraphics(KTerm* term, int session_index, const char* data, size_t len);
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
-uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
+KTERM_API uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
 
 // Forward declaration for SGR helper
 int ProcessExtendedKTermColor(KTerm* term, ExtendedKTermColor* color, int param_index);
 
 // Resize the terminal grid and window texture
-void KTerm_Resize(KTerm* term, int cols, int rows);
+KTERM_API void KTerm_Resize(KTerm* term, int cols, int rows);
 
 // Multiplexer API
 KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);
-void KTerm_ClosePane(KTerm* term, KTermPane* pane);
+KTERM_API void KTerm_ClosePane(KTerm* term, KTermPane* pane);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
-void KTerm_CreateFontTexture(KTerm* term);
+KTERM_API void KTerm_CreateFontTexture(KTerm* term);
 
 // Internal helper forward declaration
-void KTerm_InitCompute(KTerm* term);
-void KTerm_PrepareRenderBuffer(KTerm* term);
+KTERM_API void KTerm_InitCompute(KTerm* term);
+KTERM_API void KTerm_PrepareRenderBuffer(KTerm* term);
 
 // Low-level char processing (called by KTerm_ProcessEvents via KTerm_ProcessChar)
-void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch); // Main dispatcher for character processing
-void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsigned char ch); // Handle Printer Controller Mode
-void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch); // Main dispatcher for character processing
+KTERM_API void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsigned char ch); // Handle Printer Controller Mode
+KTERM_API void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch);
 void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data);
 void ExecuteInvokeMacro(KTerm* term, KTermSession* session);
 void ExecuteDECSRFR(KTerm* term, KTermSession* session);
-void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessCharsetCommand(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char ch);
-void KTerm_ProcessnFChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessCharsetCommand(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char ch);
+KTERM_API void KTerm_ProcessnFChar(KTerm* term, KTermSession* session, unsigned char ch);
 
 
 // Grid Access (Post-Flush / Simulation)
 EnhancedTermChar* KTerm_GetCell(KTerm* term, int x, int y);
-void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c);
-void KTerm_MarkRegionDirty(KTerm* term, KTermRect rect);
+KTERM_API void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c);
+KTERM_API void KTerm_MarkRegionDirty(KTerm* term, KTermRect rect);
 
 // Screen manipulation internals
-void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines);
-void KTerm_InsertLinesAt(KTerm* term, int row, int count); // Added IL
-void KTerm_DeleteLinesAt(KTerm* term, int row, int count); // Added DL
-void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count); // Added ICH
-void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count); // Added DCH
-void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch); // Handles character placement and insert mode
-void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines);
+KTERM_API void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines);
+KTERM_API void KTerm_InsertLinesAt(KTerm* term, int row, int count); // Added IL
+KTERM_API void KTerm_DeleteLinesAt(KTerm* term, int row, int count); // Added DL
+KTERM_API void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count); // Added ICH
+KTERM_API void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count); // Added DCH
+KTERM_API void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch); // Handles character placement and insert mode
+KTERM_API void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines);
 
-void KTerm_ExecuteSaveCursor(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteSaveCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session);
-void KTerm_ExecuteRestoreCursor(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteRestoreCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
 
-void KTerm_FlushOps(KTerm* term, KTermSession* session); // Flush pending ops to grid
+KTERM_API void KTerm_FlushOps(KTerm* term, KTermSession* session); // Flush pending ops to grid
 
 // Response and parsing helpers
-void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
-void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
-void KTerm_DispatchSequence(KTerm* term, KTermSession* session, VTParseState type);
+KTERM_API void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
+KTERM_API void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
+KTERM_API void KTerm_DispatchSequence(KTerm* term, KTermSession* session, VTParseState type);
 #ifdef KTERM_ENABLE_GATEWAY
 static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const char* data, size_t len); // Gateway Protocol Parser
 #endif
-int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
-int KTerm_GetCSIParam(KTerm* term, KTermSession* session, int index, int default_value); // Gets a parsed CSI parameter
-void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char command);
-void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecuteAPCCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecutePMCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session);
-void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session);
+KTERM_API int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
+KTERM_API int KTerm_GetCSIParam(KTerm* term, KTermSession* session, int index, int default_value); // Gets a parsed CSI parameter
+KTERM_API void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char command);
+KTERM_API void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteAPCCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecutePMCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session);
+KTERM_API void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session);
 
 // Cell and attribute helpers
-void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell); // Clears a cell with current attributes
-void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session);          // Resets current text attributes to default
+KTERM_API void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell); // Clears a cell with current attributes
+KTERM_API void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session);          // Resets current text attributes to default
 
 // Character set translation helpers
 unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch);
@@ -1419,11 +1419,11 @@ unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch);
 // Keyboard sequence generation helpers (Removed in v2.1)
 
 // Scripting API functions
-void KTerm_Script_PutChar(KTerm* term, unsigned char ch);
-void KTerm_Script_Print(KTerm* term, const char* text);
-void KTerm_Script_Printf(KTerm* term, const char* format, ...);
-void KTerm_Script_Cls(KTerm* term);
-void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
+KTERM_API void KTerm_Script_PutChar(KTerm* term, unsigned char ch);
+KTERM_API void KTerm_Script_Print(KTerm* term, const char* text);
+KTERM_API void KTerm_Script_Printf(KTerm* term, const char* format, ...);
+KTERM_API void KTerm_Script_Cls(KTerm* term);
+KTERM_API void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 
 
 // KTermPushConstants and GPU_ATTR macros moved to kt_composite_sit.h
