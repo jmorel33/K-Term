@@ -122,6 +122,7 @@ typedef struct KTermSession_T {
 
     // Operation Queue for Grid Mutations
     KTermOpQueue op_queue;
+    kterm_mutex_t op_queue_lock;
     KTermRect dirty_rect;
 
     // Screen management
@@ -4147,7 +4148,7 @@ void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
     op.u.vertical.count = count;
     op.u.vertical.respect_protected = true;
     op.u.vertical.downward = true;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 EnhancedTermChar* KTerm_GetCell(KTerm* term, int x, int y) {
@@ -4213,7 +4214,7 @@ void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
     op.u.vertical.count = count;
     op.u.vertical.respect_protected = true;
     op.u.vertical.downward = false;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
@@ -4329,7 +4330,7 @@ static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* se
     }
     op.u.set_cell.cell = target_cell;
 
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 
     if (width > 1) {
         // Clear second cell
@@ -5293,7 +5294,7 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
                     op.u.set_cell.x = x;
                     op.u.set_cell.y = y;
                     op.u.set_cell.cell = c;
-                    KTerm_QueueOp(&target_sess->op_queue, op);
+                    KTerm_QueueOp(target_sess, op);
 
                     // Advance cursor
                     x++;
@@ -12189,6 +12190,7 @@ static void KTerm_CleanupSession(KTermSession* session) {
     }
 
     KTerm_InputQueue_Free(&session->input_queue);
+    KTERM_MUTEX_DESTROY(session->op_queue_lock);
 }
 
 /**
@@ -12359,11 +12361,18 @@ bool KTerm_IsOpQueueFull(KTermOpQueue* queue) {
     return queue->count >= KTERM_OP_QUEUE_SIZE;
 }
 
-bool KTerm_QueueOp(KTermOpQueue* queue, KTermOp op) {
-    if (KTerm_IsOpQueueFull(queue)) return false;
+bool KTerm_QueueOp(KTermSession* session, KTermOp op) {
+    if (!session) return false;
+    KTermOpQueue* queue = &session->op_queue;
+    KTERM_MUTEX_LOCK(session->op_queue_lock);
+    if (KTerm_IsOpQueueFull(queue)) {
+        KTERM_MUTEX_UNLOCK(session->op_queue_lock);
+        return false;
+    }
     queue->ops[queue->tail] = op;
     queue->tail = (queue->tail + 1) % KTERM_OP_QUEUE_SIZE;
     queue->count++;
+    KTERM_MUTEX_UNLOCK(session->op_queue_lock);
     return true;
 }
 
@@ -12372,7 +12381,7 @@ void KTerm_QueueFillRect(KTermSession* session, KTermRect rect, EnhancedTermChar
     op.type = KTERM_OP_FILL_RECT;
     op.u.fill.rect = rect;
     op.u.fill.fill_char = fill_char;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueCopyRect(KTermSession* session, KTermRect src, int dst_x, int dst_y) {
@@ -12386,7 +12395,7 @@ void KTerm_QueueCopyRectWithMode(KTermSession* session, KTermRect src, int dst_x
     op.u.copy.dst_x = dst_x;
     op.u.copy.dst_y = dst_y;
     op.u.copy.mode = mode;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr_mask, uint32_t attr_values, uint32_t attr_xor_mask, bool set_fg, ExtendedKTermColor fg, bool set_bg, ExtendedKTermColor bg) {
@@ -12400,7 +12409,7 @@ void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr
     op.u.set_attr.fg = fg;
     op.u.set_attr.set_bg = set_bg;
     op.u.set_attr.bg = bg;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected) {
@@ -12424,7 +12433,7 @@ void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_prote
     op.u.vertical.respect_protected = respect_protected;
     op.u.vertical.downward = true; // Insert pushes down
 
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_protected) {
@@ -12447,7 +12456,7 @@ void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_prote
     op.u.vertical.respect_protected = respect_protected;
     op.u.vertical.downward = false; // Delete pulls up
 
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueScrollRegion(KTermSession* session, KTermRect rect, int dy) {
@@ -12455,7 +12464,7 @@ void KTerm_QueueScrollRegion(KTermSession* session, KTermRect rect, int dy) {
     op.type = KTERM_OP_SCROLL_REGION;
     op.u.scroll.rect = rect;
     op.u.scroll.dy = dy;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 void KTerm_QueueResize(KTermSession* session, int cols, int rows, bool reflow) {
@@ -12464,7 +12473,7 @@ void KTerm_QueueResize(KTermSession* session, int cols, int rows, bool reflow) {
     op.u.resize.new_width = cols;
     op.u.resize.new_height = rows;
     op.u.resize.reflow_scrollback = reflow;
-    KTerm_QueueOp(&session->op_queue, op);
+    KTerm_QueueOp(session, op);
 }
 
 // =============================================================================
@@ -12906,7 +12915,10 @@ static void KTerm_ApplyCopyRectOp(KTermSession* session, KTermOp* op) {
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             if (src.y + y < session->buffer_height && src.x + x < session->cols) {
-                temp[y * width + x] = *GetActiveScreenCell(session, src.y + y, src.x + x);
+                EnhancedTermChar* src_cell = GetActiveScreenCell(session, src.y + y, src.x + x);
+                if (src_cell) {
+                    temp[y * width + x] = *src_cell;
+                }
             }
         }
     }
@@ -13050,8 +13062,12 @@ static void KTerm_ApplyVerticalOp(KTermSession *session, KTermOp *op) {
         for (int y = end_row - 1; y >= start_row + lines; y--) {
              for (int x = r.x; x < r.x + r.w; x++) {
                  // Direct cell copy
-                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - lines, x);
-                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                 EnhancedTermChar* dst = GetActiveScreenCell(session, y, x);
+                 EnhancedTermChar* src = GetActiveScreenCell(session, y - lines, x);
+                 if (dst && src) {
+                     *dst = *src;
+                     dst->flags |= KTERM_FLAG_DIRTY;
+                 }
              }
              if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
@@ -13059,7 +13075,8 @@ static void KTerm_ApplyVerticalOp(KTermSession *session, KTermOp *op) {
         // Clear inserted lines at top
         for (int y = start_row; y < start_row + lines && y < end_row; y++) {
              for (int x = r.x; x < r.x + r.w; x++) {
-                 KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
+                 EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
+                 if (cell) KTerm_ClearCell_Internal(session, cell);
              }
              if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
@@ -13068,8 +13085,12 @@ static void KTerm_ApplyVerticalOp(KTermSession *session, KTermOp *op) {
         // Shift lines up from top down
         for (int y = start_row; y <= end_row - lines - 1; y++) {
             for (int x = r.x; x < r.x + r.w; x++) {
-                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + lines, x);
-                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                 EnhancedTermChar* dst = GetActiveScreenCell(session, y, x);
+                 EnhancedTermChar* src = GetActiveScreenCell(session, y + lines, x);
+                 if (dst && src) {
+                     *dst = *src;
+                     dst->flags |= KTERM_FLAG_DIRTY;
+                 }
             }
              if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
@@ -13077,7 +13098,8 @@ static void KTerm_ApplyVerticalOp(KTermSession *session, KTermOp *op) {
         // Clear bottom lines
         for (int y = end_row - lines; y < end_row; y++) {
              for (int x = r.x; x < r.x + r.w; x++) {
-                 KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
+                 EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
+                 if (cell) KTerm_ClearCell_Internal(session, cell);
              }
              if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
@@ -13126,14 +13148,21 @@ static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
             for (int i = 0; i < lines; i++) {
                 for (int y = top; y < bottom; y++) {
                     for (int x = x_start; x <= x_end; x++) {
-                        *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + 1, x);
-                        GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                        EnhancedTermChar* dst = GetActiveScreenCell(session, y, x);
+                        EnhancedTermChar* src = GetActiveScreenCell(session, y + 1, x);
+                        if (dst && src) {
+                            *dst = *src;
+                            dst->flags |= KTERM_FLAG_DIRTY;
+                        }
                     }
                      session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
                 for (int x = x_start; x <= x_end; x++) {
-                    KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, bottom, x));
-                    GetActiveScreenCell(session, bottom, x)->flags |= KTERM_FLAG_DIRTY;
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, bottom, x);
+                    if (cell) {
+                        KTerm_ClearCell_Internal(session, cell);
+                        cell->flags |= KTERM_FLAG_DIRTY;
+                    }
                 }
                 session->row_dirty[bottom] = KTERM_DIRTY_FRAMES;
             }
@@ -13142,14 +13171,21 @@ static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
          for (int i = 0; i < lines; i++) {
             for (int y = bottom; y > top; y--) {
                 for (int x = x_start; x <= x_end; x++) {
-                    *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - 1, x);
-                     GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                    EnhancedTermChar* dst = GetActiveScreenCell(session, y, x);
+                    EnhancedTermChar* src = GetActiveScreenCell(session, y - 1, x);
+                    if (dst && src) {
+                        *dst = *src;
+                        dst->flags |= KTERM_FLAG_DIRTY;
+                    }
                 }
                 session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
             for (int x = x_start; x <= x_end; x++) {
-                KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, top, x));
-                GetActiveScreenCell(session, top, x)->flags |= KTERM_FLAG_DIRTY;
+                EnhancedTermChar* cell = GetActiveScreenCell(session, top, x);
+                if (cell) {
+                    KTerm_ClearCell_Internal(session, cell);
+                    cell->flags |= KTERM_FLAG_DIRTY;
+                }
             }
             session->row_dirty[top] = KTERM_DIRTY_FRAMES;
         }
@@ -13174,6 +13210,7 @@ static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
 void KTerm_FlushOps(KTerm* term, KTermSession* session) {
     KTermOpQueue* queue = &session->op_queue;
     int ops_processed = 0;
+    KTERM_MUTEX_LOCK(session->op_queue_lock);
     while (queue->count > 0) {
         if (term->config.max_ops_per_flush > 0 && ops_processed >= term->config.max_ops_per_flush) break;
         ops_processed++;
@@ -13231,6 +13268,7 @@ void KTerm_FlushOps(KTerm* term, KTermSession* session) {
         queue->head = (queue->head + 1) % KTERM_OP_QUEUE_SIZE;
         queue->count--;
     }
+    KTERM_MUTEX_UNLOCK(session->op_queue_lock);
 }
 
 static void KTerm_ResetSessionDefaults(KTerm* term, KTermSession* session) {
@@ -13401,6 +13439,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
 
     // Initialize Op Queue
     KTerm_InitOpQueue(&session->op_queue);
+    KTERM_MUTEX_INIT(session->op_queue_lock);
     session->dirty_rect = (KTermRect){0, 0, 0, 0};
 
     // Initialize Graphics Subsystems (Safely resets if already initialized)
@@ -14214,7 +14253,7 @@ static void KTerm_ProcessKeyDirect(KTerm* term, KTermSession* session, const KTe
         c.flags = session->current_attributes | KTERM_FLAG_DIRTY;
 
         op.u.set_cell.cell = c;
-        KTerm_QueueOp(&session->op_queue, op);
+        KTerm_QueueOp(session, op);
 
         // Advance cursor
         session->cursor.x++;
@@ -14262,7 +14301,7 @@ static void KTerm_ProcessKeyDirect(KTerm* term, KTermSession* session, const KTe
                     c.bg_color = session->current_bg;
                     c.flags = session->current_attributes | KTERM_FLAG_DIRTY;
                     op.u.set_cell.cell = c;
-                    KTerm_QueueOp(&session->op_queue, op);
+                    KTerm_QueueOp(session, op);
                 }
                 break;
             case KTERM_KEY_LEFT:

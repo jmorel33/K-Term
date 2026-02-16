@@ -1,5 +1,11 @@
 # K-Term Update Log
 
+## [v2.6.21] - Buffer Hardening & Thread Safety
+- **Buffer Hardening**: Enhanced screen buffer operations (`CopyRect`, `Scroll`, `VerticalOp`) with explicit NULL checks for `GetActiveScreenCell`. This prevents crashes when asynchronous resize events race with pending operations, specifically addressing a vulnerability where old coordinates are applied to a new, smaller buffer.
+- **Thread Safety**: Introduced `op_queue_lock` in `KTermSession` to protect the operation queue (`KTermOpQueue`) from concurrent access. `KTerm_QueueOp` and `KTerm_FlushOps` now hold this lock, ensuring atomic queuing and flushing of grid mutations.
+- **API Update**: Updated `KTerm_QueueOp` to accept `KTermSession*` instead of `KTermOpQueue*` to facilitate session-level locking.
+- **Verification**: Added `tests/test_buffer_hardening.c` regression test to validate the fix against the specific resize/copy exploit pattern.
+
 ## [v2.6.20] - Library Structure Refactoring
 - **Modular Architecture:** Split monolithic `kterm.h` into three files for better maintainability:
   - `kterm_api.h`: Public API declarations (types, structs, function prototypes)

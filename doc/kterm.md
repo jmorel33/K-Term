@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.20
+# kterm.h - Technical Reference Manual v2.6.21
 
 **(c) 2026 Jacques Morel**
 
@@ -192,9 +192,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.20)
+### 1.3. Known Limitations (v2.6.21)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.20 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.21 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
