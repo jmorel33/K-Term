@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.21
+# K-Term Emulation Library v2.6.22
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -447,7 +447,7 @@ These functions add data to an internal buffer, which `KTerm_Update(term)` proce
 -   `KTerm_SetOutputSink(term, KTermOutputSink sink, void* ctx)`: Register a direct sink callback `void my_sink(void* ctx, const char* data, size_t len)`. This bypasses the internal buffer for zero-copy output, ideal for high-throughput scenarios. Setting a sink automatically flushes any data remaining in the legacy buffer.
 -   `KTerm_GetKey(term, VTKeyEvent* event)`: Retrieve a fully processed `VTKeyEvent` from the keyboard buffer. The `event->sequence` field contains the string
     to be sent to the host or processed by a local application.
-    > **Note:** Applications can call `KTerm_GetKey` before `KTerm_Update` to intercept and consume input events locally (e.g., for local editing or hotkeys) before they are sent to the terminal pipeline.
+    > **Note:** By default, `KTerm_Update` automatically processes queued key events and sends them to the `ResponseCallback` / `OutputSink`. Calling `KTerm_GetKey` *consumes* the event, allowing you to intercept and handle it locally (e.g., for hotkeys) instead of sending it to the host.
 
 ### 4.4. Configuring KTerm Behavior
 

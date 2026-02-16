@@ -11708,18 +11708,17 @@ void KTerm_EnableDebug(KTerm* term, bool enable) {
  * @brief Updates the terminal's internal state and processes incoming data.
  *
  * Called once per frame in the main loop, this function drives the terminal emulation by:
- * - **Processing Input**: Consumes characters from `GET_SESSION(term)->input_pipeline` via `KTerm_ProcessEvents(term)`, parsing VT52/xterm sequences with `KTerm_ProcessChar(term)`.
- * - **Handling Input Devices**: Updates keyboard (`KTerm_UpdateKeyboard(term)`) and mouse (`KTerm_UpdateMouse(term)`) states.
- * - **Auto-Printing**: Queues lines for printing when `GET_SESSION(term)->auto_print_enabled` and a newline occurs.
+ * - **Processing Input**: Consumes characters from each session's `input_queue` via `KTerm_ProcessEventsInternal(term)`, parsing VT52/xterm sequences with `KTerm_ProcessChar(term)`.
+ * - **Handling Input Devices**: Processes input events (keyboard/mouse) previously queued via `KTerm_ProcessEvent(term)` or `KTerm_QueueInputEvent(term)`.
+ * - **Auto-Printing**: Queues lines for printing when `auto_print_enabled` and a newline occurs.
  * - **Managing Timers**: Updates cursor blink, text blink, and visual bell timers for visual effects.
  * - **Flushing Responses**: Sends queued responses (e.g., DSR, DA, focus events) via `term->response_callback`.
  * - **Rendering**: Draws the terminal display with `KTerm_Draw(term)`, including the custom mouse cursor.
  *
  * Performance is tuned via `GET_SESSION(term)->VTperformance` (e.g., `chars_per_frame`, `time_budget`) to balance responsiveness and throughput.
  *
- * @see KTerm_ProcessEvents(term) for input processing details.
- * @see KTerm_UpdateKeyboard(term) for keyboard handling.
- * @see KTerm_UpdateMouse(term) for mouse and focus event handling.
+ * @see KTerm_ProcessEvent(term) for pushing input events from the host application.
+ * @see KTerm_ProcessEventsInternal(term) for internal input processing details.
  * @see KTerm_Draw(term) for rendering details.
  * @see KTerm_QueueResponse(term) for response queuing.
  */
@@ -11727,6 +11726,45 @@ void KTerm_Update(KTerm* term) {
 #ifndef KTERM_DISABLE_NET
     KTerm_Net_Process(term);
 #endif
+
+    // Process Input Buffer
+    // Doing this early ensures responses are flushed in the same frame
+    KTermSession* input_session = GET_SESSION(term);
+    if (input_session->input.auto_process) {
+        int current_tail = atomic_load_explicit(&input_session->input.buffer_tail, memory_order_relaxed);
+        int current_head = atomic_load_explicit(&input_session->input.buffer_head, memory_order_acquire);
+
+        while (current_tail != current_head) {
+            KTermKeyEvent* event = &input_session->input.buffer[current_tail];
+
+            // DEBUG: Log what's being sent to response ring
+            // fprintf(stderr, "[AutoProcess] Queuing key event: sequence[0]=0x%02X ('%c'), len=%zu\n",
+            //         (unsigned char)event->sequence[0],
+            //         (event->sequence[0] >= 32 && event->sequence[0] < 127) ? event->sequence[0] : '?',
+            //         strlen(event->sequence));
+
+            // 1. Send Sequence to Host
+            if (event->sequence[0] != '\0') {
+                KTerm_QueueSessionResponse(term, input_session, event->sequence);
+
+                // 2. Local Echo
+                if ((input_session->dec_modes & KTERM_MODE_LOCALECHO) || (input_session->dec_modes & KTERM_MODE_DECHDPXM)) {
+                    KTerm_WriteString(term, event->sequence);
+                }
+
+                // 3. Visual Bell Trigger
+                if (event->sequence[0] == 0x07) {
+                    input_session->visual_bell_timer = 0.2f;
+                }
+            }
+
+            current_tail = (current_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+            atomic_store_explicit(&input_session->input.buffer_tail, current_tail, memory_order_release);
+
+            // Refresh head snapshot
+            current_head = atomic_load_explicit(&input_session->input.buffer_head, memory_order_acquire);
+        }
+    }
 
     term->pending_session_switch = -1; // Reset pending switch
     int saved_session = term->active_session;
@@ -11832,47 +11870,11 @@ void KTerm_Update(KTerm* term) {
         term->active_session = saved_session;
     }
 
-    // Process Input Buffer
     KTermSession* session = GET_SESSION(term);
-    if (session->input.auto_process) {
-        int current_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);
-        int current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
-
-        while (current_tail != current_head) {
-            KTermKeyEvent* event = &session->input.buffer[current_tail];
-
-            // DEBUG: Log what's being sent to response ring
-            fprintf(stderr, "[AutoProcess] Queuing key event: sequence[0]=0x%02X ('%c'), len=%zu\n",
-                    (unsigned char)event->sequence[0],
-                    (event->sequence[0] >= 32 && event->sequence[0] < 127) ? event->sequence[0] : '?',
-                    strlen(event->sequence));
-
-            // 1. Send Sequence to Host
-            if (event->sequence[0] != '\0') {
-                KTerm_QueueSessionResponse(term, session, event->sequence);
-
-                // 2. Local Echo
-                if ((session->dec_modes & KTERM_MODE_LOCALECHO) || (session->dec_modes & KTERM_MODE_DECHDPXM)) {
-                    KTerm_WriteString(term, event->sequence);
-                }
-
-                // 3. Visual Bell Trigger
-                if (event->sequence[0] == 0x07) {
-                    session->visual_bell_timer = 0.2f;
-                }
-            }
-
-            current_tail = (current_tail + 1) % KEY_EVENT_BUFFER_SIZE;
-            atomic_store_explicit(&session->input.buffer_tail, current_tail, memory_order_release);
-
-            // Refresh head snapshot
-            current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
-        }
-    }
 
     // Auto-print (Active session only for now, or loop?)
     // Let's assume auto-print works for active session interaction.
-    if (GET_SESSION(term)->printer_available && GET_SESSION(term)->auto_print_enabled) {
+    if (session->printer_available && session->auto_print_enabled) {
         if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->last_cursor_y && GET_SESSION(term)->last_cursor_y >= 0) {
             // Queue the previous line for printing
             char print_buffer[term->width + 2];

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.21
+# kterm.h - Technical Reference Manual v2.6.22
 
 **(c) 2026 Jacques Morel**
 
@@ -10,7 +10,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [1. Overview](#1-overview)
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
-    *   [1.3. Known Limitations (v2.6.18)](#13-known-limitations-v2618)
+    *   [1.3. Known Limitations (v2.6.22)](#13-known-limitations-v2622)
     *   [1.4. Architectural Deep Dive](#14-architectural-deep-dive)
         *   [1.4.1. Core Philosophy and The `KTerm` Struct](#141-core-philosophy-and-the-kterm-struct)
         *   [1.4.2. The Input Pipeline](#142-the-input-pipeline)
@@ -76,7 +76,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
     *   [5.2. Host Input (Pipeline) Management](#52-host-input-pipeline-management)
-    *   [5.3. Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
+    *   [5.3. Keyboard and Mouse Input](#53-keyboard-and-mouse-input)
     *   [5.4. Configuration and Mode Setting](#54-configuration-and-mode-setting)
     *   [5.5. Callbacks](#55-callbacks)
     *   [5.6. Diagnostics and Testing](#56-diagnostics-and-testing)
@@ -192,9 +192,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
-### 1.3. Known Limitations (v2.6.21)
+### 1.3. Known Limitations (v2.6.22)
 
-While K-Term is production-ready, users should be aware of the following limitations in the v2.6.21 release:
+While K-Term is production-ready, users should be aware of the following limitations in the v2.6.22 release:
 
 1.  **BiDirectional Text (BiDi):**
     -   Support is currently limited to an internal visual reordering algorithm (`BiDiReorderRow`).
@@ -236,7 +236,7 @@ The terminal is a consumer of sequential character data. The entry point for all
 
 The heart of the emulation is the main processing loop within `KTerm_Update(term)`, which drives a sophisticated state machine.
 
--   **Consumption:** `KTerm_Update(term)` calls `KTerm_ProcessEvents(term)`, which consumes a tunable number of characters from the input pipeline each frame. This prevents the emulation from freezing the application when large amounts of data are received. The number of characters processed can be adjusted for performance (`VTperformance` struct).
+-   **Consumption:** `KTerm_Update(term)` iterates through all active sessions and consumes a tunable number of characters from each session's input pipeline via `KTerm_ProcessEventsInternal()`. This prevents the emulation from freezing the application when large amounts of data are received. The number of characters processed can be adjusted for performance (`VTperformance` struct).
 -   **Parsing:** Each character is fed into `KTerm_ProcessChar()`, which acts as a dispatcher based on the current `VTParseState`.
     -   `VT_PARSE_NORMAL`: In the default state, printable characters are sent to the screen, and control characters (like `ESC` or C0 codes) change the parser's state.
     -   `VT_PARSE_ESCAPE`: After an `ESC` (`0x1B`) is received, the parser enters this state, waiting for the next character to determine the type of sequence (e.g., `[` for CSI, `]` for OSC).
@@ -310,7 +310,7 @@ The terminal needs to send data back to the host in response to certain queries 
 
 -   **Mechanism:** In v2.4.4, each `KTermSession` maintains its own lock-free **Response Ring Buffer** (`response_ring`). This ensures that responses from multiple sessions (e.g., background queries) are safely queued without contention or blocking.
 -   **Events:** The following events generate responses:
-    -   **User Input:** Keystrokes (`KTerm_UpdateKeyboard(term)`) and mouse events (`KTerm_UpdateMouse(term)`) are translated into the appropriate VT sequences and queued.
+    -   **User Input:** Keystrokes and mouse events queued via `KTerm_QueueInputEvent(term)` are translated into the appropriate VT sequences and queued for transmission.
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
 -   **Sink (Modern):** Applications can register an `OutputSink` using `KTerm_SetOutputSink`. This flushes the ring buffer and subsequently bypasses it, delivering response data directly to the callback as it is generated (zero-copy). This is the preferred method for high-performance integration.
 
@@ -2089,9 +2089,9 @@ if (KTerm_IsEventOverflow(term)) {
 - Indicates that some data was lost.
 - Should be checked periodically in high-throughput scenarios.
 
-### 5.3. Keyboard and Mouse Output
+### 5.3. Keyboard and Mouse Input
 
-User input from the keyboard and mouse is processed by the terminal and converted into VT sequences that are sent back to the host application. This section documents the functions for retrieving keyboard events and managing mouse input.
+User input from the keyboard and mouse is pushed to the terminal using `KTerm_QueueInputEvent` (or platform-specific adapters like `KTermSit_ProcessInput`). The terminal processes these events, converting them into VT sequences that are sent back to the host application via the `ResponseCallback` or `OutputSink`.
 
 #### Keyboard Input
 
@@ -2105,7 +2105,11 @@ bool KTerm_GetKey(KTerm* term, VTKeyEvent* event);
 ```
 
 **Description:**
-Retrieves the next processed keyboard event from the output queue. This is the primary way for the host application to receive user keyboard input. The keyboard is polled automatically by `KTerm_Update()`, but events must be retrieved using this function.
+Retrieves the next processed keyboard event from the output queue, *removing* it from the buffer. This function is used to intercept user input locally.
+
+**Important:** By default, `KTerm_Update` automatically consumes events from this same queue and sends them to the `ResponseCallback` (or `OutputSink`) to simulate transmission to a host. If you call `KTerm_GetKey` and retrieve an event, it will **not** be sent to the callback during the next update. This allows for local handling of hotkeys or input interception.
+
+To disable auto-processing entirely (for manual polling), set `GET_SESSION(term)->input.auto_process = false`.
 
 **Parameters:**
 - `term`: Pointer to the K-Term instance
@@ -2124,7 +2128,7 @@ while (KTerm_GetKey(term, &event)) {
 ```
 
 **See Also:**
-- `KTerm_UpdateKeyboard()` - Poll keyboard and populate queue
+- `KTerm_QueueInputEvent()` - Queue input event
 - `KTerm_DefineFunctionKey()` - Program function keys
 - `VTKeyEvent` - Key event structure
 
@@ -2133,76 +2137,9 @@ while (KTerm_GetKey(term, &event)) {
 - Modifier keys (Shift, Ctrl, Alt) are included in the event.
 - Terminal modes affect how keys are reported (e.g., Application Cursor Keys mode).
 
-##### `KTerm_UpdateKeyboard()`
-
-**Signature:**
-```c
-void KTerm_UpdateKeyboard(KTerm* term);
-```
-
-**Description:**
-Polls the keyboard hardware, processes modifier keys and terminal modes, and populates the keyboard event queue. This function is called automatically by `KTerm_Update()` but can be called manually for finer control.
-
-**Parameters:**
-- `term`: Pointer to the K-Term instance
-
-**Example:**
-```c
-// Manually poll keyboard
-KTerm_UpdateKeyboard(term);
-
-// Retrieve events
-VTKeyEvent event;
-while (KTerm_GetKey(term, &event)) {
-    // Process event
-}
-```
-
-**See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
-- `KTerm_Update()` - Main update function
-- `KTerm_SetMode()` - Set keyboard modes
-
-**Notes:**
-- Called automatically by `KTerm_Update()`.
-- Respects terminal modes like Application Cursor Keys and Application Keypad.
-- Processes modifier key combinations.
-
 #### Mouse Input
 
 These functions handle mouse input processing and event reporting.
-
-##### `KTerm_UpdateMouse()`
-
-**Signature:**
-```c
-void KTerm_UpdateMouse(KTerm* term);
-```
-
-**Description:**
-Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for transmission to the host. This function is called automatically by `KTerm_Update()`.
-
-**Parameters:**
-- `term`: Pointer to the K-Term instance
-
-**Example:**
-```c
-// Manually poll mouse
-KTerm_UpdateMouse(term);
-
-// Mouse events are queued and sent via ResponseCallback
-```
-
-**See Also:**
-- `KTerm_SetMouseTracking()` - Set mouse tracking mode
-- `KTerm_Update()` - Main update function
-- `KTerm_SetResponseCallback()` - Set output callback
-
-**Notes:**
-- Called automatically by `KTerm_Update()`.
-- Respects the current mouse tracking mode (X10, VT200, SGR, etc.).
-- Mouse events are sent via the response callback.
-- Supports button press, release, and motion events.
 
 ##### `KTerm_SetMouseTracking()`
 
@@ -3830,9 +3767,8 @@ This entire cycle leverages the GPU for massive parallelism, ensuring the termin
 
 Concurrent to the host-to-terminal data flow, the library handles user input from the physical keyboard and mouse, translating it into byte sequences that a host application can understand.
 
-1.  **Polling:** In each frame, `KTerm_Update()` calls `KTerm_UpdateKeyboard()`. This function polls Situation for any key presses, releases, or character inputs.
-2.  **Event Creation:** For each input, a `VTKeyEvent` struct is created, capturing the raw key code, modifier states (Ctrl, Alt, Shift), and a timestamp.
-3.  **Sequence Generation:** The core of the translation happens in `KTerm_GenerateVTSequence()`. This function takes a `VTKeyEvent` and populates its `sequence` field based on a series of rules:
+1.  **Event Queueing:** The hosting application (or platform adapter) pushes raw events using `KTerm_QueueInputEvent()`. This creates a `VTKeyEvent` struct capturing the raw key code and modifier states.
+2.  **Translation:** During `KTerm_Update` (or immediately upon queueing), the terminal translates these events into VT sequences using `KTerm_TranslateKey()`. This function populates the `sequence` field based on a series of rules:
     -   **Control Keys:** `Ctrl+A` is translated to `0x01`, `Ctrl+[` to `ESC`, etc.
     -   **Application Modes:** It checks `terminal.vt_keyboard.cursor_key_mode` (DECCKM) and `terminal.vt_keyboard.keypad_mode` (DECKPAM). If these modes are active, it generates application-specific sequences (e.g., `ESC O A` for the up arrow) instead of the default ANSI sequences (`ESC [ A`).
     -   **Meta Key:** If `terminal.vt_keyboard.meta_sends_escape` is true, pressing `Alt` in combination with another key will prefix that key's character with an `ESC` byte.
