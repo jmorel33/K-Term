@@ -92,7 +92,7 @@ typedef struct KTermSession_T KTermSession; // Assuming struct name match
 
 // Function Prototypes
 void KTerm_InitOpQueue(KTermOpQueue* queue);
-bool KTerm_QueueOp(KTermOpQueue* queue, KTermOp op);
+bool KTerm_QueueOp(KTermSession* session, KTermOp op);
 bool KTerm_IsOpQueueFull(KTermOpQueue* queue);
 // FlushOps will be declared in kterm.h to avoid circular dependency issues with KTermSession definition
 

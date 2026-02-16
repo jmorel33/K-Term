@@ -2348,7 +2348,7 @@ static int KTerm_QueueGridOp(KTermSession* s, int x, int y, int w, int h, const 
     op.u.fill_masked.fill_char.st_color = style->st;
     op.u.fill_masked.fill_char.flags = style->flags;
 
-    KTerm_QueueOp(&s->op_queue, op);
+    KTerm_QueueOp(s, op);
     return w * h;
 }
 
@@ -2855,7 +2855,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
             op.u.set_cell.cell = cell;
             // Ensure dirty flag is set
             op.u.set_cell.cell.flags |= KTERM_FLAG_DIRTY;
-            KTerm_QueueOp(&target->op_queue, op);
+            KTerm_QueueOp(target, op);
 
             cells_applied++;
         }
