@@ -1409,7 +1409,6 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
     session->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
     session->input.keyboard_dialect = 1; // North American ASCII
     session->input.keyboard_variant = 0; // Standard
-    session->input.use_software_repeat = true;
 
     // Kitty Keyboard Protocol Defaults
     session->input.kitty_keyboard_flags = 0;

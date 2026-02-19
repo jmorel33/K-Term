@@ -57,8 +57,8 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 22
-#define KTERM_VERSION_STRING "2.6.22"
+#define KTERM_VERSION_PATCH 23
+#define KTERM_VERSION_STRING "2.6.23"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)
@@ -890,12 +890,6 @@ typedef struct {
     // buffer_count removed for thread safety
     atomic_int total_events;
     atomic_int dropped_events;
-
-    // Rate Limiting (DECARR)
-    int last_key_code;
-    double last_key_time;
-    int repeat_state; // 0=None, 1=WaitDelay, 2=Repeating
-    bool use_software_repeat;
 } KTermInputConfig;
 
 /*
