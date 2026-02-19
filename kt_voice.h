@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 // Forward declarations
+typedef struct KTerm_T KTerm;
 typedef struct KTermSession_T KTermSession;
 typedef struct KTermVoiceContext KTermVoiceContext;
 
@@ -40,8 +41,11 @@ void SituationVoiceSetGlobalMute(bool mute);
 KTermVoiceContext* KTerm_Voice_GetContext(KTermSession* session);
 
 // Integration functions (called by KTerm/Net)
-void KTerm_Voice_ProcessCapture(KTermSession* session, KTermVoiceSendCallback send_cb, void* user_data);
+void KTerm_Voice_ProcessCapture(KTerm* term, KTermSession* session, KTermVoiceSendCallback send_cb, void* user_data);
 void KTerm_Voice_ProcessPlayback(KTermSession* session, const void* data, size_t len);
+
+// Internal Helper (exposed for Net integration)
+void KTerm_Voice_InjectCommand(KTerm* term, const char* cmd);
 
 #ifdef __cplusplus
 }
@@ -55,6 +59,7 @@ void KTerm_Voice_ProcessPlayback(KTermSession* session, const void* data, size_t
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define VOICE_BUFFER_SIZE 65536 // Power of 2
 
@@ -79,6 +84,13 @@ struct KTermVoiceContext {
     uint16_t sequence;
 
     KTermSession* session;
+    KTerm* term;
+
+    // VAD State
+    float energy_level;
+    bool vad_active;
+    float vad_threshold;
+    uint64_t vad_start_time;
 };
 
 // Timestamp Helper
@@ -200,6 +212,10 @@ int SituationVoiceEnable(KTermSession* session, bool enable) {
             atomic_store(&ctx->playback_tail, 0);
             ctx->enabled = true;
             ctx->muted = false;
+            ctx->vad_active = false;
+            ctx->energy_level = 0.0f;
+            ctx->vad_threshold = 0.05f; // Default threshold
+            ctx->vad_start_time = 0;
 
             SituationStartAudioCaptureEx(KTerm_Voice_CaptureCallback, ctx, ctx->sample_rate, ctx->channels);
             SituationStartAudioPlayback(KTerm_Voice_PlaybackCallback, ctx, ctx->sample_rate, ctx->channels);
@@ -219,9 +235,55 @@ int SituationVoiceSetTarget(KTermSession* session, const char* remote_id_or_ip) 
     return SITUATION_SUCCESS;
 }
 
+// Inject command helper
+void KTerm_Voice_InjectCommand(KTerm* term, const char* cmd) {
+    if (!term || !cmd) return;
+    // Iterate string and inject key events
+    for (int i = 0; cmd[i]; i++) {
+        KTermKeyEvent event = {0};
+        event.key_code = (unsigned char)cmd[i];
+
+        // Simple mapping for basic chars
+        char c = cmd[i];
+        if (c >= 'A' && c <= 'Z') {
+            event.key_code = KTERM_KEY_A + (c - 'A');
+            event.shift = true;
+        } else if (c >= 'a' && c <= 'z') {
+            event.key_code = KTERM_KEY_A + (c - 'a');
+        } else if (c >= '0' && c <= '9') {
+            event.key_code = KTERM_KEY_0 + (c - '0');
+        } else if (c == ' ') {
+            event.key_code = KTERM_KEY_SPACE;
+        } else if (c == '\n' || c == '\r') {
+            event.key_code = KTERM_KEY_ENTER;
+        } else {
+            // Fallback: Just pass the char code as key_code and hope KTerm handles it or use sequence
+            // KTerm_QueueInputEvent handles sequence[0] check.
+            event.key_code = (unsigned char)c;
+            event.sequence[0] = c;
+            event.sequence[1] = '\0';
+        }
+
+        KTerm_QueueInputEvent(term, event);
+    }
+
+    // Append Enter if not present?
+    // Usually voice commands are "Execute this", so appending Enter is helpful.
+    // But let's assume the command string includes it or the user wants it raw.
+    // For now, raw injection.
+}
+
 int SituationVoiceCommand(const char* command_text) {
-    (void)command_text;
-    return SITUATION_SUCCESS;
+    if (!command_text) return SITUATION_FAILURE;
+
+    int injected_count = 0;
+    for(int i=0; i<MAX_SESSIONS; i++) {
+        if (g_voice_contexts[i].enabled && g_voice_contexts[i].term) {
+            KTerm_Voice_InjectCommand(g_voice_contexts[i].term, command_text);
+            injected_count++;
+        }
+    }
+    return (injected_count > 0) ? SITUATION_SUCCESS : SITUATION_FAILURE;
 }
 
 void SituationVoiceSetGlobalMute(bool mute) {
@@ -229,9 +291,11 @@ void SituationVoiceSetGlobalMute(bool mute) {
 }
 
 // Process Capture (Main Thread)
-void KTerm_Voice_ProcessCapture(KTermSession* session, KTermVoiceSendCallback send_cb, void* user_data) {
+void KTerm_Voice_ProcessCapture(KTerm* term, KTermSession* session, KTermVoiceSendCallback send_cb, void* user_data) {
     KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
     if (!ctx || !ctx->enabled) return;
+
+    ctx->term = term;
 
     uint32_t head = atomic_load_explicit(&ctx->capture_head, memory_order_acquire);
     uint32_t tail = atomic_load_explicit(&ctx->capture_tail, memory_order_relaxed);
@@ -278,6 +342,29 @@ void KTerm_Voice_ProcessCapture(KTermSession* session, KTermVoiceSendCallback se
         } else {
             memcpy(audio_payload, &ctx->capture_buffer[tail], chunk1 * sizeof(float));
             memcpy(audio_payload + chunk1, &ctx->capture_buffer[0], (CHUNK_SIZE - chunk1) * sizeof(float));
+        }
+
+        // VAD Analysis
+        float sum_sq = 0.0f;
+        for(int i=0; i<CHUNK_SIZE; i++) {
+            float s = audio_payload[i];
+            sum_sq += s * s;
+        }
+        float rms = sqrtf(sum_sq / CHUNK_SIZE);
+        ctx->energy_level = rms;
+
+        if (rms > ctx->vad_threshold) {
+            if (!ctx->vad_active) {
+                ctx->vad_active = true;
+                ctx->vad_start_time = ts;
+            }
+        } else {
+            if (ctx->vad_active) {
+                // Hangover or just stop
+                ctx->vad_active = false;
+                // Here we could check duration (ts - start_time) and trigger a command
+                // For now, we leave the infrastructure ready for the Keyword Spotter integration
+            }
         }
 
         if (send_cb) send_cb(user_data, packet, PACKET_SIZE);

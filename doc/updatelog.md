@@ -1,5 +1,17 @@
 # K-Term Update Log
 
+## [v2.6.27] - Voice Reactor Phase 3 (Commands & VAD)
+- **Voice Commands**: Implemented Voice Command Injection, allowing spoken words to be translated into terminal input.
+  - **Injection API**: Added `SituationVoiceCommand` to programmatically inject command strings into active voice contexts.
+  - **Network Protocol**: Added `KTERM_PKT_AUDIO_COMMAND` handling in `kt_net.h` to support remote command injection.
+- **Voice Activity Detection (VAD)**:
+  - **VAD Logic**: Implemented RMS energy calculation in `KTerm_Voice_ProcessCapture` to detect speech activity.
+  - **State**: Added `vad_active` and `energy_level` to `KTermVoiceContext` for monitoring speech status.
+- **Infrastructure**:
+  - **Context Awareness**: Updated `KTerm_Voice_ProcessCapture` to accept `KTerm*` instance, enabling direct access to input queues for injection.
+  - **Helper**: Added `KTerm_Voice_InjectCommand` to handle string-to-key-event conversion.
+- **Verification**: Validated VAD state transitions and command injection via `tests/verify_voice_commands.c`.
+
 ## [v2.6.25] - Voice Reactor Phase 2 (Network Integration)
 - **Voice Networking**: Enabled full network transmission for voice data, transitioning from local loopback to a functional VoIP pipeline.
   - **Packetization**: Integrated `KTERM_PKT_AUDIO_VOICE` packet handling into `kt_net.h`. The network process loop now polls the voice capture buffer and transmits audio chunks automatically.
