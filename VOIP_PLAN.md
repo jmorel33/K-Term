@@ -93,16 +93,17 @@ void SituationVoiceSetGlobalMute(bool mute);
 ## 4. Phased Implementation Plan
 
 ### Phase 1: Foundation
--   [ ] Define `KTERM_PKT_AUDIO_*` packet types in `kt_net.h`.
--   [ ] Create `kt_voice.h` with the public API definitions.
--   [ ] Implement ring buffer + capture callback integration (`SituationStartAudioCaptureEx`).
--   [ ] Local loopback test (Mic -> Ring Buffer -> Playback) to verify audio chain.
+- [x] Define `KTERM_PKT_AUDIO_*` packet types in `kt_net.h`.
+- [x] Create `kt_voice.h` with the public API definitions.
+- [x] Implement ring buffer + capture callback integration (`SituationStartAudioCaptureEx`).
+- [x] Local loopback test (Mic -> Ring Buffer -> Playback) to verify audio chain.
 
 ### Phase 2: Network Voice
--   [ ] Implement packetization of audio samples in `KTerm_Net_Process` according to the byte-level spec.
--   [ ] Send packets via `KTerm_Net_SendPacket`.
--   [ ] Implement receiver logic in `KTerm_Net_ProcessFrame` to extract and play back audio.
--   [ ] Basic multi-user support (routing audio to correct session/mixer channel).
+- [x] Implement packetization of audio samples in `KTerm_Net_Process` according to the byte-level spec (Updated with 16-byte aligned header).
+- [x] Send packets via `KTerm_Net_SendPacket`.
+- [x] Implement receiver logic in `KTerm_Net_ProcessFrame` to extract and play back audio.
+- [x] Basic multi-user support (routing audio to correct session/mixer channel).
+- [x] Verified via `tests/verify_voice.c` (Capture -> Network -> Loopback -> Playback).
 
 ### Phase 3: Voice Commands
 -   [ ] Implement Voice Activity Detection (VAD).

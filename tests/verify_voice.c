@@ -83,7 +83,7 @@ int main() {
     // 4. Verify Data Sent to Socket
     unsigned char buffer[4096];
     int total_read = 0;
-    int expected_size = 5 + (256 * sizeof(float)); // 1029
+    int expected_size = 5 + 16 + (256 * sizeof(float)); // 1045
 
     while(total_read < expected_size) {
         int n = read(sv[1], buffer + total_read, sizeof(buffer) - total_read);
@@ -113,16 +113,35 @@ int main() {
 
     uint32_t len = (buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4];
     printf("Packet Payload Length: %d\n", len);
-    if (len != 256 * sizeof(float)) {
-        fprintf(stderr, "Wrong payload length: %d (expected %lu)\n", len, 256 * sizeof(float));
-        // Note: Currently we send whatever chunk is available.
-        // Logic says CHUNK_SIZE = 256. So it should match.
+    int expected_payload_len = 16 + (256 * sizeof(float));
+    if (len != expected_payload_len) {
+        fprintf(stderr, "Wrong payload length: %d (expected %d)\n", len, expected_payload_len);
+        return 1;
     }
 
+    // Verify Metadata
+    uint8_t* metadata = buffer + 5;
+    if (metadata[0] != 0) { fprintf(stderr, "Wrong Format: %d\n", metadata[0]); return 1; }
+    if (metadata[1] != 1) { fprintf(stderr, "Wrong Channels: %d\n", metadata[1]); return 1; }
+    if (metadata[2] != 1) { fprintf(stderr, "Wrong SampleRate: %d\n", metadata[2]); return 1; } // 48k=1
+
+    // Sequence
+    uint16_t seq = (metadata[3] << 8) | metadata[4];
+    printf("Sequence: %d\n", seq);
+
+    // Timestamp
+    uint64_t ts = 0;
+    for(int i=0; i<8; i++) ts = (ts << 8) | metadata[5+i];
+    printf("Timestamp: %llu\n", (unsigned long long)ts);
+
     // Verify Payload (first few samples)
-    float* payload = (float*)(buffer + 5);
-    if (payload[0] != 0.0f || payload[1] != 1.0f/256.0f) {
-        fprintf(stderr, "Payload mismatch: %f, %f\n", payload[0], payload[1]);
+    // Audio starts at 5 + 16 = 21
+    float sample0, sample1;
+    memcpy(&sample0, buffer + 21, sizeof(float));
+    memcpy(&sample1, buffer + 21 + sizeof(float), sizeof(float));
+
+    if (sample0 != 0.0f || sample1 != 1.0f/256.0f) {
+        fprintf(stderr, "Payload mismatch: %f, %f\n", sample0, sample1);
         return 1;
     }
 

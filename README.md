@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.25
+# K-Term Emulation Library v2.6.26
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,7 +65,7 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.6.25: Voice Reactor Phase 2 (Network Integration)**
+**New in v2.6.26: Voice Reactor Phase 2 (Network Integration)**
 This release enables full network transmission for the Voice Reactor, moving beyond local loopback to real-time VoIP capabilities.
 *   **Network Integration (`kt_net.h`):**
     *   **Voice Packetization:** Implemented `KTERM_PKT_AUDIO_VOICE` transmission logic within the network loop. Captured audio frames are now automatically chunked, wrapped in binary packets, and sent over the active connection.
