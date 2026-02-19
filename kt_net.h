@@ -288,6 +288,18 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
 struct KTermTracerouteContext;
 struct KTermResponseTimeContext;
 struct KTermPortScanContext;
+
+#ifndef KTERM_DISABLE_VOICE
+typedef struct {
+    KTerm* term;
+    KTermSession* session;
+} KTermVoiceSendCtx;
+
+static void _KTerm_Net_VoiceSendCallback(void* user_data, const void* data, size_t len) {
+    KTermVoiceSendCtx* ctx = (KTermVoiceSendCtx*)user_data;
+    KTerm_Net_SendPacket(ctx->term, ctx->session, KTERM_PKT_AUDIO_VOICE, data, len);
+}
+#endif
 struct KTermWhoisContext;
 struct KTermSpeedtestContext;
 struct KTermHttpProbeContext;
@@ -754,6 +766,12 @@ static void KTerm_Net_ProcessFrame(KTerm* term, KTermSession* session, KTermNetS
             snprintf(msg, sizeof(msg), "Attached to Session %d", new_session_id);
             KTerm_Net_Log(term, (int)(session - term->sessions), msg);
         }
+    }
+    else if (type == KTERM_PKT_AUDIO_VOICE) {
+#ifndef KTERM_DISABLE_VOICE
+        KTermSession* target_session = &term->sessions[target_idx];
+        KTerm_Voice_ProcessPlayback(target_session, payload, len);
+#endif
     }
 }
 
@@ -1761,6 +1779,14 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session); // Forward
         KTerm_Net_ProcessHttpProbe(term, session);
     }
+
+    // Process Voice Capture
+#ifndef KTERM_DISABLE_VOICE
+    {
+        KTermVoiceSendCtx vctx = { term, session };
+        KTerm_Voice_ProcessCapture(session, _KTerm_Net_VoiceSendCallback, &vctx);
+    }
+#endif
 
     if (!net || net->state == KTERM_NET_STATE_DISCONNECTED || net->state == KTERM_NET_STATE_ERROR) return;
 
