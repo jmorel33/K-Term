@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.23
+# K-Term Emulation Library v2.6.24
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -64,6 +64,14 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.24: Voice Reactor Phase 1**
+This release introduces the foundational architecture for **Voice Reactor**, transforming K-Term into a real-time voice command and streaming environment.
+*   **Voice Core (`kt_voice.h`):** A new single-header library for managing audio contexts and streams.
+    *   **Lock-Free Ring Buffer:** Implements a high-performance Single-Producer Single-Consumer (SPSC) ring buffer to bridge the high-priority audio thread and the main terminal loop without locking.
+    *   **Audio Capture:** Integration with `SituationStartAudioCaptureEx` for low-latency microphone input.
+    *   **Loopback Verification:** Includes `tests/test_voice_loopback.c` verifying the full capture-to-playback data path.
+*   **Protocol Support:** Added `KTERM_PKT_AUDIO_VOICE`, `COMMAND`, and `STREAM` packet definitions to `kt_net.h`, laying the groundwork for network voice transmission.
 
 **New in v2.6.0: Networking & Production Readiness**
 This release consolidates the massive networking improvements introduced throughout the v2.5.x cycle, delivering a full-featured, non-blocking networking stack for building robust remote clients and servers. It finalizes the SSH/Telnet integration and introduces configuration controls for embedded use.

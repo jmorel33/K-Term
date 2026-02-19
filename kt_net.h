@@ -80,6 +80,9 @@ typedef enum {
 #define KTERM_PKT_RESIZE  0x02 // Payload: [Width:4][Height:4] (Big Endian)
 #define KTERM_PKT_GATEWAY 0x03 // Payload: Gateway Command String
 #define KTERM_PKT_ATTACH  0x04 // Payload: [SessionID:1]
+#define KTERM_PKT_AUDIO_VOICE   0x10 // Compressed or raw PCM voice data
+#define KTERM_PKT_AUDIO_COMMAND 0x11 // Voice command (recognized text or raw waveform)
+#define KTERM_PKT_AUDIO_STREAM  0x12 // High-quality audio stream between sessions
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Commands (RFC 854)
