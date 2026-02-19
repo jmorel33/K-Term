@@ -1,6 +1,13 @@
 # K-Term Update Log
 
-## [v2.6.23] - Input Input & Version Bump
+## [v2.6.24] - Voice Reactor Phase 1 (Core & Loopback)
+- **Voice Reactor**: Implemented Phase 1 of the Voice Reactor architecture, enabling low-latency audio capture and playback functionality within the terminal ecosystem.
+  - **Core API**: Introduced `kt_voice.h`, a single-header library for managing voice contexts and audio streams using a lock-free SPSC ring buffer logic.
+  - **Protocol Definitions**: Added `KTERM_PKT_AUDIO_VOICE`, `KTERM_PKT_AUDIO_COMMAND`, and `KTERM_PKT_AUDIO_STREAM` packet types to `kt_net.h` to support future network transmission.
+  - **Testing**: Added `tests/mock_situation.h` hooks for `SituationStartAudioCaptureEx` and `SituationStartAudioPlayback` to allow rigorous loopback verification without external audio hardware.
+  - **Verification**: Validated the full Capture -> Ring Buffer -> Playback data path via `tests/test_voice_loopback.c`.
+
+## [v2.6.23] - Input Logic Simplification
 - **Input Logic**: Completely removed the software keyboard repeater logic and state from the core library. Keyboard input is now processed directly as it flows in from the input buffer, relying on the host/platform for repetition events if provided. This simplifies the input pipeline and eliminates potential state inconsistencies.
 - **Configuration**: Removed `REPEAT_RATE` and `DELAY` configuration options from `SET;KEYBOARD` in the Gateway Protocol, as well as the internal `last_key_code` and `repeat_state` tracking fields.
 - **Documentation**: Updated technical reference manual to version 2.6.23.

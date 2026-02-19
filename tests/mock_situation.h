@@ -211,6 +211,35 @@ static inline void SituationSetTargetFPS(int fps) {}
 static inline void SituationBeginFrame() {}
 static inline void SituationShutdown() {}
 
+// Audio (Mock)
+typedef void (*SituationAudioCallback)(void* user_data, float* buffer, int frames);
+static SituationAudioCallback mock_audio_cb = NULL;
+static void* mock_audio_user_data = NULL;
+
+static inline int SituationStartAudioCaptureEx(SituationAudioCallback cb, void* user_data, int sample_rate, int channels) {
+    mock_audio_cb = cb;
+    mock_audio_user_data = user_data;
+    return SITUATION_SUCCESS;
+}
+static inline void SituationStopAudioCapture() {
+    mock_audio_cb = NULL;
+    mock_audio_user_data = NULL;
+}
+
+// Playback (Mock)
+static SituationAudioCallback mock_playback_cb = NULL;
+static void* mock_playback_user_data = NULL;
+
+static inline int SituationStartAudioPlayback(SituationAudioCallback cb, void* user_data, int sample_rate, int channels) {
+    mock_playback_cb = cb;
+    mock_playback_user_data = user_data;
+    return SITUATION_SUCCESS;
+}
+static inline void SituationStopAudioPlayback() {
+    mock_playback_cb = NULL;
+    mock_playback_user_data = NULL;
+}
+
 // Input
 static inline bool SituationIsKeyPressed(int key) { return false; }
 static inline bool SituationIsKeyDown(int key) { return false; }
