@@ -93,11 +93,6 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
 
     // Process virtual key presses (for special keys and tracking)
     while ((rk = SituationGetKeyPressed()) != 0) {
-        // New key press - update tracking
-        session->input.last_key_code = rk;
-        session->input.last_key_time = now;
-        session->input.repeat_state = 1; // WaitDelay
-
         // Process immediately (First Press) - only for special keys
         KTermSit_ProcessSingleKey(term, session, rk);
     }

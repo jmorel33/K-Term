@@ -1120,13 +1120,6 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                      if (next.type == KT_TOK_EQUALS) {
                          KTermToken val = KTerm_LexerNext(&lexer);
                          int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
-                         if (val.type == KT_TOK_IDENTIFIER) {
-                             if (KTerm_TokenIs(val, "HOST")) {
-                                 if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = false;
-                             } else if (KTerm_TokenIs(val, "SOFTWARE")) {
-                                 if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = true;
-                             }
-                         }
                          if (strcmp(key, "REPEAT_RATE") == 0) {
                             if (v < 0) v = 0; if (v > 31) v = 31;
                             target_session->auto_repeat_rate = v;
