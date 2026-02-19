@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.26
+# K-Term Emulation Library v2.6.27
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -64,6 +64,15 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.27: Voice Reactor Phase 3 (Commands & VAD)**
+This release adds intelligence to the Voice Reactor with Voice Activity Detection and Command Injection.
+*   **Voice Commands:**
+    *   **Injection API:** Added `SituationVoiceCommand` to programmatically inject command strings into active voice contexts.
+    *   **Remote Control:** Added `KTERM_PKT_AUDIO_COMMAND` handling in `kt_net.h` to support remote command injection packets.
+*   **Voice Activity Detection (VAD):**
+    *   **Energy Analysis:** Implemented RMS energy calculation in the audio capture loop to detect speech activity.
+    *   **State Tracking:** Added `vad_active` and `energy_level` to `KTermVoiceContext` for real-time monitoring.
 
 **New in v2.6.26: Voice Reactor Phase 2 (Network Integration)**
 This release enables full network transmission for the Voice Reactor, moving beyond local loopback to real-time VoIP capabilities.

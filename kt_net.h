@@ -773,6 +773,17 @@ static void KTerm_Net_ProcessFrame(KTerm* term, KTermSession* session, KTermNetS
         KTerm_Voice_ProcessPlayback(target_session, payload, len);
 #endif
     }
+    else if (type == KTERM_PKT_AUDIO_COMMAND) {
+#ifndef KTERM_DISABLE_VOICE
+        // Payload is null-terminated string
+        char cmd[1024];
+        if (len < sizeof(cmd)) {
+            memcpy(cmd, payload, len);
+            cmd[len] = '\0';
+            KTerm_Voice_InjectCommand(term, cmd);
+        }
+#endif
+    }
 }
 
 #ifndef KTERM_DISABLE_TELNET
@@ -1784,7 +1795,7 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
 #ifndef KTERM_DISABLE_VOICE
     {
         KTermVoiceSendCtx vctx = { term, session };
-        KTerm_Voice_ProcessCapture(session, _KTerm_Net_VoiceSendCallback, &vctx);
+        KTerm_Voice_ProcessCapture(term, session, _KTerm_Net_VoiceSendCallback, &vctx);
     }
 #endif
 
