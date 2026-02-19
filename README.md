@@ -45,7 +45,7 @@ To build the included examples (Telnet Client, SSH Client, Server) using the pro
 make
 ```
 
-> **Note:** This requires `libsituation` and standard build tools (`gcc`).
+> **Note:** This requires `situation` and standard build tools (`gcc`).
 > - **`telnet_client`**: A full graphical Telnet client.
 > - **`ssh_client`**: A reference SSH client (see crypto warning below).
 > - **`net_server`**: A simple Telnet/TCP server.
