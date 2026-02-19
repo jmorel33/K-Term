@@ -1,5 +1,12 @@
 # K-Term Update Log
 
+## [v2.6.25] - Voice Reactor Phase 2 (Network Integration)
+- **Voice Networking**: Enabled full network transmission for voice data, transitioning from local loopback to a functional VoIP pipeline.
+  - **Packetization**: Integrated `KTERM_PKT_AUDIO_VOICE` packet handling into `kt_net.h`. The network process loop now polls the voice capture buffer and transmits audio chunks automatically.
+  - **Playback Routing**: Implemented receive logic for audio packets, routing payload data directly to the session-specific playback ring buffer.
+  - **Context Refactor**: Updated `kt_voice.h` to maintain separate `capture_buffer` and `playback_buffer` rings, ensuring full-duplex operation capability.
+  - **Verification**: Added `tests/verify_voice.c` to validate the complete Capture -> Network Packet -> Playback Loop.
+
 ## [v2.6.24] - Voice Reactor Phase 1 (Core & Loopback)
 - **Voice Reactor**: Implemented Phase 1 of the Voice Reactor architecture, enabling low-latency audio capture and playback functionality within the terminal ecosystem.
   - **Core API**: Introduced `kt_voice.h`, a single-header library for managing voice contexts and audio streams using a lock-free SPSC ring buffer logic.

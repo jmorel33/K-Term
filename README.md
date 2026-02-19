@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.24
+# K-Term Emulation Library v2.6.25
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,8 +65,18 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.6.25: Voice Reactor Phase 2 (Network Integration)**
+This release enables full network transmission for the Voice Reactor, moving beyond local loopback to real-time VoIP capabilities.
+*   **Network Integration (`kt_net.h`):**
+    *   **Voice Packetization:** Implemented `KTERM_PKT_AUDIO_VOICE` transmission logic within the network loop. Captured audio frames are now automatically chunked, wrapped in binary packets, and sent over the active connection.
+    *   **Playback Routing:** Incoming voice packets are depacketized and routed directly to the target session's playback buffer via `KTerm_Voice_ProcessPlayback`.
+*   **Voice Core Refactor (`kt_voice.h`):**
+    *   **Split Buffers:** Refactored `KTermVoiceContext` to support separate, concurrent `capture_buffer` (Mic -> Network) and `playback_buffer` (Network -> Speaker) rings.
+    *   **Integration Hooks:** Added `KTerm_Voice_ProcessCapture` and `KTerm_Voice_ProcessPlayback` to bridge the gap between the lock-free audio thread and the network thread.
+*   **Verification:** Validated the full Network Loopback path (Capture -> Packet -> Network Sim -> Depacket -> Playback) via `tests/verify_voice.c`.
+
 **New in v2.6.24: Voice Reactor Phase 1**
-This release introduces the foundational architecture for **Voice Reactor**, transforming K-Term into a real-time voice command and streaming environment.
+This release introduced the foundational architecture for **Voice Reactor**, transforming K-Term into a real-time voice command and streaming environment.
 *   **Voice Core (`kt_voice.h`):** A new single-header library for managing audio contexts and streams.
     *   **Lock-Free Ring Buffer:** Implements a high-performance Single-Producer Single-Consumer (SPSC) ring buffer to bridge the high-priority audio thread and the main terminal loop without locking.
     *   **Audio Capture:** Integration with `SituationStartAudioCaptureEx` for low-latency microphone input.

@@ -13,6 +13,10 @@
 // Include API
 #include "kterm_api.h"
 
+#ifndef KTERM_DISABLE_VOICE
+#include "kt_voice.h"
+#endif
+
 // Include implementation if requested
 #ifdef KTERM_IMPLEMENTATION
 #include "kt_parser.h"
@@ -20,6 +24,12 @@
 #include "kt_layout.h"
 
 #include "kterm_impl.h"
+
+#define KTERM_VOICE_IMPLEMENTATION
+#ifndef KTERM_DISABLE_VOICE
+#include "kt_voice.h"
+#endif
+
 #ifdef KTERM_ENABLE_GATEWAY
 #define KTERM_GATEWAY_IMPLEMENTATION
 #include "kt_gateway.h"
