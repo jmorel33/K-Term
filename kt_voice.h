@@ -76,8 +76,30 @@ struct KTermVoiceContext {
     int sample_rate;
     int channels;
 
+    uint16_t sequence;
+
     KTermSession* session;
 };
+
+// Timestamp Helper
+#ifdef _WIN32
+#include <windows.h>
+static uint64_t KTerm_Voice_GetMicroseconds() {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    uint64_t sec = counter.QuadPart / freq.QuadPart;
+    uint64_t usec = (counter.QuadPart % freq.QuadPart) * 1000000 / freq.QuadPart;
+    return sec * 1000000 + usec;
+}
+#else
+#include <sys/time.h>
+static uint64_t KTerm_Voice_GetMicroseconds() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+}
+#endif
 
 // Global Mute
 static atomic_bool g_voice_global_mute = false;
@@ -219,18 +241,46 @@ void KTerm_Voice_ProcessCapture(KTermSession* session, KTermVoiceSendCallback se
     else available = VOICE_BUFFER_SIZE - (tail - head);
 
     const int CHUNK_SIZE = 256;
+    // Header size: Format(1) + Channels(1) + Rate(1) + Seq(2) + TS(8) + Pad(3) = 16 bytes
+    const int HEADER_SIZE = 16;
+    const int PACKET_SIZE = HEADER_SIZE + (CHUNK_SIZE * sizeof(float));
 
     while (available >= CHUNK_SIZE) {
-        float chunk[CHUNK_SIZE];
+        uint8_t packet[PACKET_SIZE];
+
+        // 1. Fill Header
+        packet[0] = 0; // Format: PCM Float
+        packet[1] = (uint8_t)ctx->channels;
+        packet[2] = (ctx->sample_rate == 48000) ? 1 : 0;
+
+        uint16_t seq = ctx->sequence++;
+        packet[3] = (seq >> 8) & 0xFF;
+        packet[4] = seq & 0xFF;
+
+        uint64_t ts = KTerm_Voice_GetMicroseconds();
+        packet[5] = (ts >> 56) & 0xFF;
+        packet[6] = (ts >> 48) & 0xFF;
+        packet[7] = (ts >> 40) & 0xFF;
+        packet[8] = (ts >> 32) & 0xFF;
+        packet[9] = (ts >> 24) & 0xFF;
+        packet[10] = (ts >> 16) & 0xFF;
+        packet[11] = (ts >> 8) & 0xFF;
+        packet[12] = ts & 0xFF;
+
+        // Padding
+        packet[13] = 0; packet[14] = 0; packet[15] = 0;
+
+        // 2. Fill Audio Data
+        float* audio_payload = (float*)(packet + HEADER_SIZE);
         uint32_t chunk1 = VOICE_BUFFER_SIZE - tail;
         if ((uint32_t)CHUNK_SIZE <= chunk1) {
-            memcpy(chunk, &ctx->capture_buffer[tail], CHUNK_SIZE * sizeof(float));
+            memcpy(audio_payload, &ctx->capture_buffer[tail], CHUNK_SIZE * sizeof(float));
         } else {
-            memcpy(chunk, &ctx->capture_buffer[tail], chunk1 * sizeof(float));
-            memcpy(chunk + chunk1, &ctx->capture_buffer[0], (CHUNK_SIZE - chunk1) * sizeof(float));
+            memcpy(audio_payload, &ctx->capture_buffer[tail], chunk1 * sizeof(float));
+            memcpy(audio_payload + chunk1, &ctx->capture_buffer[0], (CHUNK_SIZE - chunk1) * sizeof(float));
         }
 
-        if (send_cb) send_cb(user_data, chunk, CHUNK_SIZE * sizeof(float));
+        if (send_cb) send_cb(user_data, packet, PACKET_SIZE);
 
         tail = (tail + CHUNK_SIZE) % VOICE_BUFFER_SIZE;
         atomic_store_explicit(&ctx->capture_tail, tail, memory_order_release);
@@ -243,10 +293,21 @@ void KTerm_Voice_ProcessPlayback(KTermSession* session, const void* data, size_t
     KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
     if (!ctx || !ctx->enabled) return;
 
-    int samples = len / sizeof(float);
-    if (samples <= 0) return;
+    if (len < 16) return; // Header size check
 
-    const float* buffer = (const float*)data;
+    const uint8_t* packet = (const uint8_t*)data;
+    uint8_t format = packet[0];
+    // uint8_t channels = packet[1]; // TODO: Validate/Resample if needed
+    // uint8_t rate = packet[2];     // TODO: Validate/Resample if needed
+    // uint16_t seq = (packet[3] << 8) | packet[4];
+    // uint64_t ts = ...;
+
+    if (format != 0) return; // Only PCM Float supported for now
+
+    const float* buffer = (const float*)(packet + 16);
+    int samples = (len - 16) / sizeof(float);
+
+    if (samples <= 0) return;
 
     uint32_t head = atomic_load_explicit(&ctx->playback_head, memory_order_relaxed);
     uint32_t tail = atomic_load_explicit(&ctx->playback_tail, memory_order_acquire);
