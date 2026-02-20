@@ -882,7 +882,10 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
                     if (strcasecmp(host_pattern, profile_name) == 0) {
                         in_block = true;
                         found = true;
-                        if (out_profile) strcpy(out_profile->host_pattern, host_pattern);
+                        if (out_profile) {
+                            strncpy(out_profile->host_pattern, host_pattern, sizeof(out_profile->host_pattern) - 1);
+                            out_profile->host_pattern[sizeof(out_profile->host_pattern) - 1] = '\0';
+                        }
                     } else {
                         in_block = false;
                     }
@@ -890,12 +893,22 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
             } else if (in_block && out_profile) {
                 char* v = strtok(NULL, " \t=");
                 if (v) {
-                    strncpy(val, v, 255);
-                    if (strcasecmp(key, "HostName") == 0) strcpy(out_profile->hostname, val);
-                    else if (strcasecmp(key, "User") == 0) strcpy(out_profile->user, val);
+                    strncpy(val, v, sizeof(val) - 1);
+                    val[sizeof(val) - 1] = '\0';
+                    if (strcasecmp(key, "HostName") == 0) {
+                        strncpy(out_profile->hostname, val, sizeof(out_profile->hostname) - 1);
+                        out_profile->hostname[sizeof(out_profile->hostname) - 1] = '\0';
+                    }
+                    else if (strcasecmp(key, "User") == 0) {
+                        strncpy(out_profile->user, val, sizeof(out_profile->user) - 1);
+                        out_profile->user[sizeof(out_profile->user) - 1] = '\0';
+                    }
                     else if (strcasecmp(key, "Port") == 0) out_profile->port = atoi(val);
                     else if (strcasecmp(key, "Durable") == 0) out_profile->durable = (strcasecmp(val, "true") == 0 || strcasecmp(val, "yes") == 0 || strcmp(val, "1") == 0);
-                    else if (strcasecmp(key, "Term") == 0) strcpy(out_profile->term_type, val);
+                    else if (strcasecmp(key, "Term") == 0) {
+                        strncpy(out_profile->term_type, val, sizeof(out_profile->term_type) - 1);
+                        out_profile->term_type[sizeof(out_profile->term_type) - 1] = '\0';
+                    }
                 }
             }
         }
@@ -926,8 +939,10 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
             char* act = strtok(NULL, ";");
             if (pat && act && global_ssh_ctx.trigger_count < 16) {
                 AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
-                strncpy(t->pattern, pat, 127);
-                strncpy(t->action, act, 127);
+                strncpy(t->pattern, pat, sizeof(t->pattern) - 1);
+                t->pattern[sizeof(t->pattern) - 1] = '\0';
+                strncpy(t->action, act, sizeof(t->action) - 1);
+                t->action[sizeof(t->action) - 1] = '\0';
                 t->active = true;
                 t->oneshot = true;
                 if (respond) respond(term, session, "OK;TRIGGER_ADDED");
@@ -936,11 +951,17 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
             }
         } else if (sub && strcmp(sub, "list") == 0) {
             // Very simple list
-            char msg[1024] = "OK;TRIGGERS=";
+            char msg[4096];
+            snprintf(msg, sizeof(msg), "OK;TRIGGERS=");
             for(int i=0; i<global_ssh_ctx.trigger_count; i++) {
                 if(global_ssh_ctx.triggers[i].active) {
-                    strcat(msg, global_ssh_ctx.triggers[i].pattern);
-                    strcat(msg, ",");
+                    size_t cur_len = strlen(msg);
+                    size_t pat_len = strlen(global_ssh_ctx.triggers[i].pattern);
+                    // Ensure we have space for pattern + comma + null
+                    if (cur_len + pat_len + 2 < sizeof(msg)) {
+                        strcat(msg, global_ssh_ctx.triggers[i].pattern);
+                        strcat(msg, ",");
+                    }
                 }
             }
             if (respond) respond(term, session, msg);

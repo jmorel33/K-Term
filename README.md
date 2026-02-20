@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.29
+# K-Term Emulation Library v2.6.30
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,11 +65,11 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.6.29: VoIP Integration Skeleton**
-This release introduces the foundational API and Gateway commands for SIP-based VoIP integration.
-*   **VoIP Core (`kt_voip.h`):** New module defining the VoIP API (`Register`, `Dial`, `DTMF`, `Hangup`) with PJSIP stubs.
-*   **Gateway Extension:** Added `EXT;voip` command set for remote control of VoIP features.
-*   **Integration:** Hooks provided for future full PJSIP implementation via `KTERM_USE_PJSIP`.
+**New in v2.6.30: Security Hardening & Automation Fixes**
+This release focuses on hardening the `ssh_client` and the Gateway Protocol against potential security vulnerabilities.
+*   **Buffer Overflow Fix:** Resolved a critical overflow in automation trigger listing.
+*   **Safe String Operations:** Transitioned to bounded string manipulation for configuration and profile loading.
+*   **Null Termination:** Enforced strict null termination for all dynamically managed trigger patterns and actions.
 
 **New in v2.6.28: Voice Reactor Visuals & Final Polish**
 This release adds intelligence to the Voice Reactor with Voice Activity Detection and Command Injection.

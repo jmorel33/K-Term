@@ -1,3 +1,9 @@
+## [v2.6.30] - Security Hardening & Automation Fixes
+- **Security**: Fixed a critical buffer overflow in `ssh_client.c` related to automation trigger listing.
+- **Hardening**: Replaced unsafe string operations in configuration parsing with bounded alternatives.
+- **Automation**: Ensured proper null termination for all dynamically added triggers via Gateway.
+- **Maintenance**: Updated library versioning to 2.6.30 across all documentation and headers.
+
 ## [v2.6.29] - VoIP Integration Skeleton
 - **VoIP Core**: Introduced `kt_voip.h` defining the SIP-based VoIP API (`Register`, `Dial`, `DTMF`, `Hangup`).
 - **PJSIP Support**: Included stubs and hooks for future PJSIP integration via `KTERM_USE_PJSIP`.
