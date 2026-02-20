@@ -17,6 +17,10 @@
 #include "kt_voice.h"
 #endif
 
+#ifndef KTERM_DISABLE_VOIP
+#include "kt_voip.h"
+#endif
+
 // Include implementation if requested
 #ifdef KTERM_IMPLEMENTATION
 #include "kt_parser.h"
@@ -28,6 +32,11 @@
 #define KTERM_VOICE_IMPLEMENTATION
 #ifndef KTERM_DISABLE_VOICE
 #include "kt_voice.h"
+#endif
+
+#define KTERM_VOIP_IMPLEMENTATION
+#ifndef KTERM_DISABLE_VOIP
+#include "kt_voip.h"
 #endif
 
 #ifdef KTERM_ENABLE_GATEWAY
