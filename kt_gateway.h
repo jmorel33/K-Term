@@ -21,6 +21,10 @@ extern "C" {
 #include "kt_voice.h"
 #endif
 
+#ifndef KTERM_DISABLE_VOIP
+#include "kt_voip.h"
+#endif
+
 // Gateway Protocol Entry Point
 // Parses and executes Gateway commands (DCS GATE ...)
 // Format: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
@@ -2246,6 +2250,67 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
 #endif
 }
 
+static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+#ifdef KTERM_DISABLE_VOIP
+    if (respond) respond(term, session, "ERR;VOIP_DISABLED");
+#else
+    if (!args) return;
+    (void)id;
+
+    // register;user=...;pass=...;domain=...
+    // dial;target
+    // dtmf;digits
+    // hangup
+
+    char buffer[256];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char* cmd = strtok(buffer, ";");
+    if (!cmd) return;
+
+    if (strcmp(cmd, "register") == 0) {
+        char* user = NULL;
+        char* pass = NULL;
+        char* domain = NULL;
+
+        char* token = strtok(NULL, ";");
+        while (token) {
+            if (strncmp(token, "user=", 5) == 0) user = token + 5;
+            else if (strncmp(token, "pass=", 5) == 0) pass = token + 5;
+            else if (strncmp(token, "domain=", 7) == 0) domain = token + 7;
+            token = strtok(NULL, ";");
+        }
+
+        if (user && domain) {
+            KTerm_VoIP_Register(user, pass, domain);
+            if (respond) respond(term, session, "OK;REGISTERING");
+        } else {
+            if (respond) respond(term, session, "ERR;MISSING_ARGS");
+        }
+    } else if (strcmp(cmd, "dial") == 0) {
+        char* target = strtok(NULL, ";");
+        if (target) {
+            KTerm_VoIP_Dial(target);
+            if (respond) respond(term, session, "OK;DIALING");
+        } else {
+            if (respond) respond(term, session, "ERR;MISSING_TARGET");
+        }
+    } else if (strcmp(cmd, "dtmf") == 0) {
+        char* digits = strtok(NULL, ";");
+        if (digits) {
+            KTerm_VoIP_DTMF(digits);
+            if (respond) respond(term, session, "OK;DTMF_SENT");
+        }
+    } else if (strcmp(cmd, "hangup") == 0) {
+        KTerm_VoIP_Hangup();
+        if (respond) respond(term, session, "OK;HANGUP");
+    } else {
+        if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
+    }
+#endif
+}
+
 static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
     (void)id;
@@ -2929,6 +2994,7 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "ssh", KTerm_Ext_SSH);
     KTerm_RegisterGatewayExtension(term, "net", KTerm_Ext_Net);
     KTerm_RegisterGatewayExtension(term, "voice", KTerm_Ext_Voice);
+    KTerm_RegisterGatewayExtension(term, "voip", KTerm_Ext_Voip);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {

@@ -1,9 +1,15 @@
+## [v2.6.29] - VoIP Integration Skeleton
+- **VoIP Core**: Introduced `kt_voip.h` defining the SIP-based VoIP API (`Register`, `Dial`, `DTMF`, `Hangup`).
+- **PJSIP Support**: Included stubs and hooks for future PJSIP integration via `KTERM_USE_PJSIP`.
+- **Gateway**: Added `EXT;voip` command set for remote control of VoIP features.
+- **Integration**: Updated `kterm.h` to include the VoIP module.
+
+# K-Term Update Log
+
 ## [v2.6.28] - Voice Reactor Visuals & Final Polish
 - **Visual Indicators**: Implemented VU meter in terminal compute shader driven by voice energy.
 - **Core**: Added `voice_energy` to `GPUShaderConfig` for real-time visualization.
 - **Cleanup**: Removed unused `voice_energy` from push constants and polished shader preambles.
-
-# K-Term Update Log
 
 ## [v2.6.27] - Voice Reactor Phase 3 (Commands & VAD)
 - **Voice Commands**: Implemented Voice Command Injection, allowing spoken words to be translated into terminal input.
