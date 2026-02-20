@@ -18,6 +18,7 @@ void main() {
     float glow_intensity = 0.0;
     float noise_intensity = 0.0;
     float visual_bell_intensity = 0.0;
+    float voice_energy = 0.0;
     uint config_flags = 0;
 
     if (pc.shader_config_addr != 0) {
@@ -28,6 +29,7 @@ void main() {
         if ((config_flags & 4) != 0) glow_intensity = config.glow_intensity; // Flag 4: Glow
         if ((config_flags & 8) != 0) noise_intensity = config.noise_intensity; // Flag 8: Noise
         visual_bell_intensity = config.visual_bell_intensity;
+        voice_energy = config.voice_energy;
     }
 
     vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;
@@ -353,5 +355,17 @@ void main() {
         }
     }
 
+    // VU Meter Overlay
+    if (voice_energy > 0.01) {
+        float bar_width = 8.0;
+        if (pixel_coords.x >= uint(pc.screen_size.x) - uint(bar_width)) {
+            float uv_y = float(pixel_coords.y) / pc.screen_size.y;
+            if (uv_y > (1.0 - voice_energy)) {
+                 float intensity = (uv_y - (1.0 - voice_energy)) / voice_energy;
+                 vec4 meter_color = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 1.0, 0.0, 1.0), intensity);
+                 pixel_color = mix(pixel_color, meter_color, 0.8);
+            }
+        }
+    }
     imageStore(output_image, ivec2(pixel_coords), pixel_color);
 }

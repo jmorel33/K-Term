@@ -141,9 +141,10 @@ void process_shell(KTerm* term, int session_idx, const char* data, size_t len) {
     }
 }
 
-void my_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
+bool my_on_data(KTerm* term, KTermSession* session, const char* data, size_t len) {
     int idx = (int)(session - term->sessions);
     process_shell(term, idx, data, len);
+    return true;
 }
 
 void my_on_connect(KTerm* term, KTermSession* session) {

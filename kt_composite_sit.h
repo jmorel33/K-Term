@@ -2,6 +2,9 @@
 #define KT_COMPOSITE_SIT_H
 
 #include "kt_render_sit.h"
+#ifndef KTERM_DISABLE_VOICE
+#include "kt_voice.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +50,7 @@ typedef struct {
     float glow_intensity;
     float noise_intensity;
     float visual_bell_intensity;
+    float voice_energy;
     uint32_t flags; // 1=CRT, 2=Scanline, 4=Glow, 8=Noise
     
     // Font dimensions
@@ -746,6 +750,18 @@ void KTermCompositor_Prepare(KTermCompositor* comp, KTerm* term) {
         } else {
             config.visual_bell_intensity = 0.0f;
         }
+
+        // Voice Energy
+        float max_energy = 0.0f;
+#ifndef KTERM_DISABLE_VOICE
+        for (int i = 0; i < MAX_SESSIONS; i++) {
+            KTermVoiceContext* vctx = KTerm_Voice_GetContext(&term->sessions[i]);
+            if (vctx && vctx->enabled) {
+                if (vctx->energy_level > max_energy) max_energy = vctx->energy_level;
+            }
+        }
+#endif
+        config.voice_energy = max_energy;
 
         KTerm_UpdateBuffer(term->shader_config_buffer, 0, sizeof(GPUShaderConfig), &config);
         pc->shader_config_addr = KTerm_GetBufferAddress(term->shader_config_buffer);

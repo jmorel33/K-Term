@@ -17,7 +17,7 @@ int main() {
     KTermSession* session = &term->sessions[0];
 
     // 1. Enable Voice
-    if (SituationVoiceEnable(session, true) != SITUATION_SUCCESS) {
+    if (KTerm_Voice_Enable(session, true) != SITUATION_SUCCESS) {
         fprintf(stderr, "Voice Enable Failed\n");
         return 1;
     }
@@ -28,10 +28,10 @@ int main() {
     if (mock_audio_cb) mock_audio_cb(mock_audio_user_data, silence, 256);
     KTerm_Net_Process(term);
 
-    // 3. Test SituationVoiceCommand Injection
-    printf("Testing SituationVoiceCommand...\n");
-    if (SituationVoiceCommand("ls") != SITUATION_SUCCESS) {
-        fprintf(stderr, "SituationVoiceCommand returned failure\n");
+    // 3. Test KTerm_Voice_Command Injection
+    printf("Testing KTerm_Voice_Command...\n");
+    if (KTerm_Voice_Command("ls") != SITUATION_SUCCESS) {
+        fprintf(stderr, "KTerm_Voice_Command returned failure\n");
         return 1;
     }
 

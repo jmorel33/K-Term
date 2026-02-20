@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.26
+# kterm.h - Technical Reference Manual v2.6.28
 
 **(c) 2026 Jacques Morel**
 
@@ -72,6 +72,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.22. VT Pipe (Gateway Protocol)](#422-vt-pipe-gateway-protocol)
     *   [4.23. Networking & SSH](#423-networking--ssh)
     *   [4.24. Session Persistence](#424-session-persistence)
+    *   [4.25. Voice Reactor (VOIP)](#425-voice-reactor-voip)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -82,6 +83,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [5.6. Diagnostics and Testing](#56-diagnostics-and-testing)
     *   [5.7. Advanced Control](#57-advanced-control)
     *   [5.8. Session Management](#58-session-management)
+    *   [5.9. Voice Reactor](#59-voice-reactor)
 
 *   [6. Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
     *   [6.1. Stage 1: Ingestion](#61-stage-1-ingestion)
@@ -191,6 +193,7 @@ The library emulates a wide range of historical and modern terminal standards, f
 -   **Device Support:**
     -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
     -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
+    -   **Voice Reactor (v2.6.28):** Real-time low-latency voice communication, command injection, and GPU-accelerated visual feedback (VU meter).
 
 ### 1.3. Known Limitations (v2.6.23)
 
@@ -1567,6 +1570,19 @@ KTerm v2.6.1 introduces `kt_serialize.h`, a header-only library for persisting a
 *   **API:**
     *   `bool KTerm_SerializeSession(KTermSession* session, void** out_buf, size_t* out_len);`
     *   `bool KTerm_DeserializeSession(KTermSession* session, const void* buf, size_t len);`
+
+### 4.25. Voice Reactor (VOIP)
+
+**v2.6.28** introduces "Voice Reactor", a low-latency, lock-free audio subsystem designed to turn K-Term into a collaborative voice command center. It integrates real-time voice communication directly into the terminal session.
+
+*   **Architecture:** The "Voice Reactor" treats the multi-session multiplexer as a studio patchbay. Audio is captured, packetized, and routed between sessions or over the network using `kt_net.h`.
+*   **Protocol:** Uses dedicated packet types in the framed protocol:
+    *   `KTERM_PKT_AUDIO_VOICE` (0x10): Raw PCM float or Opus voice data.
+    *   `KTERM_PKT_AUDIO_COMMAND` (0x11): Voice command payloads (text injection).
+    *   `KTERM_PKT_AUDIO_STREAM` (0x12): High-quality inter-session streaming.
+*   **Visual Feedback:** A real-time VU meter is rendered on the right edge of the screen using compute shaders (`terminal.comp`). The meter's intensity and color (Green to Red) are driven by the `voice_energy` metric calculated from the capture buffer.
+*   **Integration:** Relies on `kt_voice.h` for lock-free ring buffering (SPSC) and `Situation` audio callbacks. It supports Voice Activity Detection (VAD) to trigger transmission or commands.
+*   **Control:** Managed via the Gateway Protocol (`EXT;voice`) or the C API.
 
 ---
 
@@ -3710,6 +3726,46 @@ KTerm_SetSessionResizeCallback(term, my_resize_callback);
 
 -   `void KTerm_ResizePane(KTerm* term, KTermPane* pane, int width, int height);`
     Resizes a specific pane. (Planned).
+
+### 5.9. Voice Reactor
+
+The Voice Reactor is primarily managed through the Gateway Protocol, allowing the host application or shell scripts to control voice features dynamically. The internal C API (`SituationVoice*`) is available for low-level integration but Gateway commands are preferred for consistency.
+
+#### Gateway Commands
+
+These commands are sent via the `EXT` mechanism: `DCS GATE KTERM ; <ID> ; EXT ; voice ; <Command> [; <Params>] ST`.
+
+| Command | Params | Description |
+| :--- | :--- | :--- |
+| `enable` | `1`/`0` | Enables or disables voice capture/playback for the target session. |
+| `target` | `<ip>` | Sets the remote peer IP/ID for voice transmission. |
+| `command`| `<text>` | Injects a voice command string into the active session (simulates typing). |
+| `mute` | `1`/`0` | Globally mutes/unmutes all voice I/O. |
+
+**Example:** Enable voice on the current session.
+```bash
+printf "\033PGATE;KTERM;0;EXT;voice;enable;1\033\\"
+```
+
+#### Internal C API
+
+These functions are available when `KTERM_DISABLE_VOICE` is not defined. They map directly to the Gateway commands.
+
+##### `KTerm_Voice_Enable()`
+**Signature:** `int KTerm_Voice_Enable(KTermSession* session, bool enable);`
+Enables/disables voice context for a session.
+
+##### `KTerm_Voice_SetTarget()`
+**Signature:** `int KTerm_Voice_SetTarget(KTermSession* session, const char* remote_id_or_ip);`
+Sets network destination for voice packets.
+
+##### `KTerm_Voice_Command()`
+**Signature:** `int KTerm_Voice_Command(const char* command_text);`
+Injects text command into the active session.
+
+##### `KTerm_Voice_SetGlobalMute()`
+**Signature:** `void KTerm_Voice_SetGlobalMute(bool mute);`
+Toggles global mute.
 
 ---
 

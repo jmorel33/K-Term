@@ -26,16 +26,16 @@ typedef void (*KTermVoiceSendCallback)(void* user_data, const void* data, size_t
 // --- API ---
 
 // Enable/Disable voice capture/playback on a specific session
-int SituationVoiceEnable(KTermSession* session, bool enable);
+int KTerm_Voice_Enable(KTermSession* session, bool enable);
 
 // Set the target for voice data (another session index, or remote IP for P2P)
-int SituationVoiceSetTarget(KTermSession* session, const char* remote_id_or_ip);
+int KTerm_Voice_SetTarget(KTermSession* session, const char* remote_id_or_ip);
 
 // Execute a voice command programmatically (simulating speech input)
-int SituationVoiceCommand(const char* command_text);
+int KTerm_Voice_Command(const char* command_text);
 
 // Global controls (Push-to-Talk / Mute)
-void SituationVoiceSetGlobalMute(bool mute);
+void KTerm_Voice_SetGlobalMute(bool mute);
 
 // Helper for testing/debugging
 KTermVoiceContext* KTerm_Voice_GetContext(KTermSession* session);
@@ -198,7 +198,7 @@ static void KTerm_Voice_PlaybackCallback(void* user_data, float* buffer, int fra
     atomic_store_explicit(&ctx->playback_tail, (tail + samples) % VOICE_BUFFER_SIZE, memory_order_release);
 }
 
-int SituationVoiceEnable(KTermSession* session, bool enable) {
+int KTerm_Voice_Enable(KTermSession* session, bool enable) {
     KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
     if (!ctx) return SITUATION_FAILURE;
 
@@ -230,7 +230,7 @@ int SituationVoiceEnable(KTermSession* session, bool enable) {
     return SITUATION_SUCCESS;
 }
 
-int SituationVoiceSetTarget(KTermSession* session, const char* remote_id_or_ip) {
+int KTerm_Voice_SetTarget(KTermSession* session, const char* remote_id_or_ip) {
     (void)session; (void)remote_id_or_ip;
     return SITUATION_SUCCESS;
 }
@@ -273,7 +273,7 @@ void KTerm_Voice_InjectCommand(KTerm* term, const char* cmd) {
     // For now, raw injection.
 }
 
-int SituationVoiceCommand(const char* command_text) {
+int KTerm_Voice_Command(const char* command_text) {
     if (!command_text) return SITUATION_FAILURE;
 
     int injected_count = 0;
@@ -286,7 +286,7 @@ int SituationVoiceCommand(const char* command_text) {
     return (injected_count > 0) ? SITUATION_SUCCESS : SITUATION_FAILURE;
 }
 
-void SituationVoiceSetGlobalMute(bool mute) {
+void KTerm_Voice_SetGlobalMute(bool mute) {
     atomic_store_explicit(&g_voice_global_mute, mute, memory_order_relaxed);
 }
 
