@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.27
+# K-Term Emulation Library v2.6.28
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,7 +65,7 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.6.27: Voice Reactor Phase 3 (Commands & VAD)**
+**New in v2.6.28: Voice Reactor Visuals & Final Polish**
 This release adds intelligence to the Voice Reactor with Voice Activity Detection and Command Injection.
 *   **Voice Commands:**
     *   **Injection API:** Added `SituationVoiceCommand` to programmatically inject command strings into active voice contexts.

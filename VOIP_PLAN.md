@@ -106,11 +106,11 @@ void SituationVoiceSetGlobalMute(bool mute);
 - [x] Verified via `tests/verify_voice.c` (Capture -> Network -> Loopback -> Playback).
 
 ### Phase 3: Voice Commands
--   [ ] Implement Voice Activity Detection (VAD).
--   [ ] Simple keyword spotting -> console command injection.
+-   [x] Implement Voice Activity Detection (VAD).
+-   [x] Simple keyword spotting -> console command injection.
 -   [ ] (Future) Full local STT option.
 
 ### Phase 4: Advanced Streaming & Polish
--   [ ] High-quality inter-session audio streaming (`KTERM_PKT_AUDIO_STREAM`).
--   [ ] Visual voice activity indicators (VU meter in status bar).
--   [ ] Latency optimization (Opus integration, jitter buffer tuning).
+-   [x] High-quality inter-session audio streaming (`KTERM_PKT_AUDIO_STREAM`).
+-   [x] Visual voice activity indicators (VU meter in status bar).
+-   [x] Latency optimization (Opus integration, jitter buffer tuning).

@@ -49,7 +49,7 @@ int main() {
 
     // Enable Voice
     printf("Enabling Voice...\n");
-    if (SituationVoiceEnable(session, true) != SITUATION_SUCCESS) {
+    if (KTerm_Voice_Enable(session, true) != SITUATION_SUCCESS) {
         fprintf(stderr, "Voice Enable Failed\n");
         return 1;
     }

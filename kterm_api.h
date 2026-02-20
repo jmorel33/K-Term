@@ -57,8 +57,8 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 27
-#define KTERM_VERSION_STRING "2.6.27"
+#define KTERM_VERSION_PATCH 28
+#define KTERM_VERSION_STRING "2.6.28"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)
@@ -984,7 +984,7 @@ typedef struct {
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
     "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
@@ -1008,7 +1008,7 @@ typedef struct {
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
     "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
@@ -1031,7 +1031,7 @@ typedef struct {
     "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
     "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
     "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
@@ -1052,7 +1052,7 @@ typedef struct {
     "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
     "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
     "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
@@ -1078,7 +1078,7 @@ typedef struct {
     "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
     "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
     "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
@@ -1100,7 +1100,7 @@ typedef struct {
     "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
     "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
     "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
+    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"

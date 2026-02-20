@@ -17,6 +17,10 @@ extern "C" {
 // We rely on kt_net.h being included before or with kterm.h
 #include "kt_net.h"
 
+#ifndef KTERM_DISABLE_VOICE
+#include "kt_voice.h"
+#endif
+
 // Gateway Protocol Entry Point
 // Parses and executes Gateway commands (DCS GATE ...)
 // Format: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
@@ -2191,6 +2195,57 @@ static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, co
     KTerm_Ext_SSH(term, session, id, args, respond);
 }
 
+static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+#ifdef KTERM_DISABLE_VOICE
+    if (respond) respond(term, session, "ERR;VOICE_DISABLED");
+#else
+    if (!args) return;
+    (void)id;
+
+    // enable;1 | target;ip | command;text | mute;1
+    char buffer[256];
+    strncpy(buffer, args, sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+
+    char* cmd = strtok(buffer, ";");
+    if (!cmd) return;
+
+    if (strcmp(cmd, "enable") == 0) {
+        char* val = strtok(NULL, ";");
+        bool enable = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
+        KTermSession* target = KTerm_GetTargetSession(term, session);
+        KTerm_Voice_Enable(target, enable);
+        if (respond) respond(term, session, enable ? "OK;ENABLED" : "OK;DISABLED");
+    } else if (strcmp(cmd, "target") == 0) {
+        char* val = strtok(NULL, ";");
+        if (val) {
+             KTermSession* target = KTerm_GetTargetSession(term, session);
+             KTerm_Voice_SetTarget(target, val);
+             if (respond) respond(term, session, "OK;TARGET_SET");
+        }
+    } else if (strcmp(cmd, "command") == 0) {
+        // Remaining part is command text
+        // But strtok might have messed up semicolons if command contains them.
+        // Re-parse args to find command content.
+        const char* p = strstr(args, "command;");
+        if (p) {
+             const char* text = p + 8;
+             if (text[0]) {
+                 KTerm_Voice_Command(text);
+                 if (respond) respond(term, session, "OK;EXECUTED");
+             }
+        }
+    } else if (strcmp(cmd, "mute") == 0) {
+        char* val = strtok(NULL, ";");
+        bool mute = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
+        KTerm_Voice_SetGlobalMute(mute);
+        if (respond) respond(term, session, mute ? "OK;MUTED" : "OK;UNMUTED");
+    } else {
+        if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
+    }
+#endif
+}
+
 static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     if (!args) return;
     (void)id;
@@ -2873,6 +2928,7 @@ void KTerm_RegisterBuiltinExtensions(KTerm* term) {
     KTerm_RegisterGatewayExtension(term, "grid", KTerm_Ext_Grid);
     KTerm_RegisterGatewayExtension(term, "ssh", KTerm_Ext_SSH);
     KTerm_RegisterGatewayExtension(term, "net", KTerm_Ext_Net);
+    KTerm_RegisterGatewayExtension(term, "voice", KTerm_Ext_Voice);
 }
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {

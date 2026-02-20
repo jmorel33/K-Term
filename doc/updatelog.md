@@ -1,3 +1,8 @@
+## [v2.6.28] - Voice Reactor Visuals & Final Polish
+- **Visual Indicators**: Implemented VU meter in terminal compute shader driven by voice energy.
+- **Core**: Added `voice_energy` to `GPUShaderConfig` for real-time visualization.
+- **Cleanup**: Removed unused `voice_energy` from push constants and polished shader preambles.
+
 # K-Term Update Log
 
 ## [v2.6.27] - Voice Reactor Phase 3 (Commands & VAD)
