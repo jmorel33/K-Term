@@ -1951,6 +1951,69 @@ static void KTerm_HttpProbe_Callback(KTerm* term, KTermSession* session, const K
     snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;HTTPPROBE;%s\x1B\\", id, payload);
     KTerm_QueueSessionResponse(term, session, response);
 }
+
+static void KTerm_MtuProbe_Callback(KTerm* term, KTermSession* session, const KTermMtuProbeResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[1024];
+    if (result->error) {
+        snprintf(payload, sizeof(payload), "ERR;%s", result->msg);
+    } else if (result->done) {
+        snprintf(payload, sizeof(payload), "OK;PATH_MTU=%d;LOCAL_MTU=%d", result->path_mtu, result->local_mtu);
+    } else {
+        snprintf(payload, sizeof(payload), "PROGRESS;...");
+    }
+
+    char response[2048];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;MTUPROBE;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+}
+
+static void KTerm_FragTest_Callback(KTerm* term, KTermSession* session, const KTermFragTestResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[1024];
+    if (result->error) {
+        snprintf(payload, sizeof(payload), "ERR;%s", result->msg);
+    } else {
+        snprintf(payload, sizeof(payload), "OK;FRAGS_SENT=%d;REASSEMBLY=%s",
+            result->fragments_sent, result->reassembly_success ? "SUCCESS" : "FAILURE");
+    }
+
+    char response[2048];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;FRAGTEST;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+}
+
+static void KTerm_PingExt_Callback(KTerm* term, KTermSession* session, const KTermPingExtResult* result, void* user_data) {
+    if (!term || !session || !result) return;
+    char* id = (char*)user_data;
+    if (!id) id = "0";
+
+    char payload[2048];
+    if (!result->done) {
+        return;
+    }
+
+    int offset = snprintf(payload, sizeof(payload), "OK;SENT=%d;RECV=%d;LOST=%d;LOSS_PCT=%.1f;MIN=%d;AVG=%d;MAX=%d;STDDEV=%d",
+             result->sent, result->received, result->lost, result->loss_percent,
+             result->min_rtt, result->avg_rtt, result->max_rtt, result->stddev_rtt);
+
+    offset += snprintf(payload + offset, sizeof(payload) - offset, ";HIST=0-10:%d,10-20:%d,20-50:%d,50-100:%d,100+:%d",
+             result->hist_0_10, result->hist_10_20, result->hist_20_50, result->hist_50_100, result->hist_100_plus);
+
+    if (result->graph_line[0]) {
+        snprintf(payload + offset, sizeof(payload) - offset, ";GRAPH=%s", result->graph_line);
+    }
+
+    char response[4096];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PINGEXT;%s\x1B\\", id, payload);
+    KTerm_QueueSessionResponse(term, session, response);
+}
 #endif
 
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
@@ -2227,6 +2290,93 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_URL");
         }
+    } else if (strcmp(cmd, "mtu_probe") == 0) {
+        char* host = NULL;
+        bool df = false;
+        int start_size = 0;
+        int max_size = 0;
+
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
+        while(arg) {
+            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (strncmp(arg, "df=", 3) == 0) df = (atoi(arg+3) != 0);
+            else if (strncmp(arg, "start_size=", 11) == 0) start_size = atoi(arg+11);
+            else if (strncmp(arg, "max_size=", 9) == 0) max_size = atoi(arg+9);
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
+        }
+
+        if (host) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 if (KTerm_Net_MTUProbe(term, session, host, df, start_size, max_size, KTerm_MtuProbe_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_TARGET");
+        }
+    } else if (strcmp(cmd, "frag_test") == 0) {
+        char* host = NULL;
+        int size = 2000;
+        int fragments = 2;
+
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
+        while(arg) {
+            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (strncmp(arg, "size=", 5) == 0) size = atoi(arg+5);
+            else if (strncmp(arg, "fragments=", 10) == 0) fragments = atoi(arg+10);
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
+        }
+
+        if (host) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 if (KTerm_Net_FragTest(term, session, host, size, fragments, KTerm_FragTest_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_TARGET");
+        }
+    } else if (strcmp(cmd, "ping_ext") == 0) {
+        char* host = NULL;
+        int count = 10;
+        int interval = 200;
+        int size = 64;
+        bool graph = false;
+
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
+        while(arg) {
+            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (strncmp(arg, "count=", 6) == 0) count = atoi(arg+6);
+            else if (strncmp(arg, "interval=", 9) == 0) interval = (int)(atof(arg+9) * 1000);
+            else if (strncmp(arg, "size=", 5) == 0) size = atoi(arg+5);
+            else if (strncmp(arg, "graph=", 6) == 0) graph = (atoi(arg+6) != 0);
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
+        }
+
+        if (host) {
+             char* id_copy = (char*)malloc(strlen(id) + 1);
+             if (id_copy) {
+                 strcpy(id_copy, id);
+                 if (KTerm_Net_PingExt(term, session, host, count, interval, size, graph, KTerm_PingExt_Callback, id_copy)) {
+                     if (respond) respond(term, session, "OK;STARTED");
+                 } else {
+                     if (respond) respond(term, session, "ERR;START_FAILED");
+                     free(id_copy);
+                 }
+             }
+        } else {
+             if (respond) respond(term, session, "ERR;MISSING_TARGET");
+        }
     } else if (strcmp(cmd, "help") == 0) {
         const char* help =
             "OK;"
@@ -2263,6 +2413,35 @@ static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, co
             if (net->whois) { KTerm_Net_FreeWhois(net->whois); net->whois = NULL; }
             if (net->speedtest) { KTerm_Net_FreeSpeedtest(net->speedtest); net->speedtest = NULL; }
             if (net->http_probe) { KTerm_Net_FreeHttpProbe(net->http_probe); net->http_probe = NULL; }
+
+            // New Diagnostics Cleanup
+            if (net->mtu_probe) {
+                if (IS_VALID_SOCKET(net->mtu_probe->sockfd)) CLOSE_SOCKET(net->mtu_probe->sockfd);
+#ifdef _WIN32
+                if (net->mtu_probe->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->mtu_probe->icmp_handle);
+                if (net->mtu_probe->icmp_event) CloseHandle(net->mtu_probe->icmp_event);
+#endif
+                if (net->mtu_probe->user_data) free(net->mtu_probe->user_data);
+                free(net->mtu_probe); net->mtu_probe = NULL;
+            }
+            if (net->frag_test) {
+                if (IS_VALID_SOCKET(net->frag_test->sockfd)) CLOSE_SOCKET(net->frag_test->sockfd);
+#ifdef _WIN32
+                if (net->frag_test->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->frag_test->icmp_handle);
+                if (net->frag_test->icmp_event) CloseHandle(net->frag_test->icmp_event);
+#endif
+                if (net->frag_test->user_data) free(net->frag_test->user_data);
+                free(net->frag_test); net->frag_test = NULL;
+            }
+            if (net->ping_ext) {
+                if (IS_VALID_SOCKET(net->ping_ext->sockfd)) CLOSE_SOCKET(net->ping_ext->sockfd);
+#ifdef _WIN32
+                if (net->ping_ext->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->ping_ext->icmp_handle);
+                if (net->ping_ext->icmp_event) CloseHandle(net->ping_ext->icmp_event);
+#endif
+                if (net->ping_ext->user_data) free(net->ping_ext->user_data);
+                free(net->ping_ext); net->ping_ext = NULL;
+            }
 
             if (respond) respond(term, session, "OK;CANCELLED");
         } else {

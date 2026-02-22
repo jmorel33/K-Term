@@ -1,3 +1,10 @@
+## [v2.6.36] - Network Diagnostics Expansion
+- **MTU Discovery**: Introduced `mtu_probe` Gateway command and `KTerm_Net_MTUProbe` API. Uses binary search with ICMP/DF packets to discover Path MTU.
+- **Fragmentation Testing**: Added `frag_test` to verify packet fragmentation and reassembly capabilities of the network path.
+- **Extended Ping**: Implemented `ping_ext` for advanced latency monitoring, including Jitter, Standard Deviation, Packet Loss %, and ASCII visualizations (histograms and timelines).
+- **Cleanup**: Added specific cleanup functions for all network diagnostic contexts (`KTerm_Net_FreeMtuProbe`, etc.) to improve memory management and prevent linkage errors.
+- **Maintenance**: Bumped library version to 2.6.36.
+
 ## [v2.6.35] - Performance Optimization
 - **Performance**: Optimized Gateway Protocol banner generation (`PIPE;BANNER`) to use stack allocation instead of heap, significantly reducing allocation overhead and memory fragmentation during frequent updates.
 - **Maintenance**: Bumped library version to 2.6.35.
