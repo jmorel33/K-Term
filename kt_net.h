@@ -24,7 +24,7 @@ typedef struct KTermHttpProbeContext KTermHttpProbeContext;
 typedef struct KTermMtuProbeContext KTermMtuProbeContext;
 typedef struct KTermFragTestContext KTermFragTestContext;
 typedef struct KTermPingExtContext KTermPingExtContext;
-typedef struct KTermWireDiagContext KTermWireDiagContext;
+typedef struct KTermPacketDiagContext KTermPacketDiagContext;
 
 // Protocol Definition (Public for introspection)
 typedef struct {
@@ -321,19 +321,19 @@ typedef void (*KTermPingExtCallback)(KTerm* term, KTermSession* session, const K
 // graph: Enable ASCII graph generation
 bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data);
 
-// Starts the WireDiag packet sniffer.
+// Starts the PacketDiag packet sniffer.
 // params: Key-value pairs (interface, filter, snaplen, count, promisc, timeout)
-bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* params);
-void KTerm_Net_WireDiag_Stop(KTerm* term, KTermSession* session);
-void KTerm_Net_WireDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
+bool KTerm_Net_PacketDiag_Start(KTerm* term, KTermSession* session, const char* params);
+void KTerm_Net_PacketDiag_Stop(KTerm* term, KTermSession* session);
+void KTerm_Net_PacketDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
 
-void KTerm_Net_WireDiag_Pause(KTerm* term, KTermSession* session);
-void KTerm_Net_WireDiag_Resume(KTerm* term, KTermSession* session);
-bool KTerm_Net_WireDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter);
-bool KTerm_Net_WireDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
-bool KTerm_Net_WireDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id);
-bool KTerm_Net_WireDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max);
-bool KTerm_Net_WireDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max);
+void KTerm_Net_PacketDiag_Pause(KTerm* term, KTermSession* session);
+void KTerm_Net_PacketDiag_Resume(KTerm* term, KTermSession* session);
+bool KTerm_Net_PacketDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter);
+bool KTerm_Net_PacketDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
+bool KTerm_Net_PacketDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id);
+bool KTerm_Net_PacketDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max);
+bool KTerm_Net_PacketDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max);
 
 // Advanced Auth / Protocol Analysis
 const KTermProtocolDef* KTerm_Net_QueryProtocol(uint16_t port, bool is_udp);
@@ -349,7 +349,7 @@ void KTerm_Net_FreeHttpProbe(KTermHttpProbeContext* ctx);
 void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx);
 void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx);
 void KTerm_Net_FreePingExt(KTermPingExtContext* ctx);
-void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx);
+void KTerm_Net_FreePacketDiag(KTermPacketDiagContext* ctx);
 
 #ifdef __cplusplus
 }
@@ -377,8 +377,8 @@ void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx);
 #include <pthread.h>
 #endif
 
-#ifdef KTERM_ENABLE_WIREDIAG
-// Include pcap.h if WireDiag is enabled.
+#ifdef KTERM_ENABLE_PACKETDIAG
+// Include pcap.h if PacketDiag is enabled.
 // Use "deps/pcap.h" if bundled, otherwise assume system path.
 #ifdef KTERM_USE_BUNDLED_PCAP
     #include "deps/pcap.h"
@@ -428,7 +428,7 @@ void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx);
 static double KTerm_GetTime(void);
 static unsigned short KTerm_Checksum(void *b, int len);
 
-// ANSI Colors for Protocol ID and WireDiag
+// ANSI Colors for Protocol ID and PacketDiag
 #define ANSI_RESET "\x1B[0m"
 #define ANSI_GRAY  "\x1B[90m"
 #define ANSI_RED   "\x1B[31m"
@@ -549,7 +549,7 @@ struct KTermHttpProbeContext;
 struct KTermMtuProbeContext;
 struct KTermFragTestContext;
 struct KTermPingExtContext;
-struct KTermWireDiagContext;
+struct KTermPacketDiagContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -633,7 +633,7 @@ typedef struct {
     struct KTermMtuProbeContext* mtu_probe;
     struct KTermFragTestContext* frag_test;
     struct KTermPingExtContext* ping_ext;
-    struct KTermWireDiagContext* wirediag;
+    struct KTermPacketDiagContext* packetdiag;
 
     int target_session_index;
 
@@ -910,7 +910,7 @@ typedef struct {
     uint16_t src_port;
     uint16_t dst_port;
     uint8_t proto;
-} WireDiagFlowKey;
+} PacketDiagFlowKey;
 
 typedef struct {
     uint32_t seq;
@@ -919,7 +919,7 @@ typedef struct {
     // Buffer for reassembly
     char buffer[4096];
     int buf_len;
-} WireDiagStream;
+} PacketDiagStream;
 
 typedef struct {
     uint64_t packets;
@@ -931,13 +931,13 @@ typedef struct {
     // Protocol specific
     bool is_rtp;
     uint32_t ssrc;
-} WireDiagFlowStats;
+} PacketDiagFlowStats;
 
-typedef struct WireDiagFlow {
-    WireDiagFlowKey key;
-    WireDiagStream stream;
-    WireDiagFlowStats stats;
-    struct WireDiagFlow* next; // Chaining for hash collisions
+typedef struct PacketDiagFlow {
+    PacketDiagFlowKey key;
+    PacketDiagStream stream;
+    PacketDiagFlowStats stats;
+    struct PacketDiagFlow* next; // Chaining for hash collisions
     uint32_t id; // Unique ID for referencing
 
     // Auth Tracking
@@ -945,12 +945,12 @@ typedef struct WireDiagFlow {
     char auth_proto[16];
     char auth_user[64];
     bool auth_risk;
-} WireDiagFlow;
+} PacketDiagFlow;
 
-typedef struct KTermWireDiagContext {
+typedef struct KTermPacketDiagContext {
     void* pcap_handle; // void* to avoid pcap dependency in header if possible, but we included pcap.h in impl
     // Actually this struct is in IMPLEMENTATION block, so we can use pcap_t if included
-#ifdef KTERM_ENABLE_WIREDIAG
+#ifdef KTERM_ENABLE_PACKETDIAG
     pcap_t* handle;
 #else
     void* handle;
@@ -992,7 +992,7 @@ typedef struct KTermWireDiagContext {
     int ring_count; // Total packets processed (redundant with captured_count but used for relative index)
 
     // Flow Tracking & Stats
-    struct WireDiagFlow* flow_table[256]; // Hash table
+    struct PacketDiagFlow* flow_table[256]; // Hash table
     uint32_t next_flow_id;
     uint32_t follow_flow_id; // 0 = None
 
@@ -1009,7 +1009,7 @@ typedef struct KTermWireDiagContext {
     KTerm* term;
     int session_index;
 
-} KTermWireDiagContext;
+} KTermPacketDiagContext;
 
 // --- Helper Functions ---
 
@@ -1125,7 +1125,7 @@ void KTerm_Net_FreePingExt(KTermPingExtContext* ctx) {
     free(ctx);
 }
 
-void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx) {
+void KTerm_Net_FreePacketDiag(KTermPacketDiagContext* ctx) {
     if (!ctx) return;
     if (ctx->running) {
         // Should have been stopped, but just in case
@@ -1135,9 +1135,9 @@ void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx) {
 
     // Cleanup Flows
     for (int i = 0; i < 256; i++) {
-        WireDiagFlow* flow = ctx->flow_table[i];
+        PacketDiagFlow* flow = ctx->flow_table[i];
         while (flow) {
-            WireDiagFlow* next = flow->next;
+            PacketDiagFlow* next = flow->next;
             free(flow);
             flow = next;
         }
@@ -1161,10 +1161,10 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
     if (net->mtu_probe) { KTerm_Net_FreeMtuProbe(net->mtu_probe); net->mtu_probe = NULL; }
     if (net->frag_test) { KTerm_Net_FreeFragTest(net->frag_test); net->frag_test = NULL; }
     if (net->ping_ext) { KTerm_Net_FreePingExt(net->ping_ext); net->ping_ext = NULL; }
-    if (net->wirediag) {
-        KTerm_Net_WireDiag_Stop(NULL, session); // Stop if active
-        KTerm_Net_FreeWireDiag(net->wirediag);
-        net->wirediag = NULL;
+    if (net->packetdiag) {
+        KTerm_Net_PacketDiag_Stop(NULL, session); // Stop if active
+        KTerm_Net_FreePacketDiag(net->packetdiag);
+        net->packetdiag = NULL;
     }
 
     if (net->security.close) {
@@ -2830,11 +2830,11 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         KTerm_Net_ProcessPingExt(term, session);
     }
 
-#ifdef KTERM_ENABLE_WIREDIAG
-    // Process WireDiag
-    if (net && net->wirediag) {
-        void KTerm_Net_ProcessWireDiag(KTerm* term, KTermSession* session); // Forward
-        KTerm_Net_ProcessWireDiag(term, session);
+#ifdef KTERM_ENABLE_PACKETDIAG
+    // Process PacketDiag
+    if (net && net->packetdiag) {
+        void KTerm_Net_ProcessPacketDiag(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessPacketDiag(term, session);
     }
 #endif
 
@@ -3626,18 +3626,18 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     return true;
 }
 
-bool KTerm_Net_WireDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id) {
+bool KTerm_Net_PacketDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
-    net->wirediag->follow_flow_id = flow_id;
+    if (!net || !net->packetdiag) return false;
+    net->packetdiag->follow_flow_id = flow_id;
     return true;
 }
 
-bool KTerm_Net_WireDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max) {
+bool KTerm_Net_PacketDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
-    KTermWireDiagContext* ctx = net->wirediag;
+    if (!net || !net->packetdiag) return false;
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
     snprintf(out, max, "PKTS=%llu;BYTES=%llu;TCP=%llu;UDP=%llu;ICMP=%llu;OTHER=%llu",
         (unsigned long long)ctx->stats.total_packets,
@@ -3649,11 +3649,11 @@ bool KTerm_Net_WireDiag_GetStats(KTerm* term, KTermSession* session, char* out, 
     return true;
 }
 
-bool KTerm_Net_WireDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
+bool KTerm_Net_PacketDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
-    KTermWireDiagContext* ctx = net->wirediag;
+    if (!net || !net->packetdiag) return false;
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
     out[0] = '\0';
     size_t offset = 0;
@@ -3666,7 +3666,7 @@ bool KTerm_Net_WireDiag_GetFlows(KTerm* term, KTermSession* session, char* out, 
 #endif
 
     for (int i = 0; i < 256; i++) {
-        WireDiagFlow* flow = ctx->flow_table[i];
+        PacketDiagFlow* flow = ctx->flow_table[i];
         while (flow) {
             char src[16], dst[16];
             struct in_addr sa = { .s_addr = flow->key.src_ip };
@@ -4231,9 +4231,9 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
     return true;
 }
 
-// --- WireDiag Implementation ---
+// --- PacketDiag Implementation ---
 
-#ifdef KTERM_ENABLE_WIREDIAG
+#ifdef KTERM_ENABLE_PACKETDIAG
 
 // --- Heuristics & Auth Detection ---
 
@@ -4284,7 +4284,7 @@ static bool KTerm_Net_ScanPayloadForAuth(const unsigned char* payload, int len, 
     return false;
 }
 
-static const KTermProtocolDef* WireDiag_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp) {
+static const KTermProtocolDef* PacketDiag_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp) {
     const KTermProtocolDef* p_src = KTerm_Net_IdentifyProtocol(src_port, is_udp);
     const KTermProtocolDef* p_dst = KTerm_Net_IdentifyProtocol(dst_port, is_udp);
     const KTermProtocolDef* p = NULL;
@@ -4313,7 +4313,7 @@ static const KTermProtocolDef* WireDiag_IdentifyProtocol(uint16_t src_port, uint
     return p;
 }
 
-static void WireDiag_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
+static void PacketDiag_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 12) return;
     int version = (data[0] >> 6) & 0x03;
     if (version != 2) return;
@@ -4324,7 +4324,7 @@ static void WireDiag_ParseRTP(const unsigned char* data, int len, char* out, int
     snprintf(out, max_len, " RTP v2 PT=%d Seq=%d TS=%u SSRC=0x%X", pt, seq, ts, ssrc);
 }
 
-static void WireDiag_ParsePTP(const unsigned char* data, int len, char* out, int max_len) {
+static void PacketDiag_ParsePTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 34) return;
     int msgType = data[0] & 0x0F;
     int ver = data[1] & 0x0F;
@@ -4346,7 +4346,7 @@ static void WireDiag_ParsePTP(const unsigned char* data, int len, char* out, int
     snprintf(out, max_len, " PTPv%d %s Seq=%d Dom=%d", ver, typeStr, seq, domain);
 }
 
-static void WireDiag_ParseDNS(const unsigned char* data, int len, char* out, int max_len) {
+static void PacketDiag_ParseDNS(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 12) return;
     int qr = (data[2] >> 7) & 0x01;
     int qdcount = (data[4] << 8) | data[5];
@@ -4375,7 +4375,7 @@ static void WireDiag_ParseDNS(const unsigned char* data, int len, char* out, int
     }
 }
 
-static void WireDiag_ParseHTTP(const unsigned char* data, int len, char* out, int max_len) {
+static void PacketDiag_ParseHTTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 10) return;
     char prefix[16];
     int copy_len = (len < 15) ? len : 15;
@@ -4411,7 +4411,7 @@ static void WireDiag_ParseHTTP(const unsigned char* data, int len, char* out, in
     }
 }
 
-static void WireDiag_WriteToBuffer(KTermWireDiagContext* ctx, const char* fmt, ...) {
+static void PacketDiag_WriteToBuffer(KTermPacketDiagContext* ctx, const char* fmt, ...) {
     char buf[1024];
     va_list args;
     va_start(args, fmt);
@@ -4437,8 +4437,8 @@ static void WireDiag_WriteToBuffer(KTermWireDiagContext* ctx, const char* fmt, .
 #endif
 }
 
-static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *pkt) {
-    KTermWireDiagContext* ctx = (KTermWireDiagContext*)user;
+static void PacketDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *pkt) {
+    KTermPacketDiagContext* ctx = (KTermPacketDiagContext*)user;
     if (!ctx || !ctx->running) return;
     if (ctx->paused) return;
 
@@ -4555,7 +4555,7 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             if (flags & 0x04) strcat(flag_str, "RST ");
             if (flags & 0x08) strcat(flag_str, "PSH ");
 
-            const KTermProtocolDef* pdef = WireDiag_IdentifyProtocol(sport, dport, false);
+            const KTermProtocolDef* pdef = PacketDiag_IdentifyProtocol(sport, dport, false);
 
             if (pdef) {
                 pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s[%s]%s %s",
@@ -4589,7 +4589,7 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 // Parse HTTP
                 if (payload_len > 0) {
                     char http_info[256] = "";
-                    WireDiag_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
+                    PacketDiag_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
                     if (http_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, http_info, ANSI_RESET);
                 }
             }
@@ -4614,7 +4614,7 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 flow_payload_len = payload_len;
             }
 
-            const KTermProtocolDef* pdef = WireDiag_IdentifyProtocol(sport, dport, true);
+            const KTermProtocolDef* pdef = PacketDiag_IdentifyProtocol(sport, dport, true);
 
             if (pdef) {
                 pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[%s]%s", ANSI_CYAN, ANSI_RESET, sport, dport, pdef->ansi_color, pdef->short_name, ANSI_RESET);
@@ -4638,21 +4638,21 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             if ((pname && (strstr(pname, "Dante") || strstr(pname, "RTP"))) || dport == 4321 || sport == 4321) {
                 if (payload_len > 0) {
                     char rtp_info[256] = "";
-                    WireDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                    PacketDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
                     if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_MAGENTA, rtp_info, ANSI_RESET);
                 }
             }
             else if ((pname && strstr(pname, "PTP")) || dport == 319 || dport == 320 || sport == 319 || sport == 320) {
                 if (payload_len > 0) {
                     char ptp_info[256] = "";
-                    WireDiag_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
+                    PacketDiag_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
                     if (ptp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_CYAN, ptp_info, ANSI_RESET);
                 }
             }
             else if ((pname && (strcmp(pname, "DNS") == 0 || strcmp(pname, "mDNS") == 0)) || dport == 53 || sport == 53) {
                 if (payload_len > 0) {
                     char dns_info[256] = "";
-                    WireDiag_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
+                    PacketDiag_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
                     if (dns_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, dns_info, ANSI_RESET);
                 }
             }
@@ -4662,7 +4662,7 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                      // Maybe RTP? Check PT < 128?
                      if ((payload[1] & 0x7F) < 128) {
                          char rtp_info[256] = "";
-                         WireDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                         PacketDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
                          if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s?%s", ANSI_GRAY, rtp_info, ANSI_RESET);
                      }
                 }
@@ -4675,7 +4675,7 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     }
 
     // Update Stats & Flows
-    WireDiagFlowKey key = {0};
+    PacketDiagFlowKey key = {0};
     bool has_key = false;
     char stream_out_buf[512] = {0};
 
@@ -4706,13 +4706,13 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     // Update Flow
     if (has_key) {
         uint8_t hash = (key.src_ip ^ key.dst_ip ^ key.src_port ^ key.dst_port ^ key.proto) & 0xFF;
-        WireDiagFlow* flow = ctx->flow_table[hash];
+        PacketDiagFlow* flow = ctx->flow_table[hash];
         while (flow) {
             if (memcmp(&flow->key, &key, sizeof(key)) == 0) break;
             flow = flow->next;
         }
         if (!flow && ctx->next_flow_id < 1024) {
-            flow = (WireDiagFlow*)calloc(1, sizeof(WireDiagFlow));
+            flow = (PacketDiagFlow*)calloc(1, sizeof(PacketDiagFlow));
             if (flow) {
                 flow->key = key;
                 flow->id = ++ctx->next_flow_id;
@@ -4776,37 +4776,37 @@ static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
 #endif
 
     if (stream_out_buf[0]) {
-        WireDiag_WriteToBuffer(ctx, "%s", stream_out_buf);
+        PacketDiag_WriteToBuffer(ctx, "%s", stream_out_buf);
     }
 
     pos += snprintf(out + pos, sizeof(out) - pos, "\r\n");
 
     // Output
-    WireDiag_WriteToBuffer(ctx, "%s", out);
+    PacketDiag_WriteToBuffer(ctx, "%s", out);
 }
 
 #ifndef _WIN32
-static void* WireDiag_Thread(void* arg) {
+static void* PacketDiag_Thread(void* arg) {
 #else
-static DWORD WINAPI WireDiag_Thread(LPVOID arg) {
+static DWORD WINAPI PacketDiag_Thread(LPVOID arg) {
 #endif
-    KTermWireDiagContext* ctx = (KTermWireDiagContext*)arg;
+    KTermPacketDiagContext* ctx = (KTermPacketDiagContext*)arg;
     if (!ctx) return 0;
 
-    pcap_loop(ctx->handle, ctx->count > 0 ? ctx->count : -1, WireDiag_PacketHandler, (u_char*)ctx);
+    pcap_loop(ctx->handle, ctx->count > 0 ? ctx->count : -1, PacketDiag_PacketHandler, (u_char*)ctx);
 
     ctx->running = false;
 
     // Notify stopped
-    WireDiag_WriteToBuffer(ctx, "%s[WireDiag] Stopped.%s\r\n", ANSI_YELLOW, ANSI_RESET);
+    PacketDiag_WriteToBuffer(ctx, "%s[PacketDiag] Stopped.%s\r\n", ANSI_YELLOW, ANSI_RESET);
 
     return 0;
 }
 
-void KTerm_Net_ProcessWireDiag(KTerm* term, KTermSession* session) {
+void KTerm_Net_ProcessPacketDiag(KTerm* term, KTermSession* session) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return;
-    KTermWireDiagContext* ctx = net->wirediag;
+    if (!net || !net->packetdiag) return;
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
 #ifndef _WIN32
     pthread_mutex_lock(&ctx->mutex);
@@ -4847,11 +4847,11 @@ void KTerm_Net_ProcessWireDiag(KTerm* term, KTermSession* session) {
     }
 }
 
-#endif // KTERM_ENABLE_WIREDIAG
+#endif // KTERM_ENABLE_PACKETDIAG
 
-bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* params) {
-#ifndef KTERM_ENABLE_WIREDIAG
-    KTerm_Net_Log(term, (int)(session - term->sessions), "WireDiag not enabled in build.");
+bool KTerm_Net_PacketDiag_Start(KTerm* term, KTermSession* session, const char* params) {
+#ifndef KTERM_ENABLE_PACKETDIAG
+    KTerm_Net_Log(term, (int)(session - term->sessions), "PacketDiag not enabled in build.");
     return false;
 #else
     if (!term || !session) return false;
@@ -4860,10 +4860,10 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
     if (!net) net = KTerm_Net_CreateContext(session);
 
     // Stop if already running
-    if (net->wirediag) KTerm_Net_WireDiag_Stop(term, session);
+    if (net->packetdiag) KTerm_Net_PacketDiag_Stop(term, session);
 
-    net->wirediag = (KTermWireDiagContext*)calloc(1, sizeof(KTermWireDiagContext));
-    KTermWireDiagContext* ctx = net->wirediag;
+    net->packetdiag = (KTermPacketDiagContext*)calloc(1, sizeof(KTermPacketDiagContext));
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
     ctx->term = term;
     ctx->session_index = (int)(session - term->sessions);
@@ -4929,7 +4929,7 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
         pcap_if_t* alldevs;
         if (pcap_findalldevs(&alldevs, errbuf) == -1) {
             KTerm_Net_Log(term, ctx->session_index, "Failed to find devices");
-            free(ctx); net->wirediag = NULL;
+            free(ctx); net->packetdiag = NULL;
             return false;
         }
         if (alldevs) {
@@ -4938,7 +4938,7 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
             pcap_freealldevs(alldevs);
         } else {
             KTerm_Net_Log(term, ctx->session_index, "No devices found");
-            free(ctx); net->wirediag = NULL;
+            free(ctx); net->packetdiag = NULL;
             return false;
         }
     }
@@ -4954,7 +4954,7 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
 #else
         DeleteCriticalSection(&ctx->mutex);
 #endif
-        free(ctx); net->wirediag = NULL;
+        free(ctx); net->packetdiag = NULL;
         return false;
     }
 
@@ -4969,7 +4969,7 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
 #else
             DeleteCriticalSection(&ctx->mutex);
 #endif
-            free(ctx); net->wirediag = NULL;
+            free(ctx); net->packetdiag = NULL;
             return false;
         }
         if (pcap_setfilter(ctx->handle, &fp) == -1) {
@@ -4980,7 +4980,7 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
 #else
             DeleteCriticalSection(&ctx->mutex);
 #endif
-            free(ctx); net->wirediag = NULL;
+            free(ctx); net->packetdiag = NULL;
             return false;
         }
     }
@@ -4989,35 +4989,35 @@ bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* pa
 
     // Spawn Thread
 #ifndef _WIN32
-    if (pthread_create(&ctx->thread, NULL, WireDiag_Thread, ctx) != 0) {
+    if (pthread_create(&ctx->thread, NULL, PacketDiag_Thread, ctx) != 0) {
         KTerm_Net_Log(term, ctx->session_index, "Failed to create thread");
         pcap_close(ctx->handle);
         pthread_mutex_destroy(&ctx->mutex);
-        free(ctx); net->wirediag = NULL;
+        free(ctx); net->packetdiag = NULL;
         return false;
     }
 #else
-    ctx->thread = CreateThread(NULL, 0, WireDiag_Thread, ctx, 0, NULL);
+    ctx->thread = CreateThread(NULL, 0, PacketDiag_Thread, ctx, 0, NULL);
     if (ctx->thread == NULL) {
         KTerm_Net_Log(term, ctx->session_index, "Failed to create thread");
         pcap_close(ctx->handle);
         DeleteCriticalSection(&ctx->mutex);
-        free(ctx); net->wirediag = NULL;
+        free(ctx); net->packetdiag = NULL;
         return false;
     }
 #endif
 
-    WireDiag_WriteToBuffer(ctx, "%s[WireDiag] Started on %s%s\r\n", ANSI_GREEN, iface, ANSI_RESET);
+    PacketDiag_WriteToBuffer(ctx, "%s[PacketDiag] Started on %s%s\r\n", ANSI_GREEN, iface, ANSI_RESET);
     return true;
 #endif
 }
 
-void KTerm_Net_WireDiag_Stop(KTerm* term, KTermSession* session) {
-#ifdef KTERM_ENABLE_WIREDIAG
+void KTerm_Net_PacketDiag_Stop(KTerm* term, KTermSession* session) {
+#ifdef KTERM_ENABLE_PACKETDIAG
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->wirediag) {
-        KTermWireDiagContext* ctx = net->wirediag;
+    if (net && net->packetdiag) {
+        KTermPacketDiagContext* ctx = net->packetdiag;
         if (ctx->running && ctx->handle) {
             pcap_breakloop(ctx->handle);
             // Join thread
@@ -5039,18 +5039,18 @@ void KTerm_Net_WireDiag_Stop(KTerm* term, KTermSession* session) {
 #endif
 }
 
-void KTerm_Net_WireDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len) {
-#ifdef KTERM_ENABLE_WIREDIAG
+void KTerm_Net_PacketDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len) {
+#ifdef KTERM_ENABLE_PACKETDIAG
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->wirediag) {
+    if (net && net->packetdiag) {
         const char* warn = "";
 #ifdef _WIN32
         warn = ";WARN=WIN_RESTRICTED";
 #endif
         snprintf(buffer, max_len, "RUNNING;CAPTURED=%d%s%s",
-                 net->wirediag->captured_count,
-                 net->wirediag->paused ? ";PAUSED" : "",
+                 net->packetdiag->captured_count,
+                 net->packetdiag->paused ? ";PAUSED" : "",
                  warn);
     } else {
         snprintf(buffer, max_len, "STOPPED");
@@ -5060,41 +5060,41 @@ void KTerm_Net_WireDiag_GetStatus(KTerm* term, KTermSession* session, char* buff
 #endif
 }
 
-void KTerm_Net_WireDiag_Pause(KTerm* term, KTermSession* session) {
+void KTerm_Net_PacketDiag_Pause(KTerm* term, KTermSession* session) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->wirediag) {
-        net->wirediag->paused = true;
+    if (net && net->packetdiag) {
+        net->packetdiag->paused = true;
     }
 }
 
-void KTerm_Net_WireDiag_Resume(KTerm* term, KTermSession* session) {
+void KTerm_Net_PacketDiag_Resume(KTerm* term, KTermSession* session) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->wirediag) {
-        net->wirediag->paused = false;
+    if (net && net->packetdiag) {
+        net->packetdiag->paused = false;
     }
 }
 
-bool KTerm_Net_WireDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter) {
+bool KTerm_Net_PacketDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
+    if (!net || !net->packetdiag) return false;
 
     // Reconstruct params
-    KTermWireDiagContext* ctx = net->wirediag;
+    KTermPacketDiagContext* ctx = net->packetdiag;
     char params[512];
     snprintf(params, sizeof(params), "interface=%s;filter=%s;snaplen=%d;count=%d;promisc=%d;timeout=%d",
              ctx->dev, filter, ctx->snaplen, ctx->count, ctx->promisc, ctx->timeout_ms);
 
     // Restart (Start handles stop/restart)
-    return KTerm_Net_WireDiag_Start(term, session, params);
+    return KTerm_Net_PacketDiag_Start(term, session, params);
 }
 
-bool KTerm_Net_WireDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max) {
+bool KTerm_Net_PacketDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
-    KTermWireDiagContext* ctx = net->wirediag;
+    if (!net || !net->packetdiag) return false;
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
     if (packet_id < 0) return false;
 
@@ -5640,10 +5640,10 @@ const KTermProtocolDef* KTerm_Net_QueryProtocol(uint16_t port, bool is_udp) {
 }
 
 bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
-#ifdef KTERM_ENABLE_WIREDIAG
+#ifdef KTERM_ENABLE_PACKETDIAG
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) return false;
-    KTermWireDiagContext* ctx = net->wirediag;
+    if (!net || !net->packetdiag) return false;
+    KTermPacketDiagContext* ctx = net->packetdiag;
 
     out[0] = '\0';
     size_t offset = 0;
@@ -5656,7 +5656,7 @@ bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size
 #endif
 
     for (int i = 0; i < 256; i++) {
-        WireDiagFlow* flow = ctx->flow_table[i];
+        PacketDiagFlow* flow = ctx->flow_table[i];
         while (flow) {
             if (flow->auth_detected) {
                 char src[16], dst[16];
@@ -5688,7 +5688,7 @@ bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size
     if (count == 0) snprintf(out, max, "NO_AUTH_DETECTED");
     return true;
 #else
-    snprintf(out, max, "WIREDIAG_DISABLED");
+    snprintf(out, max, "PACKETDIAG_DISABLED");
     return false;
 #endif
 }
