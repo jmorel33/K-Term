@@ -1,5 +1,5 @@
 #define KTERM_NET_IMPLEMENTATION
-#define KTERM_ENABLE_LIVEWIRE
+#define KTERM_ENABLE_WIREDIAG
 #define KTERM_USE_BUNDLED_PCAP
 #define KTERM_DISABLE_VOICE
 
@@ -58,7 +58,7 @@ char* pcap_geterr(pcap_t* p) { return "Stub Error"; }
 #include "../kt_net.h"
 
 // Helper to inspect buffer
-static void CheckBufferContains(KTermLiveWireContext* ctx, const char* expected) {
+static void CheckBufferContains(KTermWireDiagContext* ctx, const char* expected) {
     // Reconstruct string from ring buffer
     char buf[65536];
     int len = 0;
@@ -79,14 +79,14 @@ static void CheckBufferContains(KTermLiveWireContext* ctx, const char* expected)
     }
 }
 
-static void ClearBuffer(KTermLiveWireContext* ctx) {
+static void ClearBuffer(KTermWireDiagContext* ctx) {
     ctx->buf_tail = ctx->buf_head;
 }
 
 int main() {
     printf("Verifying Dissectors...\n");
 
-    KTermLiveWireContext ctx = {0};
+    KTermWireDiagContext ctx = {0};
     ctx.running = true;
     ctx.count = 100;
 #ifndef _WIN32
@@ -129,7 +129,7 @@ int main() {
         // SSRC
         pkt[50] = 0; pkt[51] = 0; pkt[52] = 0; pkt[53] = 5;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "Dante Audio");
         CheckBufferContains(&ctx, "RTP v2");
@@ -163,7 +163,7 @@ int main() {
         // Seq=55
         pkt[72] = 0; pkt[73] = 55; // Offset 30 in PTP -> 42+30 = 72
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "PTPv2 Sync");
         CheckBufferContains(&ctx, "Seq=55");
@@ -203,7 +203,7 @@ int main() {
         *q++ = 3; memcpy(q, "com", 3); q += 3;
         *q++ = 0;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "DNS Query");
         CheckBufferContains(&ctx, "www.google.com");
@@ -231,7 +231,7 @@ int main() {
         // Payload at 34 + 20 = 54
         sprintf((char*)&pkt[54], "GET /index.html HTTP/1.1\r\nHost: example.com\r\n\r\n");
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "TCP");
         CheckBufferContains(&ctx, "HTTP"); // Label
@@ -256,7 +256,7 @@ int main() {
         // Data Offset
         pkt[46] = 0x50;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "SSH");
         ClearBuffer(&ctx);
@@ -282,7 +282,7 @@ int main() {
         // Payload (Empty DNS header)
         pkt[42] = 0;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "mDNS");
         ClearBuffer(&ctx);
@@ -304,7 +304,7 @@ int main() {
         pkt[36] = 0x38; pkt[37] = 0x00;
         pkt[38] = 0; pkt[39] = 20;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "Dante Unicast");
         ClearBuffer(&ctx);
@@ -327,7 +327,7 @@ int main() {
         // Data Offset
         pkt[46] = 0x50;
 
-        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "FTP");
         ClearBuffer(&ctx);

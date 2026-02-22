@@ -1,7 +1,34 @@
+## [v2.6.43] - Advanced Protocol Identification & Security Analysis
+**Release Date:** 2026-05-23
+
+This release transforms the WireDiag network inspector from a passive logger into an active security analysis tool. It introduces advanced protocol definitions, heuristic payload scanning, and new Gateway commands to query security metadata and authenticated flows.
+
+### New Features
+*   **Security Context in WireDiag**:
+    *   Added security-related fields to `KTermProtocolDef` (`supports_auth`, `plaintext_auth`, `high_bruteforce_risk`, `high_relay_risk`, `auth_notes`).
+    *   WireDiag output now appends color-coded risk tags: `[Auth]`, `[PLAIN]`, `[BRUTE]`, `[RELAY]`, and context notes (e.g., "Plaintext credentials").
+*   **Deep Payload Inspection**:
+    *   Implemented `KTerm_Net_ScanPayloadForAuth` using signature-based heuristics to detect authentication handshakes in active flows (SSH versions, NTLM SSP, Basic Auth headers).
+    *   Flow tracking now maintains `auth_detected`, `auth_proto`, and `auth_risk` state.
+*   **New Gateway Commands**:
+    *   `PROTO_QUERY;port;[UDP]`: Returns security metadata and description for a specific port (e.g., `RISK=1;DESC=Telnet...`).
+    *   `SCAN_AUTH`: Returns a list of active network flows where authentication handshakes have been detected, including protocol and risk level.
+*   **Public API**:
+    *   Exposed `KTerm_Net_QueryProtocol` and `KTerm_Net_ScanAuthFlows` for integration with external tools.
+
+### Improvements
+*   **Protocol Table**:
+    *   Updated the internal protocol table with security flags for SSH, Telnet, RDP, SMB, HTTP, FTP, and more.
+    *   Added a new "Streaming Services" category (RTMP, OBS-WS, NDI).
+    *   Refined `WireDiag_IdentifyProtocol` to strictly respect transport protocol (TCP/UDP) when matching, preventing false positives (e.g., DNS vs TCP-53).
+
+### Fixes
+*   **Maintenance**: Bumped library version to 2.6.43.
+
 ## [v2.6.42] - Enhanced Protocol Identification & Range Support
 **Release Date:** 2026-05-22
 
-This release significantly expands the protocol definitions used by **LiveWire** and the **Gateway**, adding support for port ranges and detailed metadata to better identify modern services, especially in AV, Gaming, and Messaging contexts.
+This release significantly expands the protocol definitions used by **WireDiag** and the **Gateway**, adding support for port ranges and detailed metadata to better identify modern services, especially in AV, Gaming, and Messaging contexts.
 
 ### New Features
 *   **Enhanced Protocol Definitions**:
@@ -11,7 +38,7 @@ This release significantly expands the protocol definitions used by **LiveWire**
 *   **Gateway Port Scan**:
     *   The `PORTSCAN` command now returns service names (e.g., `;SERVICE=HTTP`) in its callback response based on the identified protocol.
 *   **API Exposure**:
-    *   Exposed `KTerm_Net_IdentifyProtocol` for internal use by both LiveWire and Gateway modules.
+    *   Exposed `KTerm_Net_IdentifyProtocol` for internal use by both WireDiag and Gateway modules.
 
 ### Improvements
 *   **Identification Logic**: Protocol identification now prioritizes exact port matches over range matches to accurately identify standard services running within broader reserved ranges.
@@ -20,35 +47,35 @@ This release significantly expands the protocol definitions used by **LiveWire**
 ### Fixes
 *   **Maintenance**: Bumped library version to 2.6.42.
 
-## [v2.6.41] - LiveWire Protocol Map & Stream Reassembly
-- **Feature**: Implemented **Protocol Map** for LiveWire, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).
-- **Feature**: Implemented **Stream Reassembly** and **Flow Tracking** for LiveWire packet analysis.
-- **LiveWire Flows**: Added `livewire_flows` command to list active network flows (5-tuple) with packet counts.
-- **LiveWire Follow**: Added `livewire_follow;flow_id=...` command to target a specific flow. Packets for the followed flow are reassembled and their payload displayed (Hex/ASCII) in real-time.
-- **LiveWire Stats**: Added `livewire_stats` command to report global protocol statistics (TCP, UDP, ICMP, Bytes, etc.).
+## [v2.6.41] - WireDiag Protocol Map & Stream Reassembly
+- **Feature**: Implemented **Protocol Map** for WireDiag, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).
+- **Feature**: Implemented **Stream Reassembly** and **Flow Tracking** for WireDiag packet analysis.
+- **WireDiag Flows**: Added `wirediag_flows` command to list active network flows (5-tuple) with packet counts.
+- **WireDiag Follow**: Added `wirediag_follow;flow_id=...` command to target a specific flow. Packets for the followed flow are reassembled and their payload displayed (Hex/ASCII) in real-time.
+- **WireDiag Stats**: Added `wirediag_stats` command to report global protocol statistics (TCP, UDP, ICMP, Bytes, etc.).
 - **Metrics**: Implemented **Jitter** calculation for UDP/RTP flows (inter-arrival variance).
-- **Architecture**: Introduced `LiveWireFlow` tracking with a hash table (limit 1024 flows) and thread-safe stats updates.
+- **Architecture**: Introduced `WireDiagFlow` tracking with a hash table (limit 1024 flows) and thread-safe stats updates.
 - **Maintenance**: Bumped library version to 2.6.41.
 
-## [v2.6.40] - LiveWire Polish & Edge Case Handling
-- **LiveWire Control**: Added `pause` and `resume` commands to the `livewire` Gateway extension, allowing users to freeze the packet capture for inspection.
-- **LiveWire Inspection**: Implemented `detail` command (`livewire;detail;packet=N`) to retrieve hex/ASCII dumps of specific packets from the ring buffer.
-- **LiveWire Filtering**: Added `filter` command (`livewire;filter;bpf=...`) to update the BPF filter at runtime without restarting the capture.
-- **Network Diagnostics**: Added automatic `mtu_probe` triggering when `frag_test` detects fragmentation during a LiveWire capture.
-- **Platform Portability**: Added warnings to `livewire;status` for Windows limitations (ICMP/Raw Sockets requiring Admin).
+## [v2.6.40] - WireDiag Polish & Edge Case Handling
+- **WireDiag Control**: Added `pause` and `resume` commands to the `wirediag` Gateway extension, allowing users to freeze the packet capture for inspection.
+- **WireDiag Inspection**: Implemented `detail` command (`wirediag;detail;packet=N`) to retrieve hex/ASCII dumps of specific packets from the ring buffer.
+- **WireDiag Filtering**: Added `filter` command (`wirediag;filter;bpf=...`) to update the BPF filter at runtime without restarting the capture.
+- **Network Diagnostics**: Added automatic `mtu_probe` triggering when `frag_test` detects fragmentation during a WireDiag capture.
+- **Platform Portability**: Added warnings to `wirediag;status` for Windows limitations (ICMP/Raw Sockets requiring Admin).
 - **Maintenance**: Bumped library version to 2.6.40.
 
-## [v2.6.39] - Advanced LiveWire Dissectors
-- **Feature**: Added advanced protocol dissectors to `LiveWire` packet handler.
+## [v2.6.39] - Advanced WireDiag Dissectors
+- **Feature**: Added advanced protocol dissectors to `WireDiag` packet handler.
 - **Feature**: Dante Audio detection (UDP port 4321) with RTP header parsing.
 - **Feature**: PTP (Precision Time Protocol) parsing (UDP ports 319/320).
 - **Feature**: HTTP method and status line parsing (TCP port 80/8080).
 - **Feature**: DNS query and response parsing (UDP port 53).
 - **Maintenance**: Bumped library version to 2.6.39.
 
-## [v2.6.38] - LiveWire Packet Sniffer
-- **Network Diagnostics**: Integrated **LiveWire**, a built-in packet sniffer and analyzer, into the network diagnostics suite.
-- **Gateway**: Added `EXT;net;livewire` command to start real-time packet capture with customizable filters (BPF), interface selection, and promiscuous mode settings.
+## [v2.6.38] - WireDiag Packet Sniffer
+- **Network Diagnostics**: Integrated **WireDiag**, a built-in packet sniffer and analyzer, into the network diagnostics suite.
+- **Gateway**: Added `EXT;net;wirediag` command to start real-time packet capture with customizable filters (BPF), interface selection, and promiscuous mode settings.
 - **Rendering**: Implemented real-time packet dissection and rendering using ANSI colors directly within the terminal stream.
 - **Architecture**: Introduced thread-safe output handling for async network extensions using a ring buffer and mutex mechanism.
 - **Compatibility**: Added comprehensive Windows compatibility support for threading and string handling within the network module.
