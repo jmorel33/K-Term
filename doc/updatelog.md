@@ -1,3 +1,13 @@
+## [v2.6.32] - Robustness & Networking
+- **Robustness**: Fixed a potential memory leak in Kitty graphics protocol during image replacement.
+- **Robustness**: Implemented OpQueue backpressure to pause input processing when the queue is nearly full, preventing state desynchronization.
+- **Networking**: Added FD_SET safety checks for POSIX systems to prevent stack corruption with high FD counts.
+- **Networking**: Fixed a regression in Speedtest where the wrong socket FD was used in `select`.
+- **Networking**: Implemented `cancel_diag` Gateway command to stop running network diagnostics.
+- **Networking**: Updated HTTP Probe to respect `Content-Length` and support Keep-Alive connections.
+- **Networking**: Added fallback logic to `KTerm_Net_GetLocalIP` to try a private IP connection if Google DNS is unreachable (Air-Gap support).
+- **Maintenance**: Bumped library version to 2.6.32.
+
 ## [v2.6.31] - Performance & Maintenance
 - **Performance**: Optimized `ssh_client.c` sending logic by implementing buffered writes and `writev` to reduce system call overhead (~3.75x improvement).
 - **Correctness**: Implemented software write buffering in `ssh_client.c` to correctly handle non-blocking writes (`EAGAIN`/`EWOULDBLOCK`) and partial sends.
