@@ -69,6 +69,27 @@ typedef struct {
 } while(0)
 #endif
 
+// Safe strtok replacement
+static char* KTerm_Strtok(char* str, const char* delim, char** saveptr) {
+    char* token;
+    if (str) *saveptr = str;
+    token = *saveptr;
+    if (!token) return NULL;
+    token += strspn(token, delim);
+    if (*token == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+    char* end = token + strcspn(token, delim);
+    if (*end == '\0') {
+        *saveptr = NULL;
+    } else {
+        *end = '\0';
+        *saveptr = end + 1;
+    }
+    return token;
+}
+
 // Internal Helper Declarations
 static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color);
 static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* options);
@@ -253,7 +274,8 @@ static uint32_t KTerm_ParseAttributeString(const char* str) {
     strncpy(buffer, str, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
 
-    char* tok = strtok(buffer, "|");
+    char* saveptr = NULL;
+    char* tok = KTerm_Strtok(buffer, "|", &saveptr);
     while (tok) {
         if (KTerm_Strcasecmp(tok, "BOLD") == 0) flags |= KTERM_ATTR_BOLD;
         else if (KTerm_Strcasecmp(tok, "DIM") == 0) flags |= KTERM_ATTR_FAINT;
@@ -269,7 +291,7 @@ static uint32_t KTerm_ParseAttributeString(const char* str) {
         else if (KTerm_Strcasecmp(tok, "PROTECTED") == 0) flags |= KTERM_ATTR_PROTECTED;
         else if (KTerm_Strcasecmp(tok, "DIRTY") == 0) flags |= KTERM_FLAG_DIRTY;
 
-        tok = strtok(NULL, "|");
+        tok = KTerm_Strtok(NULL, "|", &saveptr);
     }
 
     return flags;
@@ -689,11 +711,13 @@ static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const
 }
 
 // Forward declarations for callbacks
+#ifndef KTERM_DISABLE_NET
 static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
 static void KTerm_ResponseTime_Callback(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data);
 static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const char* host, int port, int status, void* user_data);
 static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data);
 static void KTerm_Speedtest_Callback(KTerm* term, KTermSession* session, const SpeedtestResult* result, void* user_data);
+#endif
 
 static void KTerm_Gateway_HandleDNS(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
 #ifdef KTERM_DISABLE_NET
@@ -1356,7 +1380,8 @@ static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, cons
     int target_id = -1;
     int force_wob = -1; // -1=unset
 
-    char* token = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* token = KTerm_Strtok(buffer, ";", &saveptr);
     while (token) {
         if (strcmp(token, "START") == 0) start = true;
         else if (strcmp(token, "STOP") == 0) stop = true;
@@ -1368,7 +1393,7 @@ static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, cons
             if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
             else force_wob = 0;
         }
-        token = strtok(NULL, ";");
+        token = KTerm_Strtok(NULL, ";", &saveptr);
     }
 
     if (target_id == -1) {
@@ -1707,6 +1732,7 @@ static void KTerm_Ext_DirectInput(KTerm* term, KTermSession* session, const char
 }
 
 // Callback for async traceroute responses
+#ifndef KTERM_DISABLE_NET
 static void KTerm_Traceroute_Callback(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data) {
     if (!term || !session) return;
     char* id = (char*)user_data;
@@ -1898,6 +1924,7 @@ static void KTerm_HttpProbe_Callback(KTerm* term, KTermSession* session, const K
     snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;HTTPPROBE;%s\x1B\\", id, payload);
     KTerm_QueueSessionResponse(term, session, response);
 }
+#endif
 
 static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
 #ifdef KTERM_DISABLE_NET
@@ -1909,12 +1936,13 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
 
-    char* cmd = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
     if (strcmp(cmd, "connect") == 0) {
-        char* target = strtok(NULL, ";");
-        char* password = strtok(NULL, ";"); // Optional Password
+        char* target = KTerm_Strtok(NULL, ";", &saveptr);
+        char* password = KTerm_Strtok(NULL, ";", &saveptr); // Optional Password
 
         if (target) {
             char user[64] = "root";
@@ -1976,7 +2004,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             respond(term, session, msg);
         }
     } else if (strcmp(cmd, "ping") == 0) {
-        char* host = strtok(NULL, ";");
+        char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
              char output[1024];
              KTerm_Net_Ping(host, output, sizeof(output));
@@ -1994,14 +2022,14 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         int interval_sec = 1;
         int timeout_ms = 2000;
 
-        char* arg = strtok(NULL, ";");
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
             if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
             else if (strncmp(arg, "count=", 6) == 0) count = atoi(arg+6);
             else if (strncmp(arg, "interval=", 9) == 0) interval_sec = atoi(arg+9);
             else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
             else if (!host) host = arg; // Fallback positional if not keyed
-            arg = strtok(NULL, ";");
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
         if (host) {
@@ -2032,14 +2060,14 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         int timeout_ms = 2000;
         bool continuous = false;
 
-        char* arg = strtok(NULL, ";");
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
             if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
             else if (strncmp(arg, "maxhops=", 8) == 0) max_hops = atoi(arg+8);
             else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
             else if (strncmp(arg, "continuous=", 11) == 0) continuous = (atoi(arg+11) != 0);
             else if (!host) host = arg; // Fallback positional if not keyed
-            arg = strtok(NULL, ";");
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
         if (host) {
@@ -2055,7 +2083,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
     } else if (strcmp(cmd, "dns") == 0) {
-        char* host = strtok(NULL, ";");
+        char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
             char ip[64];
             if (KTerm_Net_Resolve(host, ip, sizeof(ip))) {
@@ -2073,14 +2101,14 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         char* ports = NULL;
         int timeout_ms = 1000;
 
-        char* arg = strtok(NULL, ";");
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
             if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
             else if (strncmp(arg, "ports=", 6) == 0) ports = arg + 6;
             else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
             else if (!host) host = arg; // 1st Positional
             else if (!ports) ports = arg; // 2nd Positional
-            arg = strtok(NULL, ";");
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
         if (host && ports) {
@@ -2098,7 +2126,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
              if (respond) respond(term, session, "ERR;MISSING_ARGS");
         }
     } else if (strcmp(cmd, "whois") == 0) {
-        char* host = strtok(NULL, ";");
+        char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
              char* id_copy = (char*)malloc(strlen(id) + 1);
              if (id_copy) {
@@ -2121,7 +2149,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         char* path = NULL;
         int graph = 0;
 
-        char* arg = strtok(NULL, ";");
+        char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
             if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
             else if (strncmp(arg, "port=", 5) == 0) port = atoi(arg+5);
@@ -2129,7 +2157,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             else if (strncmp(arg, "path=", 5) == 0) path = arg + 5;
             else if (strncmp(arg, "graph=", 6) == 0) graph = atoi(arg+6);
             else if (!host) host = arg; // 1st Positional
-            arg = strtok(NULL, ";");
+            arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
         // Default host: NULL implies auto-select in KTerm_Net_Speedtest
@@ -2157,7 +2185,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             respond(term, session, msg);
         }
     } else if (strcmp(cmd, "httpprobe") == 0) {
-        char* url = strtok(NULL, ";");
+        char* url = KTerm_Strtok(NULL, ";", &saveptr);
         if (url) {
              char* id_copy = (char*)malloc(strlen(id) + 1);
              if (id_copy) {
@@ -2234,17 +2262,18 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
 
-    char* cmd = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
     if (strcmp(cmd, "enable") == 0) {
-        char* val = strtok(NULL, ";");
+        char* val = KTerm_Strtok(NULL, ";", &saveptr);
         bool enable = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
         KTermSession* target = KTerm_GetTargetSession(term, session);
         KTerm_Voice_Enable(target, enable);
         if (respond) respond(term, session, enable ? "OK;ENABLED" : "OK;DISABLED");
     } else if (strcmp(cmd, "target") == 0) {
-        char* val = strtok(NULL, ";");
+        char* val = KTerm_Strtok(NULL, ";", &saveptr);
         if (val) {
              KTermSession* target = KTerm_GetTargetSession(term, session);
              KTerm_Voice_SetTarget(target, val);
@@ -2252,7 +2281,7 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
         }
     } else if (strcmp(cmd, "command") == 0) {
         // Remaining part is command text
-        // But strtok might have messed up semicolons if command contains them.
+        // But KTerm_Strtok might have messed up semicolons if command contains them.
         // Re-parse args to find command content.
         const char* p = strstr(args, "command;");
         if (p) {
@@ -2263,7 +2292,7 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
              }
         }
     } else if (strcmp(cmd, "mute") == 0) {
-        char* val = strtok(NULL, ";");
+        char* val = KTerm_Strtok(NULL, ";", &saveptr);
         bool mute = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
         KTerm_Voice_SetGlobalMute(mute);
         if (respond) respond(term, session, mute ? "OK;MUTED" : "OK;UNMUTED");
@@ -2289,7 +2318,8 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
 
-    char* cmd = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
     if (strcmp(cmd, "register") == 0) {
@@ -2297,12 +2327,12 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
         char* pass = NULL;
         char* domain = NULL;
 
-        char* token = strtok(NULL, ";");
+        char* token = KTerm_Strtok(NULL, ";", &saveptr);
         while (token) {
             if (strncmp(token, "user=", 5) == 0) user = token + 5;
             else if (strncmp(token, "pass=", 5) == 0) pass = token + 5;
             else if (strncmp(token, "domain=", 7) == 0) domain = token + 7;
-            token = strtok(NULL, ";");
+            token = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
         if (user && domain) {
@@ -2312,7 +2342,7 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
         }
     } else if (strcmp(cmd, "dial") == 0) {
-        char* target = strtok(NULL, ";");
+        char* target = KTerm_Strtok(NULL, ";", &saveptr);
         if (target) {
             KTerm_VoIP_Dial(target);
             if (respond) respond(term, session, "OK;DIALING");
@@ -2320,7 +2350,7 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
             if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
     } else if (strcmp(cmd, "dtmf") == 0) {
-        char* digits = strtok(NULL, ";");
+        char* digits = KTerm_Strtok(NULL, ";", &saveptr);
         if (digits) {
             KTerm_VoIP_DTMF(digits);
             if (respond) respond(term, session, "OK;DTMF_SENT");
@@ -2348,7 +2378,8 @@ static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id
     int target_id = -1;
     int force_wob = -1;
 
-    char* token = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* token = KTerm_Strtok(buffer, ";", &saveptr);
     while (token) {
         if (strcmp(token, "START") == 0) start = true;
         else if (strcmp(token, "STOP") == 0) stop = true;
@@ -2360,7 +2391,7 @@ static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id
             if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
             else force_wob = 0;
         }
-        token = strtok(NULL, ";");
+        token = KTerm_Strtok(NULL, ";", &saveptr);
     }
 
     if (target_id == -1) {

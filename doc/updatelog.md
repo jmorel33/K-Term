@@ -1393,3 +1393,9 @@ This completes the multi-version refactor arc (started v2.3.40) — grid is now 
 
 - **Major Update**: Rendering engine rewritten to use a Compute Shader pipeline via Shader Storage Buffer Objects (SSBO).
 - **Integration**: Full integration with the KTerm Platform for robust resource management and windowing.
+## [v2.6.33] - Critical Fixes
+- **Multiplexer Heap Corruption Fix**: Corrected bounds checking for VT operations in split-pane layouts.
+- **Thread-Safety**: Removed unsafe strtok usage in Gateway and Network modules.
+- **ReGIS Stability**: Fixed memory corruption in macro recording.
+- **Robustness**: Added bounds checking for direct cell access.
+- **Maintenance**: Bumped library version to 2.6.33.

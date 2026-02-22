@@ -1028,12 +1028,13 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         char key[64] = {0};
         char val[256] = {0};
 
-        char* token = strtok(p, " \t=");
+        char* saveptr = NULL;
+        char* token = SafeStrtok(p, " \t=", &saveptr);
         if (token) {
             strncpy(key, token, 63);
 
             if (strcasecmp(key, "Host") == 0) {
-                char* host_pattern = strtok(NULL, " \t=");
+                char* host_pattern = SafeStrtok(NULL, " \t=", &saveptr);
                 if (host_pattern) {
                     if (found) break; // Already found our block, next Host ends it
                     if (strcasecmp(host_pattern, profile_name) == 0) {
@@ -1048,7 +1049,7 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
                     }
                 }
             } else if (in_block && out_profile) {
-                char* v = strtok(NULL, " \t=");
+                char* v = SafeStrtok(NULL, " \t=", &saveptr);
                 if (v) {
                     strncpy(val, v, sizeof(val) - 1);
                     val[sizeof(val) - 1] = '\0';
@@ -1086,14 +1087,15 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
     strncpy(buffer, args, sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
 
-    char* cmd = strtok(buffer, ";");
+    char* saveptr = NULL;
+    char* cmd = SafeStrtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
     if (strcmp(cmd, "trigger") == 0) {
-        char* sub = strtok(NULL, ";");
+        char* sub = SafeStrtok(NULL, ";", &saveptr);
         if (sub && strcmp(sub, "add") == 0) {
-            char* pat = strtok(NULL, ";");
-            char* act = strtok(NULL, ";");
+            char* pat = SafeStrtok(NULL, ";", &saveptr);
+            char* act = SafeStrtok(NULL, ";", &saveptr);
             if (pat && act && global_ssh_ctx.trigger_count < 16) {
                 AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
                 strncpy(t->pattern, pat, sizeof(t->pattern) - 1);
