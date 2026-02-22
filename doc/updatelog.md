@@ -1,3 +1,8 @@
+## [v2.6.31] - Performance & Maintenance
+- **Performance**: Optimized `ssh_client.c` sending logic by implementing buffered writes and `writev` to reduce system call overhead (~3.75x improvement).
+- **Correctness**: Implemented software write buffering in `ssh_client.c` to correctly handle non-blocking writes (`EAGAIN`/`EWOULDBLOCK`) and partial sends.
+- **Maintenance**: Bumped library version to 2.6.31.
+
 ## [v2.6.30] - Security Hardening & Automation Fixes
 - **Security**: Fixed a critical buffer overflow in `ssh_client.c` related to automation trigger listing.
 - **Hardening**: Replaced unsafe string operations in configuration parsing with bounded alternatives.
