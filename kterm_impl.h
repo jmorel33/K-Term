@@ -2579,13 +2579,13 @@ void ExecuteDECCARA(KTerm* term, KTermSession* session) {
     // CSI Pt ; Pl ; Pb ; Pr ; Ps $ t
     int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
     int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, session, 2, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, session, 3, term->width) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, session->rows) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, session->cols) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
     if (top > bottom || left > right) return;
 
     if (session->param_count <= 4) return; // No attributes
@@ -2651,13 +2651,13 @@ void ExecuteDECRARA(KTerm* term, KTermSession* session) {
     // CSI Pt ; Pl ; Pb ; Pr ; Ps $ u
     int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
     int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, session, 2, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, session, 3, term->width) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, session->rows) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, session->cols) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
     if (top > bottom || left > right) return;
 
     if (session->param_count <= 4) return; // No attributes
@@ -2727,13 +2727,13 @@ void ExecuteDECRQCRA(KTerm* term, KTermSession* session) {
     // int page = KTerm_GetCSIParam(term, session, 1, 1); // Ignored
     int top = KTerm_GetCSIParam(term, session, 2, 1) - 1;
     int left = KTerm_GetCSIParam(term, session, 3, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, session, 4, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, session, 5, term->width) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 4, session->rows) - 1;
+    int right = KTerm_GetCSIParam(term, session, 5, session->cols) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
@@ -2767,8 +2767,8 @@ void ExecuteDECFRA(KTerm* term, KTermSession* session) {
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
     if (top > bottom || left > right) return;
 
     unsigned int fill_char = (unsigned int)char_code;
@@ -2930,13 +2930,13 @@ void ExecuteDECERA(KTerm* term, KTermSession* session) {
     }
     int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
     int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, session, 2, 1) - 1;
-    int right = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, session->rows) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, session->cols) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
     if (top > bottom || left > right) return;
 
     for (int y = top; y <= bottom; y++) {
@@ -2965,20 +2965,20 @@ void ExecuteDECSERA(KTerm* term, KTermSession* session) {
         erase_param = KTerm_GetCSIParam(term, session, 0, 0);
         top = KTerm_GetCSIParam(term, session, 1, 1) - 1;
         left = KTerm_GetCSIParam(term, session, 2, 1) - 1;
-        bottom = KTerm_GetCSIParam(term, session, 3, 1) - 1;
-        right = KTerm_GetCSIParam(term, session, 4, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, session, 3, session->rows) - 1;
+        right = KTerm_GetCSIParam(term, session, 4, session->cols) - 1;
     } else { // param_count == 4
         erase_param = 0; // Default when Ps is omitted
         top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
         left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
-        bottom = KTerm_GetCSIParam(term, session, 2, 1) - 1;
-        right = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, session, 2, session->rows) - 1;
+        right = KTerm_GetCSIParam(term, session, 3, session->cols) - 1;
     }
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
+    if (bottom >= session->rows) bottom = session->rows - 1;
+    if (right >= session->cols) right = session->cols - 1;
     if (top > bottom || left > right) return;
 
     for (int y = top; y <= bottom; y++) {
@@ -4159,6 +4159,7 @@ EnhancedTermChar* KTerm_GetCell(KTerm* term, int x, int y) {
 void KTerm_SetCellDirect(KTerm* term, int x, int y, EnhancedTermChar c) {
     if (!term) return;
     KTermSession* session = GET_SESSION(term);
+    if (x < 0 || x >= session->cols || y < 0 || y >= session->rows) return;
     EnhancedTermChar* cell = GetScreenCell(session, y, x);
     if (cell) {
         *cell = c;
@@ -5785,14 +5786,14 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
     switch (n) {
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
-            for (int x = session->cursor.x; x < term->width; x++) {
+            for (int x = session->cursor.x; x < session->cols; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             // Clear remaining lines
-            for (int y = session->cursor.y + 1; y < term->height; y++) {
-                for (int x = 0; x < term->width; x++) {
+            for (int y = session->cursor.y + 1; y < session->rows; y++) {
+                for (int x = 0; x < session->cols; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell_Internal(session, cell);
@@ -5802,24 +5803,24 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
 
         case 1: // Clear from beginning of screen to cursor
             // Clear lines before cursor
-            for (int y = 0; y < GET_SESSION(term)->cursor.y; y++) {
-                for (int x = 0; x < term->width; x++) {
-                    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+            for (int y = 0; y < session->cursor.y; y++) {
+                for (int x = 0; x < session->cols; x++) {
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell(term, cell);
                 }
             }
             // Clear current line up to cursor
-            for (int x = 0; x <= GET_SESSION(term)->cursor.x; x++) {
-                EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
+            for (int x = 0; x <= session->cursor.x; x++) {
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell(term, cell);
             }
             break;
 
         case 2: // Clear entire screen
-            for (int y = 0; y < term->height; y++) {
-                for (int x = 0; x < term->width; x++) {
+            for (int y = 0; y < session->rows; y++) {
+                for (int x = 0; x < session->cols; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell(term, cell);
@@ -5852,7 +5853,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
 
     switch (n) {
         case 0: // Clear from cursor to end of line
-            for (int x = session->cursor.x; x < term->width; x++) {
+            for (int x = session->cursor.x; x < session->cols; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
@@ -5868,7 +5869,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
             break;
 
         case 2: // Clear entire line
-            for (int x = 0; x < term->width; x++) {
+            for (int x = 0; x < session->cols; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
@@ -5886,7 +5887,7 @@ static void ExecuteECH_Internal(KTerm* term, KTermSession* session) { // Erase C
     (void)term;
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
 
-    for (int i = 0; i < n && session->cursor.x + i < term->width; i++) {
+    for (int i = 0; i < n && session->cursor.x + i < session->cols; i++) {
         KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, session->cursor.x + i));
     }
 }
@@ -7073,10 +7074,10 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
 void ExecuteDECSTBM(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Set Top and Bottom Margins
     int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;    // Convert to 0-based
-    int bottom = KTerm_GetCSIParam(term, session, 1, term->height) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 1, session->rows) - 1;
 
     // Validate parameters
-    if (top >= 0 && top < term->height && bottom >= top && bottom < term->height) {
+    if (top >= 0 && top < session->rows && bottom >= top && bottom < session->rows) {
         session->scroll_top = top;
         session->scroll_bottom = bottom;
 
@@ -7099,10 +7100,10 @@ void ExecuteDECSLRM(KTerm* term, KTermSession* session) {
     }
 
     int left = KTerm_GetCSIParam(term, session, 0, 1) - 1;    // Convert to 0-based
-    int right = KTerm_GetCSIParam(term, session, 1, term->width) - 1;
+    int right = KTerm_GetCSIParam(term, session, 1, session->cols) - 1;
 
     // Validate parameters
-    if (left >= 0 && left < term->width && right >= left && right < term->width) {
+    if (left >= 0 && left < session->cols && right >= left && right < session->cols) {
         session->left_margin = left;
         session->right_margin = right;
 
@@ -9909,13 +9910,19 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
              if (new_cap > limit + 1) new_cap = limit + 1; // +1 for null terminator
 
              if (new_cap > session->regis.macro_cap) {
-                 session->regis.macro_cap = new_cap;
-                 session->regis.macro_buffer = KTerm_Realloc(session->regis.macro_buffer, session->regis.macro_cap);
+                 void* new_buf = KTerm_Realloc(session->regis.macro_buffer, new_cap);
+                 if (new_buf) {
+                     session->regis.macro_buffer = (char*)new_buf;
+                     session->regis.macro_cap = new_cap;
+                 } else {
+                     session->regis.recording_macro = false;
+                     return;
+                 }
              }
         }
 
         // Final check against capacity to be safe
-        if (session->regis.macro_len < session->regis.macro_cap - 1) {
+        if (session->regis.macro_buffer && session->regis.macro_len < session->regis.macro_cap - 1) {
             session->regis.macro_buffer[session->regis.macro_len++] = ch;
             session->regis.macro_buffer[session->regis.macro_len] = '\0';
         }

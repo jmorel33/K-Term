@@ -1637,7 +1637,7 @@ static void KTerm_Net_ProcessPortScan(KTerm* term, KTermSession* session) {
 #ifndef _WIN32
         if (ps->sockfd >= FD_SETSIZE) {
             // Trigger error, fd is too high for select()
-            ps->callback(term, session, -1, false, ps->user_data); // Report error? Or just skip
+            ps->callback(term, session, NULL, -1, 0, ps->user_data); // Report error? Or just skip
             KTerm_Net_FreePortScan(net->port_scan);
             net->port_scan = NULL;
             return;

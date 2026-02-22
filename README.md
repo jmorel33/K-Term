@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.32
+# K-Term Emulation Library v2.6.33
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -64,6 +64,14 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.33: Critical Fixes**
+This release addresses critical stability and security issues identified in v2.7 candidate testing.
+*   **Multiplexer Heap Corruption Fix:** Corrected bounds checking for VT operations in split-pane layouts to prevent heap corruption.
+*   **Thread-Safety:** Removed unsafe `strtok` usage in Gateway and Network modules, replacing it with a thread-safe implementation.
+*   **ReGIS Stability:** Fixed memory corruption in macro recording logic.
+*   **Robustness:** Added bounds checking for direct cell access to prevent buffer wrap-around.
+*   **Maintenance:** Bumped library version to 2.6.33 across all components.
 
 **New in v2.6.32: Robustness & Networking**
 This release introduces critical robustness fixes and enhanced networking capabilities.

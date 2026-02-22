@@ -39,15 +39,15 @@
 #include "kt_voip.h"
 #endif
 
+#define KTERM_NET_IMPLEMENTATION
+#ifndef KTERM_DISABLE_NET
+#include "kt_net.h"
+#endif
+
 #ifdef KTERM_ENABLE_GATEWAY
 #define KTERM_GATEWAY_IMPLEMENTATION
 #include "kt_gateway.h"
 #undef KTERM_GATEWAY_IMPLEMENTATION
-#endif
-
-#define KTERM_NET_IMPLEMENTATION
-#ifndef KTERM_DISABLE_NET
-#include "kt_net.h"
 #endif
 
 #define KTERM_COMPOSITE_IMPLEMENTATION
