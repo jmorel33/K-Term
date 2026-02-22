@@ -3,6 +3,9 @@
 
 #ifndef KTERM_DISABLE_NET
 
+#include <stdint.h>
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -3947,6 +3950,104 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
 #define ANSI_MAGENTA "\x1B[35m"
 #define ANSI_CYAN  "\x1B[36m"
 
+static void LiveWire_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
+    if (len < 12) return;
+    int version = (data[0] >> 6) & 0x03;
+    if (version != 2) return;
+    int pt = data[1] & 0x7F;
+    int seq = (data[2] << 8) | data[3];
+    uint32_t ts = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+    uint32_t ssrc = (data[8] << 24) | (data[9] << 16) | (data[10] << 8) | data[11];
+    snprintf(out, max_len, " RTP v2 PT=%d Seq=%d TS=%u SSRC=0x%X", pt, seq, ts, ssrc);
+}
+
+static void LiveWire_ParsePTP(const unsigned char* data, int len, char* out, int max_len) {
+    if (len < 34) return;
+    int msgType = data[0] & 0x0F;
+    int ver = data[1] & 0x0F;
+    int domain = data[4];
+    int seq = (data[30] << 8) | data[31];
+    const char* typeStr = "Unknown";
+    switch(msgType) {
+        case 0: typeStr = "Sync"; break;
+        case 1: typeStr = "Delay_Req"; break;
+        case 2: typeStr = "Pdelay_Req"; break;
+        case 3: typeStr = "Pdelay_Resp"; break;
+        case 8: typeStr = "Follow_Up"; break;
+        case 9: typeStr = "Delay_Resp"; break;
+        case 0xA: typeStr = "Pdelay_Resp_Follow_Up"; break;
+        case 0xB: typeStr = "Announce"; break;
+        case 0xC: typeStr = "Signaling"; break;
+        case 0xD: typeStr = "Management"; break;
+    }
+    snprintf(out, max_len, " PTPv%d %s Seq=%d Dom=%d", ver, typeStr, seq, domain);
+}
+
+static void LiveWire_ParseDNS(const unsigned char* data, int len, char* out, int max_len) {
+    if (len < 12) return;
+    int qr = (data[2] >> 7) & 0x01;
+    int qdcount = (data[4] << 8) | data[5];
+    if (qdcount > 0 && len > 12) {
+        char name[256];
+        int npos = 0;
+        int dpos = 12;
+        while (dpos < len && npos < 255) {
+            int lbl_len = data[dpos++];
+            if (lbl_len == 0) break;
+            if ((lbl_len & 0xC0) == 0xC0) {
+                dpos++;
+                break;
+            }
+            if (npos > 0) name[npos++] = '.';
+            if (dpos + lbl_len > len) break;
+            for(int i=0; i<lbl_len; i++) {
+                char c = data[dpos++];
+                if (npos < 255) name[npos++] = c;
+            }
+        }
+        name[npos] = '\0';
+        snprintf(out, max_len, " DNS %s %s", qr ? "Resp" : "Query", name);
+    } else {
+        snprintf(out, max_len, " DNS %s", qr ? "Resp" : "Query");
+    }
+}
+
+static void LiveWire_ParseHTTP(const unsigned char* data, int len, char* out, int max_len) {
+    if (len < 10) return;
+    char prefix[16];
+    int copy_len = (len < 15) ? len : 15;
+    memcpy(prefix, data, copy_len);
+    prefix[copy_len] = '\0';
+
+    if (strncmp(prefix, "GET ", 4) == 0 || strncmp(prefix, "POST ", 5) == 0 ||
+        strncmp(prefix, "PUT ", 4) == 0 || strncmp(prefix, "HEAD ", 5) == 0) {
+        int eol = 0;
+        for(int i=0; i<len && i<64; i++) {
+            if (data[i] == '\r' || data[i] == '\n') { eol = i; break; }
+        }
+        if (eol > 0) {
+            char line[65];
+            memcpy(line, data, eol);
+            line[eol] = '\0';
+            snprintf(out, max_len, " HTTP %s", line);
+        }
+        return;
+    }
+
+    if (strncmp(prefix, "HTTP/", 5) == 0) {
+        int eol = 0;
+        for(int i=0; i<len && i<64; i++) {
+            if (data[i] == '\r' || data[i] == '\n') { eol = i; break; }
+        }
+        if (eol > 0) {
+            char line[65];
+            memcpy(line, data, eol);
+            line[eol] = '\0';
+            snprintf(out, max_len, " %s", line);
+        }
+    }
+}
+
 static void LiveWire_WriteToBuffer(KTermLiveWireContext* ctx, const char* fmt, ...) {
     char buf[1024];
     va_list args;
@@ -4043,6 +4144,21 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             if (flags & 0x08) strcat(flag_str, "PSH ");
 
             pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s", ANSI_GREEN, ANSI_RESET, sport, dport, flag_str);
+
+            if (sport == 80 || dport == 80 || sport == 8080 || dport == 8080) {
+                // Parse HTTP
+                const unsigned char* payload = tcp + (tcp[12] >> 4) * 4;
+                int payload_len = tcp_len - ((tcp[12] >> 4) * 4);
+
+                int cap_remain = pkthdr->caplen - (int)(payload - pkt);
+                if (cap_remain < payload_len) payload_len = cap_remain;
+
+                if (payload_len > 0) {
+                    char http_info[256] = "";
+                    LiveWire_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
+                    if (http_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, http_info, ANSI_RESET);
+                }
+            }
         }
     } else if (proto == 17) { // UDP
         const unsigned char* udp = ip_header + header_len;
@@ -4050,7 +4166,54 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             int sport = (udp[0] << 8) | udp[1];
             int dport = (udp[2] << 8) | udp[3];
             int len = (udp[4] << 8) | udp[5];
-            pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d Len=%d", ANSI_CYAN, ANSI_RESET, sport, dport, len);
+
+            // Payload
+            const unsigned char* payload = udp + 8;
+            int payload_len = len - 8;
+            // Safer calculation against captured length
+            int cap_remain = pkthdr->caplen - (int)(payload - pkt);
+            if (cap_remain < payload_len) payload_len = cap_remain;
+
+            if (dport == 4321 || sport == 4321) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[Dante Audio]%s", ANSI_CYAN, ANSI_RESET, sport, dport, ANSI_MAGENTA, ANSI_RESET);
+                if (payload_len > 0) {
+                    char rtp_info[256] = "";
+                    LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                    if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_MAGENTA, rtp_info, ANSI_RESET);
+                }
+            }
+            else if (dport == 319 || dport == 320 || sport == 319 || sport == 320) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d", ANSI_CYAN, ANSI_RESET, sport, dport);
+                if (payload_len > 0) {
+                    char ptp_info[256] = "";
+                    LiveWire_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
+                    if (ptp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_CYAN, ptp_info, ANSI_RESET);
+                }
+            }
+            else if (dport == 53 || sport == 53) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d", ANSI_CYAN, ANSI_RESET, sport, dport);
+                if (payload_len > 0) {
+                    char dns_info[256] = "";
+                    LiveWire_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
+                    if (dns_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, dns_info, ANSI_RESET);
+                }
+            }
+            else {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d Len=%d", ANSI_CYAN, ANSI_RESET, sport, dport, len);
+                // Heuristic RTP check
+                if (payload_len > 12 && (payload[0] & 0xC0) == 0x80) { // Version 2
+                     // Maybe RTP? Check PT < 128?
+                     if ((payload[1] & 0x7F) < 128) {
+                         char rtp_info[256] = "";
+                         LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                         // Only print if it looks valid? Just hint it.
+                         // Only print if we are sure? Let's just print if it parsed something successfully?
+                         // LiveWire_ParseRTP only checks version.
+                         // Let's add it if payload type is reasonable.
+                         if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s?%s", ANSI_GRAY, rtp_info, ANSI_RESET);
+                     }
+                }
+            }
         }
     } else if (proto == 1) { // ICMP
         pos += snprintf(out + pos, sizeof(out) - pos, "%sICMP%s", ANSI_MAGENTA, ANSI_RESET);
