@@ -452,11 +452,21 @@ static const KTermProtocolDef kterm_protocols[] = {
     { 179,   0,   "BGP",          "Border Gateway Protocol (early)",            "Legacy", ANSI_WHITE, false, false, "Routing (still used but old spec)" },
 
     // ── File Transfer ────────────────────────────────────────────────────────────
-    { 20,    0,    "FTP-Data",  "FTP Data",                                   "File",    ANSI_YELLOW,  true,  false, NULL },
-    { 21,    0,    "FTP",       "FTP Control",                                "File",    ANSI_YELLOW,  false, false, NULL },
-    { 69,    0,    "TFTP",      "Trivial File Transfer Protocol",             "File",    ANSI_YELLOW,  true,  false, "UDP only" },
-    { 445,   0,    "SMB",       "Server Message Block / CIFS",                "File",    ANSI_YELLOW,  false, false, "Windows shares" },
-    { 2049,  0,    "NFS",       "Network File System",                        "File",    ANSI_YELLOW,  true,  false, "Often UDP" },
+    { 20,    0,    "FTP-Data",  "File Transfer Protocol (Data)",               "File",    ANSI_YELLOW,  true,  false, "Active mode data; often dynamic in passive" },
+    { 21,    0,    "FTP",       "File Transfer Protocol (Control)",           "File",    ANSI_YELLOW,  false, false, "Commands/auth; RFC 959" },
+    { 69,    0,    "TFTP",      "Trivial File Transfer Protocol",             "File",    ANSI_YELLOW,  true,  false, "UDP only; boot/firmware/simple transfers" },
+    { 873,   0,    "rsync",     "rsync File Synchronization",                 "File",    ANSI_YELLOW,  false, false, "Efficient delta transfers; often over SSH" },
+    { 989,   0,    "FTPS-Data", "FTPS Protocol (Data over TLS/SSL)",           "File",    ANSI_YELLOW,  true,  false, "Implicit FTPS data; RFC 4217" },
+    { 990,   0,    "FTPS",      "FTPS Protocol (Control over TLS/SSL)",        "File",    ANSI_YELLOW,  false, false, "Implicit FTPS control; often 21 for explicit" },
+    {137,    0,    "NetBIOS-NS","NetBIOS Name Service (SMB discovery)",        "File",    ANSI_YELLOW,  true,  false, "Legacy SMB; UDP for name resolution" },
+    {138,    0,    "NetBIOS-DGM","NetBIOS Datagram (SMB legacy)",              "File",    ANSI_YELLOW,  true,  false, "Legacy SMB; UDP broadcast" },
+    {139,    0,    "NetBIOS-SSN","NetBIOS Session (SMB legacy)",               "File",    ANSI_YELLOW,  false, false, "Legacy SMB over TCP; pre-Win2000" },
+    { 445,   0,    "SMB",       "Server Message Block / CIFS",                 "File",    ANSI_YELLOW,  false, false, "Modern Windows file sharing; TCP primary" },
+    {2049,   0,    "NFS",       "Network File System",                        "File",    ANSI_YELLOW,  true,  false, "Unix/Linux shares; TCP/UDP" },
+    {6881, 6999,  "BitTorrent", "BitTorrent Peer-to-Peer (main range)",       "File",    ANSI_YELLOW,  true,  false, "P2P file distribution; dynamic often" },
+    { 80,    0,    "WebDAV",    "WebDAV over HTTP",                           "File",    ANSI_YELLOW,  false, false, "HTTP-based file access; often 80/443" },
+    { 443,   0,    "WebDAVS",   "WebDAV over HTTPS",                          "File",    ANSI_YELLOW,  false, false, "Secure WebDAV; common in cloud storage" },
+    { 22,    0,    "SFTP/SCP",  "SSH File Transfer Protocol / Secure Copy",   "File",    ANSI_YELLOW,  false, false, "Secure over SSH; port 22" },
 
     // ── Email ────────────────────────────────────────────────────────────────────
     { 25,    0,    "SMTP",      "Simple Mail Transfer Protocol",              "Mail",    ANSI_YELLOW,  false, false, NULL },
