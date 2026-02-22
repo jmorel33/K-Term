@@ -2425,6 +2425,39 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
     } else if (KTerm_Strcasecmp(cmd, "livewire_stop") == 0) {
         KTerm_Net_LiveWire_Stop(term, session);
         if (respond) respond(term, session, "OK;STOPPED");
+    } else if (KTerm_Strcasecmp(cmd, "livewire_pause") == 0) {
+        KTerm_Net_LiveWire_Pause(term, session);
+        if (respond) respond(term, session, "OK;PAUSED");
+    } else if (KTerm_Strcasecmp(cmd, "livewire_resume") == 0) {
+        KTerm_Net_LiveWire_Resume(term, session);
+        if (respond) respond(term, session, "OK;RESUMED");
+    } else if (KTerm_Strcasecmp(cmd, "livewire_filter") == 0) {
+        char* filter = KTerm_Strtok(NULL, ";", &saveptr);
+        if (!filter) filter = "";
+        if (KTerm_Net_LiveWire_SetFilter(term, session, filter)) {
+            if (respond) respond(term, session, "OK;FILTER_UPDATED");
+        } else {
+            if (respond) respond(term, session, "ERR;UPDATE_FAILED");
+        }
+    } else if (KTerm_Strcasecmp(cmd, "livewire_detail") == 0) {
+        char* token = KTerm_Strtok(NULL, ";", &saveptr);
+        int pkt_id = -1;
+        if (token && KTerm_Strncasecmp(token, "packet=", 7) == 0) {
+            pkt_id = atoi(token + 7);
+        }
+
+        if (pkt_id != -1) {
+            char detail[4096];
+            if (KTerm_Net_LiveWire_GetDetail(term, session, pkt_id, detail, sizeof(detail))) {
+                char full_resp[4200];
+                snprintf(full_resp, sizeof(full_resp), "OK;%s", detail);
+                if (respond) respond(term, session, full_resp);
+            } else {
+                if (respond) respond(term, session, "ERR;INVALID_PACKET");
+            }
+        } else {
+            if (respond) respond(term, session, "ERR;MISSING_ID");
+        }
     } else if (KTerm_Strcasecmp(cmd, "livewire_status") == 0) {
         char status[256];
         KTerm_Net_LiveWire_GetStatus(term, session, status, sizeof(status));

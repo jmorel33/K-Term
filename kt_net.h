@@ -307,6 +307,11 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
 void KTerm_Net_LiveWire_Stop(KTerm* term, KTermSession* session);
 void KTerm_Net_LiveWire_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
 
+void KTerm_Net_LiveWire_Pause(KTerm* term, KTermSession* session);
+void KTerm_Net_LiveWire_Resume(KTerm* term, KTermSession* session);
+bool KTerm_Net_LiveWire_SetFilter(KTerm* term, KTermSession* session, const char* filter);
+bool KTerm_Net_LiveWire_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
+
 // Cleanup Functions (Internal/Advanced use)
 void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx);
 void KTerm_Net_FreeResponseTime(KTermResponseTimeContext* ctx);
@@ -762,6 +767,12 @@ typedef struct KTermPingExtContext {
 #endif
 } KTermPingExtContext;
 
+typedef struct {
+    struct timeval ts;
+    int len;
+    uint8_t data[1500];
+} CapturedPacket;
+
 typedef struct KTermLiveWireContext {
     void* pcap_handle; // void* to avoid pcap dependency in header if possible, but we included pcap.h in impl
     // Actually this struct is in IMPLEMENTATION block, so we can use pcap_t if included
@@ -777,6 +788,11 @@ typedef struct KTermLiveWireContext {
     int count;
     int timeout_ms;
 
+    // Control
+    bool paused;
+    bool trigger_mtu_probe;
+    char last_frag_ip[64];
+
     // Stats
     int captured_count;
     int error_count;
@@ -791,10 +807,15 @@ typedef struct KTermLiveWireContext {
     CRITICAL_SECTION mutex;
 #endif
 
-    // Output Ring Buffer
+    // Output Ring Buffer (Text)
     char out_buf[65536];
     int buf_head;
     int buf_tail;
+
+    // Packet Ring Buffer (Raw)
+    CapturedPacket packet_ring[128];
+    int ring_head;
+    int ring_count; // Total packets processed (redundant with captured_count but used for relative index)
 
     // Target
     KTerm* term;
@@ -4077,12 +4098,33 @@ static void LiveWire_WriteToBuffer(KTermLiveWireContext* ctx, const char* fmt, .
 static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *pkt) {
     KTermLiveWireContext* ctx = (KTermLiveWireContext*)user;
     if (!ctx || !ctx->running) return;
+    if (ctx->paused) return;
 
     ctx->captured_count++;
     if (ctx->count > 0 && ctx->captured_count > ctx->count) {
         pcap_breakloop(ctx->handle);
         return;
     }
+
+    // Store Packet in Ring (Thread-Safe)
+#ifndef _WIN32
+    pthread_mutex_lock(&ctx->mutex);
+#else
+    EnterCriticalSection(&ctx->mutex);
+#endif
+    int idx = ctx->ring_head;
+    ctx->packet_ring[idx].ts = pkthdr->ts;
+    int copy_len = pkthdr->caplen;
+    if (copy_len > 1500) copy_len = 1500;
+    ctx->packet_ring[idx].len = copy_len;
+    memcpy(ctx->packet_ring[idx].data, pkt, copy_len);
+    ctx->ring_head = (ctx->ring_head + 1) % 128;
+    ctx->ring_count++; // Increment total processed count
+#ifndef _WIN32
+    pthread_mutex_unlock(&ctx->mutex);
+#else
+    LeaveCriticalSection(&ctx->mutex);
+#endif
 
     // Basic Dissection (Ethernet)
     // Assuming Ethernet for simplicity (DLT_EN10MB)
@@ -4095,6 +4137,28 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     // Check IP version (v4=0x40)
     int version = (ip_header[0] >> 4);
     if (version != 4) return; // Only IPv4 for this demo
+
+    // Frag Check
+    uint16_t off = (ip_header[6] << 8) | ip_header[7];
+    if ((off & 0x3FFF) != 0) {
+        // Detected Fragmentation
+#ifndef _WIN32
+        pthread_mutex_lock(&ctx->mutex);
+#else
+        EnterCriticalSection(&ctx->mutex);
+#endif
+        if (!ctx->trigger_mtu_probe) {
+             struct in_addr da;
+             memcpy(&da, ip_header + 16, 4);
+             inet_ntop(AF_INET, &da, ctx->last_frag_ip, sizeof(ctx->last_frag_ip));
+             ctx->trigger_mtu_probe = true;
+        }
+#ifndef _WIN32
+        pthread_mutex_unlock(&ctx->mutex);
+#else
+        LeaveCriticalSection(&ctx->mutex);
+#endif
+    }
 
     int header_len = (ip_header[0] & 0x0F) * 4;
     if (ip_len < header_len) return;
@@ -4256,6 +4320,14 @@ void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session) {
     EnterCriticalSection(&ctx->mutex);
 #endif
 
+    // Check MTU Trigger
+    bool trigger = ctx->trigger_mtu_probe;
+    char target_ip[64];
+    if (trigger) {
+        strncpy(target_ip, ctx->last_frag_ip, sizeof(target_ip));
+        ctx->trigger_mtu_probe = false;
+    }
+
     while (ctx->buf_head != ctx->buf_tail) {
         char c = ctx->out_buf[ctx->buf_tail];
         ctx->buf_tail = (ctx->buf_tail + 1) % 65536;
@@ -4270,6 +4342,15 @@ void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session) {
 #else
     LeaveCriticalSection(&ctx->mutex);
 #endif
+
+    if (trigger) {
+        if (!net->mtu_probe) {
+             char msg[128];
+             snprintf(msg, sizeof(msg), "Auto-Triggering MTU Probe for %s (Frag Detected)", target_ip);
+             KTerm_Net_Log(term, ctx->session_index, msg);
+             KTerm_Net_MTUProbe(term, session, target_ip, true, 0, 0, NULL, NULL);
+        }
+    }
 }
 
 #endif // KTERM_ENABLE_LIVEWIRE
@@ -4469,13 +4550,113 @@ void KTerm_Net_LiveWire_GetStatus(KTerm* term, KTermSession* session, char* buff
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
     if (net && net->livewire) {
-        snprintf(buffer, max_len, "RUNNING;CAPTURED=%d", net->livewire->captured_count);
+        const char* warn = "";
+#ifdef _WIN32
+        warn = ";WARN=WIN_RESTRICTED";
+#endif
+        snprintf(buffer, max_len, "RUNNING;CAPTURED=%d%s%s",
+                 net->livewire->captured_count,
+                 net->livewire->paused ? ";PAUSED" : "",
+                 warn);
     } else {
         snprintf(buffer, max_len, "STOPPED");
     }
 #else
     snprintf(buffer, max_len, "DISABLED");
 #endif
+}
+
+void KTerm_Net_LiveWire_Pause(KTerm* term, KTermSession* session) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (net && net->livewire) {
+        net->livewire->paused = true;
+    }
+}
+
+void KTerm_Net_LiveWire_Resume(KTerm* term, KTermSession* session) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (net && net->livewire) {
+        net->livewire->paused = false;
+    }
+}
+
+bool KTerm_Net_LiveWire_SetFilter(KTerm* term, KTermSession* session, const char* filter) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) return false;
+
+    // Reconstruct params
+    KTermLiveWireContext* ctx = net->livewire;
+    char params[512];
+    snprintf(params, sizeof(params), "interface=%s;filter=%s;snaplen=%d;count=%d;promisc=%d;timeout=%d",
+             ctx->dev, filter, ctx->snaplen, ctx->count, ctx->promisc, ctx->timeout_ms);
+
+    // Restart (Start handles stop/restart)
+    return KTerm_Net_LiveWire_Start(term, session, params);
+}
+
+bool KTerm_Net_LiveWire_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) return false;
+    KTermLiveWireContext* ctx = net->livewire;
+
+    if (packet_id < 0) return false;
+
+#ifndef _WIN32
+    pthread_mutex_lock(&ctx->mutex);
+#else
+    EnterCriticalSection(&ctx->mutex);
+#endif
+
+    int total = ctx->ring_count;
+    if (packet_id >= total || (total > 128 && packet_id < total - 128)) {
+#ifndef _WIN32
+        pthread_mutex_unlock(&ctx->mutex);
+#else
+        LeaveCriticalSection(&ctx->mutex);
+#endif
+        return false;
+    }
+
+    int idx = (ctx->ring_head - total + packet_id);
+    while (idx < 0) idx += 128;
+    idx %= 128;
+
+    CapturedPacket pkt = ctx->packet_ring[idx]; // Copy under lock
+
+#ifndef _WIN32
+    pthread_mutex_unlock(&ctx->mutex);
+#else
+    LeaveCriticalSection(&ctx->mutex);
+#endif
+
+    int pos = 0;
+    pos += snprintf(out + pos, max - pos, "PACKET %d (Len=%d)\r\n", packet_id, pkt.len);
+
+    // Hex Dump
+    for (int i = 0; i < pkt.len; i += 16) {
+        if (pos >= (int)max - 80) break;
+        pos += snprintf(out + pos, max - pos, "%04x: ", i);
+
+        for (int j = 0; j < 16; j++) {
+            if (i + j < pkt.len) pos += snprintf(out + pos, max - pos, "%02X ", pkt.data[i+j]);
+            else pos += snprintf(out + pos, max - pos, "   ");
+        }
+
+        pos += snprintf(out + pos, max - pos, " |");
+        for (int j = 0; j < 16; j++) {
+            if (i + j < pkt.len) {
+                unsigned char c = pkt.data[i+j];
+                if (c >= 32 && c < 127) pos += snprintf(out + pos, max - pos, "%c", c);
+                else pos += snprintf(out + pos, max - pos, ".");
+            }
+        }
+        pos += snprintf(out + pos, max - pos, "|\r\n");
+    }
+
+    return true;
 }
 
 bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data) {

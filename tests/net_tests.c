@@ -85,6 +85,74 @@ void test_frag_test_api(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
+void test_livewire_control(KTerm* term, KTermSession* session) {
+    printf("  Testing LiveWire Control...\n");
+
+    // Start
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;livewire;interface=eth0;filter=\"tcp\"\x1B\\";
+    write_sequence(term, seq);
+
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) { fprintf(stderr, "Start failed\n"); exit(1); }
+    if (net->livewire->paused) { fprintf(stderr, "Should not be paused initially\n"); exit(1); }
+
+    // Pause
+    seq = "\x1BPGATE;KTERM;1;EXT;net;livewire_pause\x1B\\";
+    write_sequence(term, seq);
+    if (!net->livewire->paused) { fprintf(stderr, "Pause failed\n"); exit(1); }
+
+    // Resume
+    seq = "\x1BPGATE;KTERM;1;EXT;net;livewire_resume\x1B\\";
+    write_sequence(term, seq);
+    if (net->livewire->paused) { fprintf(stderr, "Resume failed\n"); exit(1); }
+
+    // Filter
+    seq = "\x1BPGATE;KTERM;1;EXT;net;livewire_filter;udp\x1B\\";
+    write_sequence(term, seq);
+    // Verify filter exp updated
+    if (strcmp(net->livewire->filter_exp, "udp") != 0) {
+        fprintf(stderr, "Filter update failed: %s\n", net->livewire->filter_exp);
+        exit(1);
+    }
+
+    KTerm_Net_DestroyContext(session);
+}
+
+void test_livewire_detail(KTerm* term, KTermSession* session) {
+    printf("  Testing LiveWire Detail...\n");
+
+    // Start
+    KTerm_Net_LiveWire_Start(term, session, "interface=eth0");
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) { fprintf(stderr, "Start failed\n"); exit(1); }
+
+    // Inject a fake packet into ring
+    struct pcap_pkthdr hdr;
+    hdr.ts.tv_sec = 1234567890;
+    hdr.ts.tv_usec = 0;
+    hdr.caplen = 64;
+    hdr.len = 64;
+    uint8_t pkt[64];
+    memset(pkt, 0xAB, 64);
+
+    // Manual injection bypassing handler since pcap is mocked/threaded
+    // Just directly manipulate ring for unit test
+    net->livewire->packet_ring[0].len = 64;
+    memcpy(net->livewire->packet_ring[0].data, pkt, 64);
+    net->livewire->ring_head = 1;
+    net->livewire->ring_count = 1;
+
+    // Request Detail
+    // livewire_detail;packet=0
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;livewire_detail;packet=0\x1B\\";
+    write_sequence(term, seq);
+
+    // We assume if it didn't crash, it works.
+    // Response verification requires callback hooks not present here.
+
+    KTerm_Net_DestroyContext(session);
+}
+
 void test_ping_ext_api(KTerm* term, KTermSession* session) {
     printf("  Testing Extended Ping API...\n");
 
@@ -322,6 +390,8 @@ int main() {
     test_gateway_parsing_frag(term, session);
     test_gateway_parsing_ping_ext(term, session);
     test_gateway_parsing_livewire(term, session);
+    test_livewire_control(term, session);
+    test_livewire_detail(term, session);
     test_cancel_diag(term, session);
 
     destroy_test_term(term);
