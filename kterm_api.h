@@ -57,8 +57,8 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 6
-#define KTERM_VERSION_PATCH 40
-#define KTERM_VERSION_STRING "2.6.40"
+#define KTERM_VERSION_PATCH 41
+#define KTERM_VERSION_STRING "2.6.41"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)

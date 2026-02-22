@@ -1,3 +1,12 @@
+## [v2.6.41] - LiveWire Stream Reassembly & Stats
+- **Feature**: Implemented **Stream Reassembly** and **Flow Tracking** for LiveWire packet analysis.
+- **LiveWire Flows**: Added `livewire_flows` command to list active network flows (5-tuple) with packet counts.
+- **LiveWire Follow**: Added `livewire_follow;flow_id=...` command to target a specific flow. Packets for the followed flow are reassembled and their payload displayed (Hex/ASCII) in real-time.
+- **LiveWire Stats**: Added `livewire_stats` command to report global protocol statistics (TCP, UDP, ICMP, Bytes, etc.).
+- **Metrics**: Implemented **Jitter** calculation for UDP/RTP flows (inter-arrival variance).
+- **Architecture**: Introduced `LiveWireFlow` tracking with a hash table (limit 1024 flows) and thread-safe stats updates.
+- **Maintenance**: Bumped library version to 2.6.41.
+
 ## [v2.6.40] - LiveWire Polish & Edge Case Handling
 - **LiveWire Control**: Added `pause` and `resume` commands to the `livewire` Gateway extension, allowing users to freeze the packet capture for inspection.
 - **LiveWire Inspection**: Implemented `detail` command (`livewire;detail;packet=N`) to retrieve hex/ASCII dumps of specific packets from the ring buffer.

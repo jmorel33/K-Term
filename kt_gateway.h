@@ -2464,6 +2464,38 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         char msg[512];
         snprintf(msg, sizeof(msg), "OK;%s", status);
         if (respond) respond(term, session, msg);
+    } else if (KTerm_Strcasecmp(cmd, "livewire_follow") == 0) {
+        char* token = KTerm_Strtok(NULL, ";", &saveptr);
+        uint32_t fid = 0;
+        if (token && KTerm_Strncasecmp(token, "flow_id=", 8) == 0) {
+            fid = (uint32_t)strtoul(token + 8, NULL, 10);
+        } else if (token) {
+            fid = (uint32_t)strtoul(token, NULL, 10); // Positional
+        }
+
+        if (KTerm_Net_LiveWire_Follow(term, session, fid)) {
+            if (respond) respond(term, session, "OK;FOLLOW_UPDATED");
+        } else {
+            if (respond) respond(term, session, "ERR;FAILED");
+        }
+    } else if (KTerm_Strcasecmp(cmd, "livewire_stats") == 0) {
+        char buf[1024];
+        if (KTerm_Net_LiveWire_GetStats(term, session, buf, sizeof(buf))) {
+            char msg[1100];
+            snprintf(msg, sizeof(msg), "OK;%s", buf);
+            if (respond) respond(term, session, msg);
+        } else {
+            if (respond) respond(term, session, "ERR;FAILED");
+        }
+    } else if (KTerm_Strcasecmp(cmd, "livewire_flows") == 0) {
+        char buf[4096];
+        if (KTerm_Net_LiveWire_GetFlows(term, session, buf, sizeof(buf))) {
+            char msg[4200];
+            snprintf(msg, sizeof(msg), "OK;%s", buf);
+            if (respond) respond(term, session, msg);
+        } else {
+            if (respond) respond(term, session, "ERR;FAILED");
+        }
     } else if (KTerm_Strcasecmp(cmd, "help") == 0) {
         const char* help =
             "OK;"
@@ -2482,7 +2514,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             "httpprobe;url|"
             "livewire;[interface=x;filter=y...]|"
             "livewire_stop|"
-            "livewire_status";
+            "livewire_status|"
+            "livewire_follow;flow_id|"
+            "livewire_stats|"
+            "livewire_flows";
         if (respond) respond(term, session, help);
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
