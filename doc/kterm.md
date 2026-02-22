@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.37
+# kterm.h - Technical Reference Manual v2.6.38
 
 **(c) 2026 Jacques Morel**
 
@@ -1531,8 +1531,9 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `ext;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
 *   `ext;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted or `host=auto`. `graph=1` enables ASCII visualization.
 *   `ext;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics. Usage: `ext;net;httpprobe;http://example.com`.
+*   `ext;net;livewire`: Starts the LiveWire packet sniffer. Usage: `ext;net;livewire;interface=eth0;filter="tcp port 80";snaplen=128`. Real-time packets are rendered in ANSI colors.
 *   `ext;net;connections`: Lists active network sessions.
-*   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, etc.).
+*   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, LiveWire, etc.).
 *   `ext;automate;trigger;...`: Manages automation triggers.
 
 **Top-Level Network Diagnostics (v2.6.12):**
@@ -1541,6 +1542,9 @@ In addition to `ext;net;...`, these diagnostics are available as top-level Gatew
 *   `dns;host`: Resolves hostname.
 *   `portscan;host;ports;[timeout]`: Scans TCP ports.
 *   `whois;host;[query]`: Performs WHOIS lookup.
+*   `livewire;[interface=x;filter=y...]`: Starts packet capture.
+*   `livewire_stop`: Stops packet capture.
+*   `livewire_status`: Returns capture statistics.
 *   `ext;ssh;...`: Alias for `ext;net`.
 
 **Speedtest Client (v2.6.18):**

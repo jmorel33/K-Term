@@ -2414,6 +2414,23 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
+    } else if (KTerm_Strcasecmp(cmd, "livewire") == 0) {
+        // args in saveptr
+        const char* params = saveptr ? saveptr : "";
+        if (KTerm_Net_LiveWire_Start(term, session, params)) {
+            if (respond) respond(term, session, "OK;STARTED");
+        } else {
+            if (respond) respond(term, session, "ERR;START_FAILED");
+        }
+    } else if (KTerm_Strcasecmp(cmd, "livewire_stop") == 0) {
+        KTerm_Net_LiveWire_Stop(term, session);
+        if (respond) respond(term, session, "OK;STOPPED");
+    } else if (KTerm_Strcasecmp(cmd, "livewire_status") == 0) {
+        char status[256];
+        KTerm_Net_LiveWire_GetStatus(term, session, status, sizeof(status));
+        char msg[512];
+        snprintf(msg, sizeof(msg), "OK;%s", status);
+        if (respond) respond(term, session, msg);
     } else if (KTerm_Strcasecmp(cmd, "help") == 0) {
         const char* help =
             "OK;"
@@ -2429,7 +2446,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             "whois;host|"
             "speedtest;[host][;streams;graph=1]|"
             "connections|"
-            "httpprobe;url";
+            "httpprobe;url|"
+            "livewire;[interface=x;filter=y...]|"
+            "livewire_stop|"
+            "livewire_status";
         if (respond) respond(term, session, help);
     } else {
         if (respond) respond(term, session, "ERR;UNKNOWN_CMD");
@@ -2478,6 +2498,11 @@ static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, co
 #endif
                 if (net->ping_ext->user_data) free(net->ping_ext->user_data);
                 free(net->ping_ext); net->ping_ext = NULL;
+            }
+            if (net->livewire) {
+                KTerm_Net_LiveWire_Stop(term, session);
+                KTerm_Net_FreeLiveWire(net->livewire);
+                net->livewire = NULL;
             }
 
             if (respond) respond(term, session, "OK;CANCELLED");

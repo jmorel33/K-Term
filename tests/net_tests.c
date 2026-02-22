@@ -2,6 +2,8 @@
 // KTERM_NET_IMPLEMENTATION is defined by kterm.h inside KTERM_IMPLEMENTATION block
 #define KTERM_ENABLE_GATEWAY
 #define KTERM_TESTING
+#define KTERM_ENABLE_LIVEWIRE
+#define KTERM_USE_BUNDLED_PCAP
 
 #include "../kterm.h"
 #include "test_utilities.h"
@@ -114,6 +116,37 @@ void test_ping_ext_api(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
+void test_livewire_api(KTerm* term, KTermSession* session) {
+    printf("  Testing LiveWire API...\n");
+
+    bool res = KTerm_Net_LiveWire_Start(term, session, "interface=eth0;filter=\"tcp port 80\";count=10");
+    if (!res) {
+        fprintf(stderr, "    Failed to start LiveWire\n");
+        exit(1);
+    }
+
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) {
+        fprintf(stderr, "    LiveWire context not created\n");
+        exit(1);
+    }
+
+    if (strcmp(net->livewire->dev, "eth0") != 0) {
+        fprintf(stderr, "    Interface mismatch: %s\n", net->livewire->dev);
+        exit(1);
+    }
+    if (strcmp(net->livewire->filter_exp, "tcp port 80") != 0) {
+        fprintf(stderr, "    Filter mismatch: %s\n", net->livewire->filter_exp);
+        exit(1);
+    }
+    if (net->livewire->count != 10) {
+        fprintf(stderr, "    Count mismatch\n");
+        exit(1);
+    }
+
+    KTerm_Net_DestroyContext(session);
+}
+
 void test_gateway_parsing_mtu(KTerm* term, KTermSession* session) {
     printf("  Testing Gateway Parsing (MTU Probe)...\n");
 
@@ -206,6 +239,34 @@ void test_gateway_parsing_ping_ext(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
+void test_gateway_parsing_livewire(KTerm* term, KTermSession* session) {
+    printf("  Testing Gateway Parsing (LiveWire)...\n");
+
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;livewire;interface=eth0;filter=\"udp port 53\";snaplen=128\x1B\\";
+    write_sequence(term, seq);
+
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) {
+        fprintf(stderr, "    LiveWire not triggered via Gateway\n");
+        exit(1);
+    }
+
+    if (strcmp(net->livewire->dev, "eth0") != 0) {
+        fprintf(stderr, "    Interface mismatch\n");
+        exit(1);
+    }
+    if (strcmp(net->livewire->filter_exp, "udp port 53") != 0) {
+        fprintf(stderr, "    Filter mismatch\n");
+        exit(1);
+    }
+    if (net->livewire->snaplen != 128) {
+        fprintf(stderr, "    Snaplen mismatch\n");
+        exit(1);
+    }
+
+    KTerm_Net_DestroyContext(session);
+}
+
 void test_cancel_diag(KTerm* term, KTermSession* session) {
     printf("  Testing Cancel Diag...\n");
 
@@ -252,6 +313,7 @@ int main() {
     test_mtu_probe_api(term, session);
     test_frag_test_api(term, session);
     test_ping_ext_api(term, session);
+    test_livewire_api(term, session);
 
     // Reset terminal/parser state for gateway tests
     reset_terminal(term);
@@ -259,6 +321,7 @@ int main() {
     test_gateway_parsing_mtu(term, session);
     test_gateway_parsing_frag(term, session);
     test_gateway_parsing_ping_ext(term, session);
+    test_gateway_parsing_livewire(term, session);
     test_cancel_diag(term, session);
 
     destroy_test_term(term);
