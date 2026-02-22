@@ -56,6 +56,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -148,6 +149,10 @@ typedef struct {
     uint8_t hs_rx_buf[4096];
     int hs_rx_len;
 
+    // Output Buffer (for non-blocking sends)
+    uint8_t out_buf[65536]; // Increased to 64KB to handle larger bursts
+    int out_len;
+
     // Session State
     uint32_t window_size;
     uint32_t sequence_number;
@@ -209,7 +214,7 @@ static void g_append(const char* data, size_t len) {
 }
 
 // Forward declaration
-static int send_packet(int fd, uint8_t type, const void* payload, size_t len);
+static int send_packet(MySSHContext* ctx, uint8_t type, const void* payload, size_t len);
 static bool ssh_write_u32(uint8_t** ptr, size_t* rem, uint32_t val);
 static bool ssh_write_string(uint8_t** ptr, size_t* rem, const char* str, size_t len);
 
@@ -264,7 +269,7 @@ static void check_triggers(MySSHContext* ctx, const char* data, size_t len) {
 
                     ssh_write_u32(&p, &rem, ctx->remote_channel_id);
                     ssh_write_string(&p, &rem, active_action, k);
-                    send_packet(ctx->socket_fd, SSH_MSG_CHANNEL_DATA, payload, p - payload);
+                    send_packet(ctx, SSH_MSG_CHANNEL_DATA, payload, p - payload);
                 }
 
                 if (ctx->triggers[i].oneshot) {
@@ -424,20 +429,164 @@ static bool ssh_write_cstring(uint8_t** ptr, size_t* rem, const char* str) {
     return ssh_write_string(ptr, rem, str, strlen(str));
 }
 
-// Send Framed Packet
-static int send_packet(int fd, uint8_t type, const void* payload, size_t len) {
-    if (fd < 0) return 0;
-    uint8_t pad_len = 4; // Minimal padding (dummy)
-    uint32_t pkt_len = 1 + 1 + len + pad_len; // 1(pad_len_byte) + 1(type) + body + pad
+// Helper to flush output buffer
+static int flush_ssh_queue(MySSHContext* ctx) {
+    if (ctx->out_len == 0 || ctx->socket_fd < 0) return 0;
+
+    ssize_t n = send(ctx->socket_fd, ctx->out_buf, ctx->out_len, 0);
+    if (n > 0) {
+        if (n < ctx->out_len) {
+            memmove(ctx->out_buf, ctx->out_buf + n, ctx->out_len - n);
+            ctx->out_len -= n;
+        } else {
+            ctx->out_len = 0;
+        }
+        return (int)n;
+    } else if (n < 0) {
+#ifndef _WIN32
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+#else
+        if (WSAGetLastError() == WSAEWOULDBLOCK) return 0;
+#endif
+        return -1; // Socket error
+    }
+    return 0;
+}
+
+// Helper to buffer data with bounds checking
+static bool buffer_data(MySSHContext* ctx, const void* data, size_t len) {
+    if (len == 0) return true;
+    if (ctx->out_len + len > sizeof(ctx->out_buf)) return false;
+    memcpy(ctx->out_buf + ctx->out_len, data, len);
+    ctx->out_len += len;
+    return true;
+}
+
+// Send Framed Packet (Buffered + Writev Optimized)
+static int send_packet(MySSHContext* ctx, uint8_t type, const void* payload, size_t len) {
+    if (ctx->socket_fd < 0) return 0;
+
+    uint8_t pad_len = 4;
+    uint32_t pkt_len = 1 + 1 + len + pad_len;
     uint8_t header[5];
     put_u32(header, pkt_len);
     header[4] = pad_len;
-
-    send(fd, header, 5, 0);
-    send(fd, &type, 1, 0);
-    if (len > 0) send(fd, payload, len, 0);
     uint8_t padding[16] = {0};
-    send(fd, padding, pad_len, 0);
+
+    // Total packet size
+    size_t total_size = 5 + 1 + len + pad_len;
+
+    // 1. Try to flush if we have pending data
+    if (ctx->out_len > 0) {
+        flush_ssh_queue(ctx);
+
+        // If still full and new packet won't fit, force flush loop (blocking fallback)
+        if (ctx->out_len + total_size > sizeof(ctx->out_buf)) {
+            int retries = 0;
+            while (ctx->out_len > 0 && retries++ < 1000) { // 1000 * 1ms = 1s timeout
+                if (flush_ssh_queue(ctx) < 0) return -1; // Error
+                if (ctx->out_len + total_size <= sizeof(ctx->out_buf)) break;
+                usleep(1000);
+            }
+            if (ctx->out_len + total_size > sizeof(ctx->out_buf)) {
+                // Still doesn't fit? This is fatal for this simple client.
+                fprintf(stderr, "[SSH] Fatal: Output buffer overflow\n");
+                return -1;
+            }
+        }
+    }
+
+    // 2. If buffer has data (even after flush attempt), we MUST append to preserve order
+    if (ctx->out_len > 0) {
+        // We know it fits because of check above
+        buffer_data(ctx, header, 5);
+        ctx->out_buf[ctx->out_len++] = type;
+        buffer_data(ctx, payload, len);
+        buffer_data(ctx, padding, pad_len);
+
+        // Opportunistic flush
+        flush_ssh_queue(ctx);
+        return 0;
+    }
+
+#ifndef _WIN32
+    // 3. Buffer Empty: Try direct Writev (Zero Copy) on POSIX
+    struct iovec iov[4];
+    iov[0].iov_base = header; iov[0].iov_len = 5;
+    iov[1].iov_base = &type;  iov[1].iov_len = 1;
+    iov[2].iov_base = (void*)payload; iov[2].iov_len = len;
+    iov[3].iov_base = padding; iov[3].iov_len = pad_len;
+
+    ssize_t n = writev(ctx->socket_fd, iov, 4);
+
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // Buffer whole packet
+            if (total_size <= sizeof(ctx->out_buf)) {
+                buffer_data(ctx, header, 5);
+                ctx->out_buf[ctx->out_len++] = type;
+                buffer_data(ctx, payload, len);
+                buffer_data(ctx, padding, pad_len);
+            } else {
+                // Packet too big for empty buffer? Force blocking send
+                // (Fallthrough or implement blocking send loop here)
+                // For simplicity, buffer overflow check should catch this earlier if we enforced it logic-wise
+                // But here we are empty. If packet > 64KB, we can't buffer.
+                // Just error out for now as per reference implementation limits.
+                return -1;
+            }
+            return 0; // Buffered
+        }
+        return -1; // Error
+    }
+
+    if ((size_t)n < total_size) {
+        // Partial Write: Buffer remaining
+        size_t written = (size_t)n;
+        size_t current_offset = 0;
+
+        // Header
+        if (written < 5) {
+            size_t part = 5 - written;
+            if (!buffer_data(ctx, header + written, part)) return -1;
+            written = 5;
+        }
+        current_offset += 5;
+
+        // Type
+        if (written < current_offset + 1) {
+            ctx->out_buf[ctx->out_len++] = type;
+        }
+        current_offset += 1;
+
+        // Payload
+        if (len > 0) {
+            if (written < current_offset + len) {
+                size_t payload_written = (written >= current_offset) ? (written - current_offset) : 0;
+                if (!buffer_data(ctx, (const uint8_t*)payload + payload_written, len - payload_written)) return -1;
+            }
+            current_offset += len;
+        }
+
+        // Padding
+        if (pad_len > 0) {
+            if (written < current_offset + pad_len) {
+                size_t pad_written = (written >= current_offset) ? (written - current_offset) : 0;
+                if (!buffer_data(ctx, padding + pad_written, pad_len - pad_written)) return -1;
+            }
+        }
+    }
+#else
+    // Windows fallback (or non-writev systems): Just buffer everything then flush
+    // This avoids needing WSASend/IOCP complexity for this reference client
+    if (total_size > sizeof(ctx->out_buf)) return -1; // Too big
+    buffer_data(ctx, header, 5);
+    ctx->out_buf[ctx->out_len++] = type;
+    buffer_data(ctx, payload, len);
+    buffer_data(ctx, padding, pad_len);
+    flush_ssh_queue(ctx);
+#endif
+
     return 0;
 }
 
@@ -509,7 +658,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_KEX_INIT:
             memset(scratch, 0, 16); // Cookie
-            send_packet(fd, SSH_MSG_KEXINIT, scratch, 16);
+            send_packet(ssh, SSH_MSG_KEXINIT, scratch, 16);
             ssh->state = SSH_STATE_WAIT_KEX_INIT;
             return KTERM_SEC_AGAIN;
 
@@ -537,7 +686,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
 
         case SSH_STATE_NEW_KEYS:
             update_status("Sending NEWKEYS...");
-            send_packet(fd, SSH_MSG_NEWKEYS, NULL, 0);
+            send_packet(ssh, SSH_MSG_NEWKEYS, NULL, 0);
             ssh->state = SSH_STATE_WAIT_NEW_KEYS;
             return KTERM_SEC_AGAIN;
 
@@ -552,7 +701,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             update_status("Requesting Auth Service...");
             p = scratch; rem = sizeof(scratch);
             ssh_write_cstring(&p, &rem, "ssh-userauth");
-            send_packet(fd, SSH_MSG_SERVICE_REQUEST, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_SERVICE_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_SERVICE_ACCEPT;
             return KTERM_SEC_AGAIN;
 
@@ -576,7 +725,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_cstring(&p, &rem, "password");
             ssh_write_bool(&p, &rem, false);
             ssh_write_cstring(&p, &rem, ssh->password);
-            send_packet(fd, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_USERAUTH_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_AUTH_SUCCESS;
             return KTERM_SEC_AGAIN;
 
@@ -599,7 +748,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, ssh->local_channel_id + 1); // Use ID+1 for Exec
             ssh_write_u32(&p, &rem, 2097152);
             ssh_write_u32(&p, &rem, 32768);
-            send_packet(fd, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_EXEC_OPEN;
             return KTERM_SEC_AGAIN;
 
@@ -628,7 +777,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 snprintf(cmd, sizeof(cmd), "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
 
                 ssh_write_cstring(&p, &rem, cmd);
-                send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+                send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
                 ssh->state = SSH_STATE_WAIT_EXEC_RESULT;
             }
             return KTERM_SEC_AGAIN;
@@ -640,7 +789,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 // Done
                 p = scratch; rem = sizeof(scratch);
                 ssh_write_u32(&p, &rem, ssh->remote_channel_id);
-                send_packet(fd, SSH_MSG_CHANNEL_CLOSE, scratch, p - scratch);
+                send_packet(ssh, SSH_MSG_CHANNEL_CLOSE, scratch, p - scratch);
                 ssh->state = SSH_STATE_CHANNEL_OPEN; // Proceed to Shell
             } else if (type == SSH_MSG_CHANNEL_FAILURE) {
                 // Command failed? proceed
@@ -657,7 +806,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, ssh->local_channel_id);
             ssh_write_u32(&p, &rem, 2097152); // Window
             ssh_write_u32(&p, &rem, 32768);   // Max Pkt
-            send_packet(fd, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_CHANNEL_OPEN, scratch, p - scratch);
             ssh->state = SSH_STATE_WAIT_CHANNEL_OPEN;
             return KTERM_SEC_AGAIN;
 
@@ -686,7 +835,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, 0);
             ssh_write_u32(&p, &rem, 0);
             ssh_write_string(&p, &rem, "", 0); // Modes
-            send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
 
             // Inject Environment Variable (Auto-Terminfo / TERM)
             p = scratch; rem = sizeof(scratch);
@@ -695,7 +844,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_bool(&p, &rem, false);
             ssh_write_cstring(&p, &rem, "TERM");
             ssh_write_cstring(&p, &rem, ttype);
-            send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
 
             ssh->state = SSH_STATE_SHELL;
             return KTERM_SEC_AGAIN;
@@ -707,7 +856,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             ssh_write_u32(&p, &rem, ssh->remote_channel_id);
             ssh_write_cstring(&p, &rem, "shell");
             ssh_write_bool(&p, &rem, true);
-            send_packet(fd, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+            send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
             ssh->state = SSH_STATE_READY;
             update_status("Connected");
             return KTERM_SEC_OK; // Handshake Done
@@ -772,7 +921,7 @@ static int my_ssh_write(void* ctx, int fd, const char* buf, size_t len) {
 
     ssh_write_u32(&p, &rem, ssh->remote_channel_id);
     ssh_write_string(&p, &rem, buf, len);
-    send_packet(fd, SSH_MSG_CHANNEL_DATA, payload, p - payload);
+    send_packet(ssh, SSH_MSG_CHANNEL_DATA, payload, p - payload);
     return len;
 }
 
@@ -1212,7 +1361,7 @@ int main(int argc, char** argv) {
                     ssh_write_u32(&p, &rem, rows);
                     ssh_write_u32(&p, &rem, 0);
                     ssh_write_u32(&p, &rem, 0);
-                    send_packet((int)(intptr_t)KTerm_Net_GetSocket(term, session), SSH_MSG_CHANNEL_REQUEST, payload, p - payload);
+                    send_packet(&global_ssh_ctx, SSH_MSG_CHANNEL_REQUEST, payload, p - payload);
                 }
             }
         }
@@ -1248,6 +1397,9 @@ int main(int argc, char** argv) {
 
         KTermSit_ProcessInput(term);
         KTerm_Update(term);
+
+        // Flush buffered SSH data
+        flush_ssh_queue(&global_ssh_ctx);
 
         KTerm_BeginFrame();
             ClearBackground((Color){0, 0, 0, 255});
