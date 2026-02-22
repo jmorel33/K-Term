@@ -311,6 +311,9 @@ void KTerm_Net_LiveWire_Pause(KTerm* term, KTermSession* session);
 void KTerm_Net_LiveWire_Resume(KTerm* term, KTermSession* session);
 bool KTerm_Net_LiveWire_SetFilter(KTerm* term, KTermSession* session, const char* filter);
 bool KTerm_Net_LiveWire_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
+bool KTerm_Net_LiveWire_Follow(KTerm* term, KTermSession* session, uint32_t flow_id);
+bool KTerm_Net_LiveWire_GetStats(KTerm* term, KTermSession* session, char* out, size_t max);
+bool KTerm_Net_LiveWire_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max);
 
 // Cleanup Functions (Internal/Advanced use)
 void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx);
@@ -773,6 +776,43 @@ typedef struct {
     uint8_t data[1500];
 } CapturedPacket;
 
+typedef struct {
+    uint32_t src_ip;
+    uint32_t dst_ip;
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint8_t proto;
+} LiveWireFlowKey;
+
+typedef struct {
+    uint32_t seq;
+    uint32_t ack;
+    uint32_t last_ts;
+    // Buffer for reassembly
+    char buffer[4096];
+    int buf_len;
+} LiveWireStream;
+
+typedef struct {
+    uint64_t packets;
+    uint64_t bytes;
+    uint64_t lost;
+    double jitter;
+    double last_jitter_ts;
+    double prev_delta;
+    // Protocol specific
+    bool is_rtp;
+    uint32_t ssrc;
+} LiveWireFlowStats;
+
+typedef struct LiveWireFlow {
+    LiveWireFlowKey key;
+    LiveWireStream stream;
+    LiveWireFlowStats stats;
+    struct LiveWireFlow* next; // Chaining for hash collisions
+    uint32_t id; // Unique ID for referencing
+} LiveWireFlow;
+
 typedef struct KTermLiveWireContext {
     void* pcap_handle; // void* to avoid pcap dependency in header if possible, but we included pcap.h in impl
     // Actually this struct is in IMPLEMENTATION block, so we can use pcap_t if included
@@ -816,6 +856,20 @@ typedef struct KTermLiveWireContext {
     CapturedPacket packet_ring[128];
     int ring_head;
     int ring_count; // Total packets processed (redundant with captured_count but used for relative index)
+
+    // Flow Tracking & Stats
+    struct LiveWireFlow* flow_table[256]; // Hash table
+    uint32_t next_flow_id;
+    uint32_t follow_flow_id; // 0 = None
+
+    struct {
+        uint64_t total_packets;
+        uint64_t total_bytes;
+        uint64_t tcp_packets;
+        uint64_t udp_packets;
+        uint64_t icmp_packets;
+        uint64_t other_packets;
+    } stats;
 
     // Target
     KTerm* term;
@@ -944,6 +998,18 @@ void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx) {
         ctx->running = false;
         // Handle closing in Stop
     }
+
+    // Cleanup Flows
+    for (int i = 0; i < 256; i++) {
+        LiveWireFlow* flow = ctx->flow_table[i];
+        while (flow) {
+            LiveWireFlow* next = flow->next;
+            free(flow);
+            flow = next;
+        }
+        ctx->flow_table[i] = NULL;
+    }
+
     // Handle is closed in Stop
     free(ctx);
 }
@@ -3424,6 +3490,78 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     return true;
 }
 
+bool KTerm_Net_LiveWire_Follow(KTerm* term, KTermSession* session, uint32_t flow_id) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) return false;
+    net->livewire->follow_flow_id = flow_id;
+    return true;
+}
+
+bool KTerm_Net_LiveWire_GetStats(KTerm* term, KTermSession* session, char* out, size_t max) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) return false;
+    KTermLiveWireContext* ctx = net->livewire;
+
+    snprintf(out, max, "PKTS=%llu;BYTES=%llu;TCP=%llu;UDP=%llu;ICMP=%llu;OTHER=%llu",
+        (unsigned long long)ctx->stats.total_packets,
+        (unsigned long long)ctx->stats.total_bytes,
+        (unsigned long long)ctx->stats.tcp_packets,
+        (unsigned long long)ctx->stats.udp_packets,
+        (unsigned long long)ctx->stats.icmp_packets,
+        (unsigned long long)ctx->stats.other_packets);
+    return true;
+}
+
+bool KTerm_Net_LiveWire_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
+    (void)term;
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->livewire) return false;
+    KTermLiveWireContext* ctx = net->livewire;
+
+    out[0] = '\0';
+    size_t offset = 0;
+    int count = 0;
+
+#ifndef _WIN32
+    pthread_mutex_lock(&ctx->mutex);
+#else
+    EnterCriticalSection(&ctx->mutex);
+#endif
+
+    for (int i = 0; i < 256; i++) {
+        LiveWireFlow* flow = ctx->flow_table[i];
+        while (flow) {
+            char src[16], dst[16];
+            struct in_addr sa = { .s_addr = flow->key.src_ip };
+            struct in_addr da = { .s_addr = flow->key.dst_ip };
+            inet_ntop(AF_INET, &sa, src, sizeof(src));
+            inet_ntop(AF_INET, &da, dst, sizeof(dst));
+
+            int n = snprintf(out + offset, max - offset, "ID=%u;%s:%d->%s:%d;PKTS=%llu|",
+                flow->id, src, ntohs(flow->key.src_port), dst, ntohs(flow->key.dst_port),
+                (unsigned long long)flow->stats.packets);
+
+            if (n > 0) offset += n;
+            if (offset >= max) break;
+
+            count++;
+            if (count >= 10) break;
+
+            flow = flow->next;
+        }
+        if (offset >= max || count >= 10) break;
+    }
+
+#ifndef _WIN32
+    pthread_mutex_unlock(&ctx->mutex);
+#else
+    LeaveCriticalSection(&ctx->mutex);
+#endif
+
+    return true;
+}
+
 bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data) {
     if (!term || !session || !host) return false;
 
@@ -4192,12 +4330,18 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     pos += snprintf(out + pos, sizeof(out) - pos, "%s%s \xE2\x86\x92 %s%s ", ANSI_BLUE, src, dst, ANSI_RESET);
 
     // Protocol Specifics
+    uint16_t src_port = 0;
+    uint16_t dst_port = 0;
+    const unsigned char* flow_payload = NULL;
+    int flow_payload_len = 0;
+
     if (proto == 6) { // TCP
         const unsigned char* tcp = ip_header + header_len;
         int tcp_len = ip_len - header_len;
         if (tcp_len >= 20) {
             int sport = (tcp[0] << 8) | tcp[1];
             int dport = (tcp[2] << 8) | tcp[3];
+            src_port = sport; dst_port = dport;
             int flags = tcp[13];
 
             char flag_str[32] = "";
@@ -4209,14 +4353,18 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
 
             pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s", ANSI_GREEN, ANSI_RESET, sport, dport, flag_str);
 
+            const unsigned char* payload = tcp + (tcp[12] >> 4) * 4;
+            int payload_len = tcp_len - ((tcp[12] >> 4) * 4);
+            int cap_remain = pkthdr->caplen - (int)(payload - pkt);
+            if (cap_remain < payload_len) payload_len = cap_remain;
+
+            if (payload_len > 0) {
+                flow_payload = payload;
+                flow_payload_len = payload_len;
+            }
+
             if (sport == 80 || dport == 80 || sport == 8080 || dport == 8080) {
                 // Parse HTTP
-                const unsigned char* payload = tcp + (tcp[12] >> 4) * 4;
-                int payload_len = tcp_len - ((tcp[12] >> 4) * 4);
-
-                int cap_remain = pkthdr->caplen - (int)(payload - pkt);
-                if (cap_remain < payload_len) payload_len = cap_remain;
-
                 if (payload_len > 0) {
                     char http_info[256] = "";
                     LiveWire_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
@@ -4229,6 +4377,7 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
         if (ip_len - header_len >= 8) {
             int sport = (udp[0] << 8) | udp[1];
             int dport = (udp[2] << 8) | udp[3];
+            src_port = sport; dst_port = dport;
             int len = (udp[4] << 8) | udp[5];
 
             // Payload
@@ -4237,6 +4386,11 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             // Safer calculation against captured length
             int cap_remain = pkthdr->caplen - (int)(payload - pkt);
             if (cap_remain < payload_len) payload_len = cap_remain;
+
+            if (payload_len > 0) {
+                flow_payload = payload;
+                flow_payload_len = payload_len;
+            }
 
             if (dport == 4321 || sport == 4321) {
                 pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[Dante Audio]%s", ANSI_CYAN, ANSI_RESET, sport, dport, ANSI_MAGENTA, ANSI_RESET);
@@ -4283,6 +4437,104 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
         pos += snprintf(out + pos, sizeof(out) - pos, "%sICMP%s", ANSI_MAGENTA, ANSI_RESET);
     } else {
         pos += snprintf(out + pos, sizeof(out) - pos, "Proto=%d", proto);
+    }
+
+    // Update Stats & Flows
+    LiveWireFlowKey key = {0};
+    bool has_key = false;
+    char stream_out_buf[512] = {0};
+
+    // Only track IPv4 flows for now (already checked version=4 earlier)
+    if (src_port > 0 || dst_port > 0) {
+        has_key = true;
+        memcpy(&key.src_ip, &sa, 4);
+        memcpy(&key.dst_ip, &da, 4);
+        key.proto = proto;
+        key.src_port = src_port;
+        key.dst_port = dst_port;
+    }
+
+#ifndef _WIN32
+    pthread_mutex_lock(&ctx->mutex);
+#else
+    EnterCriticalSection(&ctx->mutex);
+#endif
+
+    // Update Global Stats
+    ctx->stats.total_packets++;
+    ctx->stats.total_bytes += pkthdr->len;
+    if (proto == 6) ctx->stats.tcp_packets++;
+    else if (proto == 17) ctx->stats.udp_packets++;
+    else if (proto == 1) ctx->stats.icmp_packets++;
+    else ctx->stats.other_packets++;
+
+    // Update Flow
+    if (has_key) {
+        uint8_t hash = (key.src_ip ^ key.dst_ip ^ key.src_port ^ key.dst_port ^ key.proto) & 0xFF;
+        LiveWireFlow* flow = ctx->flow_table[hash];
+        while (flow) {
+            if (memcmp(&flow->key, &key, sizeof(key)) == 0) break;
+            flow = flow->next;
+        }
+        if (!flow && ctx->next_flow_id < 1024) {
+            flow = (LiveWireFlow*)calloc(1, sizeof(LiveWireFlow));
+            if (flow) {
+                flow->key = key;
+                flow->id = ++ctx->next_flow_id;
+                flow->next = ctx->flow_table[hash];
+                ctx->flow_table[hash] = flow;
+            }
+        }
+
+        if (flow) {
+            flow->stats.packets++;
+            flow->stats.bytes += pkthdr->len;
+
+            // Jitter calc (Inter-Arrival Variance)
+            double now = (double)pkthdr->ts.tv_sec + (double)pkthdr->ts.tv_usec / 1000000.0;
+            if (flow->stats.last_jitter_ts > 0) {
+                double delta = now - flow->stats.last_jitter_ts;
+                if (delta < 0) delta = 0;
+
+                if (flow->stats.packets > 2) {
+                    double diff = delta - flow->stats.prev_delta;
+                    if (diff < 0) diff = -diff;
+                    flow->stats.jitter += (diff - flow->stats.jitter) / 16.0;
+                }
+                flow->stats.prev_delta = delta;
+            }
+            flow->stats.last_jitter_ts = now;
+
+            // Stream Follow
+            if (ctx->follow_flow_id == flow->id) {
+                if (flow_payload_len > 0) {
+                    // Append to stream buffer
+                    if (flow->stream.buf_len + flow_payload_len < (int)sizeof(flow->stream.buffer)) {
+                        memcpy(flow->stream.buffer + flow->stream.buf_len, flow_payload, flow_payload_len);
+                        flow->stream.buf_len += flow_payload_len;
+                    }
+
+                    // Format Output (Buffered to avoid deadlock)
+                    int so_len = snprintf(stream_out_buf, sizeof(stream_out_buf), "\r\n%s[STREAM] %d bytes:%s ", ANSI_CYAN, flow_payload_len, ANSI_RESET);
+                    for(int i=0; i<flow_payload_len && i<32 && so_len < (int)sizeof(stream_out_buf)-10; i++) {
+                        unsigned char c = flow_payload[i];
+                        if (c >= 32 && c < 127) so_len += snprintf(stream_out_buf + so_len, sizeof(stream_out_buf) - so_len, "%c", c);
+                        else so_len += snprintf(stream_out_buf + so_len, sizeof(stream_out_buf) - so_len, ".");
+                    }
+                    snprintf(stream_out_buf + so_len, sizeof(stream_out_buf) - so_len, "\r\n");
+                }
+            }
+        }
+    }
+
+#ifndef _WIN32
+    pthread_mutex_unlock(&ctx->mutex);
+#else
+    LeaveCriticalSection(&ctx->mutex);
+#endif
+
+    if (stream_out_buf[0]) {
+        LiveWire_WriteToBuffer(ctx, "%s", stream_out_buf);
     }
 
     pos += snprintf(out + pos, sizeof(out) - pos, "\r\n");
