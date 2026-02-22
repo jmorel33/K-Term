@@ -960,6 +960,11 @@ Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend th
     *   **`clipboard`**: A placeholder for clipboard integration.
     *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `EXT;direct;1` (On) or `EXT;direct;0` (Off).
     *   **`rawdump`**: Mirrors raw input bytes to a target session. Usage: `EXT;rawdump;START;SESSION=n`.
+    *   **`automate`**: Manages automation triggers. Usage: `EXT;automate;trigger;add;pat;act`.
+    *   **`voip`**: Controls the VoIP subsystem (SIP/RTP). Usage: `EXT;voip;dial;user@host`.
+    *   **`net`**: Controls networking diagnostics and connections. Usage: `EXT;net;connect;host`.
+    *   **`ssh`**: Alias for `net` extension.
+    *   **`voice`**: Controls the Voice Reactor subsystem. Usage: `EXT;voice;enable;1`.
     *   **`grid`**: (v2.4.21+) Bulk screen manipulation extension. See section 4.12.1 for details.
 
 #### 4.12.1. Gateway Grid Extension (v2.4.21+)
