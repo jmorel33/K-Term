@@ -2,7 +2,7 @@
 // KTERM_NET_IMPLEMENTATION is defined by kterm.h inside KTERM_IMPLEMENTATION block
 #define KTERM_ENABLE_GATEWAY
 #define KTERM_TESTING
-#define KTERM_ENABLE_WIREDIAG
+#define KTERM_ENABLE_PACKETDIAG
 #define KTERM_USE_BUNDLED_PCAP
 
 #include "../kterm.h"
@@ -85,46 +85,46 @@ void test_frag_test_api(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
-void test_wirediag_control(KTerm* term, KTermSession* session) {
-    printf("  Testing WireDiag Control...\n");
+void test_packetdiag_control(KTerm* term, KTermSession* session) {
+    printf("  Testing PacketDiag Control...\n");
 
     // Start
-    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag;interface=eth0;filter=\"tcp\"\x1B\\";
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag;interface=eth0;filter=\"tcp\"\x1B\\";
     write_sequence(term, seq);
 
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) { fprintf(stderr, "Start failed\n"); exit(1); }
-    if (net->wirediag->paused) { fprintf(stderr, "Should not be paused initially\n"); exit(1); }
+    if (!net || !net->packetdiag) { fprintf(stderr, "Start failed\n"); exit(1); }
+    if (net->packetdiag->paused) { fprintf(stderr, "Should not be paused initially\n"); exit(1); }
 
     // Pause
-    seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag_pause\x1B\\";
+    seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag_pause\x1B\\";
     write_sequence(term, seq);
-    if (!net->wirediag->paused) { fprintf(stderr, "Pause failed\n"); exit(1); }
+    if (!net->packetdiag->paused) { fprintf(stderr, "Pause failed\n"); exit(1); }
 
     // Resume
-    seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag_resume\x1B\\";
+    seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag_resume\x1B\\";
     write_sequence(term, seq);
-    if (net->wirediag->paused) { fprintf(stderr, "Resume failed\n"); exit(1); }
+    if (net->packetdiag->paused) { fprintf(stderr, "Resume failed\n"); exit(1); }
 
     // Filter
-    seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag_filter;udp\x1B\\";
+    seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag_filter;udp\x1B\\";
     write_sequence(term, seq);
     // Verify filter exp updated
-    if (strcmp(net->wirediag->filter_exp, "udp") != 0) {
-        fprintf(stderr, "Filter update failed: %s\n", net->wirediag->filter_exp);
+    if (strcmp(net->packetdiag->filter_exp, "udp") != 0) {
+        fprintf(stderr, "Filter update failed: %s\n", net->packetdiag->filter_exp);
         exit(1);
     }
 
     KTerm_Net_DestroyContext(session);
 }
 
-void test_wirediag_detail(KTerm* term, KTermSession* session) {
-    printf("  Testing WireDiag Detail...\n");
+void test_packetdiag_detail(KTerm* term, KTermSession* session) {
+    printf("  Testing PacketDiag Detail...\n");
 
     // Start
-    KTerm_Net_WireDiag_Start(term, session, "interface=eth0");
+    KTerm_Net_PacketDiag_Start(term, session, "interface=eth0");
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) { fprintf(stderr, "Start failed\n"); exit(1); }
+    if (!net || !net->packetdiag) { fprintf(stderr, "Start failed\n"); exit(1); }
 
     // Inject a fake packet into ring
     struct pcap_pkthdr hdr;
@@ -137,14 +137,14 @@ void test_wirediag_detail(KTerm* term, KTermSession* session) {
 
     // Manual injection bypassing handler since pcap is mocked/threaded
     // Just directly manipulate ring for unit test
-    net->wirediag->packet_ring[0].len = 64;
-    memcpy(net->wirediag->packet_ring[0].data, pkt, 64);
-    net->wirediag->ring_head = 1;
-    net->wirediag->ring_count = 1;
+    net->packetdiag->packet_ring[0].len = 64;
+    memcpy(net->packetdiag->packet_ring[0].data, pkt, 64);
+    net->packetdiag->ring_head = 1;
+    net->packetdiag->ring_count = 1;
 
     // Request Detail
-    // wirediag_detail;packet=0
-    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag_detail;packet=0\x1B\\";
+    // packetdiag_detail;packet=0
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag_detail;packet=0\x1B\\";
     write_sequence(term, seq);
 
     // We assume if it didn't crash, it works.
@@ -184,30 +184,30 @@ void test_ping_ext_api(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
-void test_wirediag_api(KTerm* term, KTermSession* session) {
-    printf("  Testing WireDiag API...\n");
+void test_packetdiag_api(KTerm* term, KTermSession* session) {
+    printf("  Testing PacketDiag API...\n");
 
-    bool res = KTerm_Net_WireDiag_Start(term, session, "interface=eth0;filter=\"tcp port 80\";count=10");
+    bool res = KTerm_Net_PacketDiag_Start(term, session, "interface=eth0;filter=\"tcp port 80\";count=10");
     if (!res) {
-        fprintf(stderr, "    Failed to start WireDiag\n");
+        fprintf(stderr, "    Failed to start PacketDiag\n");
         exit(1);
     }
 
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) {
-        fprintf(stderr, "    WireDiag context not created\n");
+    if (!net || !net->packetdiag) {
+        fprintf(stderr, "    PacketDiag context not created\n");
         exit(1);
     }
 
-    if (strcmp(net->wirediag->dev, "eth0") != 0) {
-        fprintf(stderr, "    Interface mismatch: %s\n", net->wirediag->dev);
+    if (strcmp(net->packetdiag->dev, "eth0") != 0) {
+        fprintf(stderr, "    Interface mismatch: %s\n", net->packetdiag->dev);
         exit(1);
     }
-    if (strcmp(net->wirediag->filter_exp, "tcp port 80") != 0) {
-        fprintf(stderr, "    Filter mismatch: %s\n", net->wirediag->filter_exp);
+    if (strcmp(net->packetdiag->filter_exp, "tcp port 80") != 0) {
+        fprintf(stderr, "    Filter mismatch: %s\n", net->packetdiag->filter_exp);
         exit(1);
     }
-    if (net->wirediag->count != 10) {
+    if (net->packetdiag->count != 10) {
         fprintf(stderr, "    Count mismatch\n");
         exit(1);
     }
@@ -307,27 +307,27 @@ void test_gateway_parsing_ping_ext(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
-void test_gateway_parsing_wirediag(KTerm* term, KTermSession* session) {
-    printf("  Testing Gateway Parsing (WireDiag)...\n");
+void test_gateway_parsing_packetdiag(KTerm* term, KTermSession* session) {
+    printf("  Testing Gateway Parsing (PacketDiag)...\n");
 
-    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;wirediag;interface=eth0;filter=\"udp port 53\";snaplen=128\x1B\\";
+    const char* seq = "\x1BPGATE;KTERM;1;EXT;net;packetdiag;interface=eth0;filter=\"udp port 53\";snaplen=128\x1B\\";
     write_sequence(term, seq);
 
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->wirediag) {
-        fprintf(stderr, "    WireDiag not triggered via Gateway\n");
+    if (!net || !net->packetdiag) {
+        fprintf(stderr, "    PacketDiag not triggered via Gateway\n");
         exit(1);
     }
 
-    if (strcmp(net->wirediag->dev, "eth0") != 0) {
+    if (strcmp(net->packetdiag->dev, "eth0") != 0) {
         fprintf(stderr, "    Interface mismatch\n");
         exit(1);
     }
-    if (strcmp(net->wirediag->filter_exp, "udp port 53") != 0) {
+    if (strcmp(net->packetdiag->filter_exp, "udp port 53") != 0) {
         fprintf(stderr, "    Filter mismatch\n");
         exit(1);
     }
-    if (net->wirediag->snaplen != 128) {
+    if (net->packetdiag->snaplen != 128) {
         fprintf(stderr, "    Snaplen mismatch\n");
         exit(1);
     }
@@ -404,7 +404,7 @@ int main() {
     test_mtu_probe_api(term, session);
     test_frag_test_api(term, session);
     test_ping_ext_api(term, session);
-    test_wirediag_api(term, session);
+    test_packetdiag_api(term, session);
 
     // Reset terminal/parser state for gateway tests
     reset_terminal(term);
@@ -412,9 +412,9 @@ int main() {
     test_gateway_parsing_mtu(term, session);
     test_gateway_parsing_frag(term, session);
     test_gateway_parsing_ping_ext(term, session);
-    test_gateway_parsing_wirediag(term, session);
-    test_wirediag_control(term, session);
-    test_wirediag_detail(term, session);
+    test_gateway_parsing_packetdiag(term, session);
+    test_packetdiag_control(term, session);
+    test_packetdiag_detail(term, session);
     test_cancel_diag(term, session);
 
     destroy_test_term(term);

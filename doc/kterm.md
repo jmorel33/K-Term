@@ -1531,9 +1531,9 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `ext;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
 *   `ext;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted or `host=auto`. `graph=1` enables ASCII visualization.
 *   `ext;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics. Usage: `ext;net;httpprobe;http://example.com`.
-*   `ext;net;wirediag`: Starts the WireDiag packet sniffer. Usage: `ext;net;wirediag;interface=eth0;filter="tcp port 80";snaplen=128`. Real-time packets are rendered in ANSI colors.
+*   `ext;net;packetdiag`: Starts the PacketDiag packet sniffer. Usage: `ext;net;packetdiag;interface=eth0;filter="tcp port 80";snaplen=128`. Real-time packets are rendered in ANSI colors.
 *   `ext;net;connections`: Lists active network sessions.
-*   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, WireDiag, etc.).
+*   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, PacketDiag, etc.).
 *   `ext;automate;trigger;...`: Manages automation triggers.
 
 **Top-Level Network Diagnostics (v2.6.12+):**
@@ -1542,13 +1542,13 @@ In addition to `ext;net;...`, these diagnostics are available as top-level Gatew
 *   `dns;host`: Resolves hostname.
 *   `portscan;host;ports;[timeout]`: Scans TCP ports.
 *   `whois;host;[query]`: Performs WHOIS lookup.
-*   `wirediag;[interface=x;filter=y...]`: Starts packet capture.
-*   `wirediag_pause`: Pauses packet capture (no data loss in ring buffer, drops new packets).
-*   `wirediag_resume`: Resumes packet capture.
-*   `wirediag_filter;expr`: Updates the BPF filter string on the fly.
-*   `wirediag_detail;packet=N`: Returns a detailed Hex/ASCII dump of the Nth packet (relative to capture session).
-*   `wirediag_stop`: Stops packet capture.
-*   `wirediag_status`: Returns capture statistics (Captured Count, Paused State).
+*   `packetdiag;[interface=x;filter=y...]`: Starts packet capture.
+*   `packetdiag_pause`: Pauses packet capture (no data loss in ring buffer, drops new packets).
+*   `packetdiag_resume`: Resumes packet capture.
+*   `packetdiag_filter;expr`: Updates the BPF filter string on the fly.
+*   `packetdiag_detail;packet=N`: Returns a detailed Hex/ASCII dump of the Nth packet (relative to capture session).
+*   `packetdiag_stop`: Stops packet capture.
+*   `packetdiag_status`: Returns capture statistics (Captured Count, Paused State).
 *   `ext;ssh;...`: Alias for `ext;net`.
 
 **Speedtest Client (v2.6.18):**

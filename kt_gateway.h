@@ -2423,32 +2423,32 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag") == 0) {
         // args in saveptr
         const char* params = saveptr ? saveptr : "";
-        if (KTerm_Net_WireDiag_Start(term, session, params)) {
+        if (KTerm_Net_PacketDiag_Start(term, session, params)) {
             if (respond) respond(term, session, "OK;STARTED");
         } else {
             if (respond) respond(term, session, "ERR;START_FAILED");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_stop") == 0) {
-        KTerm_Net_WireDiag_Stop(term, session);
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_stop") == 0) {
+        KTerm_Net_PacketDiag_Stop(term, session);
         if (respond) respond(term, session, "OK;STOPPED");
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_pause") == 0) {
-        KTerm_Net_WireDiag_Pause(term, session);
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_pause") == 0) {
+        KTerm_Net_PacketDiag_Pause(term, session);
         if (respond) respond(term, session, "OK;PAUSED");
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_resume") == 0) {
-        KTerm_Net_WireDiag_Resume(term, session);
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_resume") == 0) {
+        KTerm_Net_PacketDiag_Resume(term, session);
         if (respond) respond(term, session, "OK;RESUMED");
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_filter") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_filter") == 0) {
         char* filter = KTerm_Strtok(NULL, ";", &saveptr);
         if (!filter) filter = "";
-        if (KTerm_Net_WireDiag_SetFilter(term, session, filter)) {
+        if (KTerm_Net_PacketDiag_SetFilter(term, session, filter)) {
             if (respond) respond(term, session, "OK;FILTER_UPDATED");
         } else {
             if (respond) respond(term, session, "ERR;UPDATE_FAILED");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_detail") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_detail") == 0) {
         char* token = KTerm_Strtok(NULL, ";", &saveptr);
         int pkt_id = -1;
         if (token && KTerm_Strncasecmp(token, "packet=", 7) == 0) {
@@ -2457,7 +2457,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         if (pkt_id != -1) {
             char detail[4096];
-            if (KTerm_Net_WireDiag_GetDetail(term, session, pkt_id, detail, sizeof(detail))) {
+            if (KTerm_Net_PacketDiag_GetDetail(term, session, pkt_id, detail, sizeof(detail))) {
                 char full_resp[4200];
                 snprintf(full_resp, sizeof(full_resp), "OK;%s", detail);
                 if (respond) respond(term, session, full_resp);
@@ -2467,13 +2467,13 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
             if (respond) respond(term, session, "ERR;MISSING_ID");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_status") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_status") == 0) {
         char status[256];
-        KTerm_Net_WireDiag_GetStatus(term, session, status, sizeof(status));
+        KTerm_Net_PacketDiag_GetStatus(term, session, status, sizeof(status));
         char msg[512];
         snprintf(msg, sizeof(msg), "OK;%s", status);
         if (respond) respond(term, session, msg);
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_follow") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_follow") == 0) {
         char* token = KTerm_Strtok(NULL, ";", &saveptr);
         uint32_t fid = 0;
         if (token && KTerm_Strncasecmp(token, "flow_id=", 8) == 0) {
@@ -2482,23 +2482,23 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             fid = (uint32_t)strtoul(token, NULL, 10); // Positional
         }
 
-        if (KTerm_Net_WireDiag_Follow(term, session, fid)) {
+        if (KTerm_Net_PacketDiag_Follow(term, session, fid)) {
             if (respond) respond(term, session, "OK;FOLLOW_UPDATED");
         } else {
             if (respond) respond(term, session, "ERR;FAILED");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_stats") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_stats") == 0) {
         char buf[1024];
-        if (KTerm_Net_WireDiag_GetStats(term, session, buf, sizeof(buf))) {
+        if (KTerm_Net_PacketDiag_GetStats(term, session, buf, sizeof(buf))) {
             char msg[1100];
             snprintf(msg, sizeof(msg), "OK;%s", buf);
             if (respond) respond(term, session, msg);
         } else {
             if (respond) respond(term, session, "ERR;FAILED");
         }
-    } else if (KTerm_Strcasecmp(cmd, "wirediag_flows") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "packetdiag_flows") == 0) {
         char buf[4096];
-        if (KTerm_Net_WireDiag_GetFlows(term, session, buf, sizeof(buf))) {
+        if (KTerm_Net_PacketDiag_GetFlows(term, session, buf, sizeof(buf))) {
             char msg[4200];
             snprintf(msg, sizeof(msg), "OK;%s", buf);
             if (respond) respond(term, session, msg);
@@ -2550,12 +2550,12 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             "speedtest;[host][;streams;graph=1]|"
             "connections|"
             "httpprobe;url|"
-            "wirediag;[interface=x;filter=y...]|"
-            "wirediag_stop|"
-            "wirediag_status|"
-            "wirediag_follow;flow_id|"
-            "wirediag_stats|"
-            "wirediag_flows|"
+            "packetdiag;[interface=x;filter=y...]|"
+            "packetdiag_stop|"
+            "packetdiag_status|"
+            "packetdiag_follow;flow_id|"
+            "packetdiag_stats|"
+            "packetdiag_flows|"
             "proto_query;port;[UDP]|"
             "scan_auth";
         if (respond) respond(term, session, help);
@@ -2607,10 +2607,10 @@ static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, co
                 if (net->ping_ext->user_data) free(net->ping_ext->user_data);
                 free(net->ping_ext); net->ping_ext = NULL;
             }
-            if (net->wirediag) {
-                KTerm_Net_WireDiag_Stop(term, session);
-                KTerm_Net_FreeWireDiag(net->wirediag);
-                net->wirediag = NULL;
+            if (net->packetdiag) {
+                KTerm_Net_PacketDiag_Stop(term, session);
+                KTerm_Net_FreePacketDiag(net->packetdiag);
+                net->packetdiag = NULL;
             }
 
             if (respond) respond(term, session, "OK;CANCELLED");

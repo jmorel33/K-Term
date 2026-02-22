@@ -1,5 +1,5 @@
 #define KTERM_NET_IMPLEMENTATION
-#define KTERM_ENABLE_WIREDIAG
+#define KTERM_ENABLE_PACKETDIAG
 #define KTERM_USE_BUNDLED_PCAP
 #define KTERM_DISABLE_VOICE
 #define KTERM_VERSION_STRING "2.6.42"
@@ -67,9 +67,9 @@ int main() {
         printf("PASS: QueryProtocol FTP\n");
     }
 
-    // 2. Verify Heuristic Detection (WireDiag)
+    // 2. Verify Heuristic Detection (PacketDiag)
     {
-        KTermWireDiagContext ctx = {0};
+        KTermPacketDiagContext ctx = {0};
         ctx.running = true;
         // ctx.handle = ...;
         // Need to set up session context because ScanAuthFlows uses GetContext(session)
@@ -79,7 +79,7 @@ int main() {
 
         // Mock session user_data to point to a KTermNetSession containing our ctx
         KTermNetSession net = {0};
-        net.wirediag = &ctx;
+        net.packetdiag = &ctx;
         session->user_data = &net;
 
 #ifndef _WIN32
@@ -116,7 +116,7 @@ int main() {
         // Inject SSH Signature
         sprintf((char*)&pkt[54], "SSH-2.0-OpenSSH_8.9p1\r\n");
 
-        WireDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
+        PacketDiag_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         // Verify Flow Table has Auth Detected
         char buf[4096];
