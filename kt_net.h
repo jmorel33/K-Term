@@ -4109,6 +4109,114 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
 #define ANSI_MAGENTA "\x1B[35m"
 #define ANSI_CYAN  "\x1B[36m"
 
+typedef struct {
+    uint16_t port;
+    const char* name;
+    const char* color;
+    bool is_udp;
+} ProtocolDef;
+
+static const ProtocolDef kterm_protocols[] = {
+    // Web
+    { 80, "HTTP", ANSI_YELLOW, false },
+    { 443, "HTTPS", ANSI_YELLOW, false },
+    { 8080, "HTTP-Alt", ANSI_YELLOW, false },
+    // File Transfer
+    { 20, "FTP-Data", ANSI_YELLOW, false },
+    { 21, "FTP", ANSI_YELLOW, false },
+    { 69, "TFTP", ANSI_YELLOW, true },
+    { 445, "SMB", ANSI_YELLOW, false },
+    { 2049, "NFS", ANSI_YELLOW, false },
+    { 2049, "NFS", ANSI_YELLOW, true },
+    // Email
+    { 25, "SMTP", ANSI_YELLOW, false },
+    { 587, "SMTP-Sub", ANSI_YELLOW, false },
+    { 110, "POP3", ANSI_YELLOW, false },
+    { 995, "POP3S", ANSI_YELLOW, false },
+    { 143, "IMAP", ANSI_YELLOW, false },
+    { 993, "IMAPS", ANSI_YELLOW, false },
+    // Remote Access
+    { 22, "SSH", ANSI_RED, false },
+    { 23, "Telnet", ANSI_RED, false },
+    { 3389, "RDP", ANSI_RED, false },
+    { 3389, "RDP", ANSI_RED, true },
+    { 5900, "VNC", ANSI_RED, false },
+    // Infrastructure
+    { 53, "DNS", ANSI_YELLOW, true },
+    { 53, "DNS", ANSI_YELLOW, false },
+    { 67, "DHCP-S", ANSI_CYAN, true },
+    { 68, "DHCP-C", ANSI_CYAN, true },
+    { 123, "NTP", ANSI_CYAN, true },
+    { 161, "SNMP", ANSI_CYAN, true },
+    { 162, "SNMP-Trap", ANSI_CYAN, true },
+    { 514, "Syslog", ANSI_CYAN, true },
+    // Directory / Auth
+    { 389, "LDAP", ANSI_YELLOW, false },
+    { 636, "LDAPS", ANSI_YELLOW, false },
+    { 88, "Kerberos", ANSI_RED, false },
+    { 88, "Kerberos", ANSI_RED, true },
+    // Discovery
+    { 5353, "mDNS", ANSI_YELLOW, true },
+    { 1900, "SSDP", ANSI_YELLOW, true },
+    { 5355, "LLMNR", ANSI_YELLOW, true },
+    { 3702, "WS-Disco", ANSI_YELLOW, true },
+    // VPN
+    { 500, "IKE", ANSI_RED, true },
+    { 4500, "IPsec-NAT", ANSI_RED, true },
+    { 1194, "OpenVPN", ANSI_RED, true },
+    { 1701, "L2TP", ANSI_RED, true },
+    // AV & Lighting
+    { 319, "PTP-Evt", ANSI_CYAN, true },
+    { 320, "PTP-Gen", ANSI_CYAN, true },
+    { 4321, "Dante Audio", ANSI_MAGENTA, true },
+    { 9875, "SAP", ANSI_MAGENTA, true },
+    { 5004, "RTP", ANSI_MAGENTA, true },
+    { 6454, "Art-Net", ANSI_MAGENTA, true },
+    { 5568, "sACN", ANSI_MAGENTA, true },
+    { 5060, "SIP", ANSI_MAGENTA, false },
+    { 5060, "SIP", ANSI_MAGENTA, true },
+    { 5061, "SIP-TLS", ANSI_MAGENTA, false },
+    { 554, "RTSP", ANSI_MAGENTA, false },
+    // Dante Control
+    { 8700, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 8702, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 8703, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 8708, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 4440, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 4444, "Dante Ctrl", ANSI_MAGENTA, true },
+    { 4455, "Dante Ctrl", ANSI_MAGENTA, true },
+    // Other
+    { 1883, "MQTT", ANSI_YELLOW, false },
+    { 8883, "MQTTS", ANSI_YELLOW, false },
+    { 0, NULL, NULL, false }
+};
+
+static const char* LiveWire_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp, const char** color_out) {
+    // Check Map
+    for (int i=0; kterm_protocols[i].name; i++) {
+        if (kterm_protocols[i].is_udp == is_udp) {
+            if (kterm_protocols[i].port == src_port || kterm_protocols[i].port == dst_port) {
+                if (color_out) *color_out = kterm_protocols[i].color;
+                return kterm_protocols[i].name;
+            }
+        }
+    }
+
+    // Check Ranges
+    if (is_udp) {
+        if ((src_port >= 14336 && src_port <= 15359) || (dst_port >= 14336 && dst_port <= 15359)) {
+            if (color_out) *color_out = ANSI_MAGENTA;
+            return "Dante Unicast";
+        }
+        if ((src_port >= 34336 && src_port <= 34600) || (dst_port >= 34336 && dst_port <= 34600)) {
+            if (color_out) *color_out = ANSI_MAGENTA;
+            return "Dante Via";
+        }
+    }
+
+    return NULL;
+}
+
 static void LiveWire_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 12) return;
     int version = (data[0] >> 6) & 0x03;
@@ -4351,7 +4459,15 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             if (flags & 0x04) strcat(flag_str, "RST ");
             if (flags & 0x08) strcat(flag_str, "PSH ");
 
-            pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s", ANSI_GREEN, ANSI_RESET, sport, dport, flag_str);
+            const char* pname = NULL;
+            const char* pcolor = NULL;
+            pname = LiveWire_IdentifyProtocol(sport, dport, false, &pcolor);
+
+            if (pname) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s[%s]%s %s", ANSI_GREEN, ANSI_RESET, sport, dport, pcolor, pname, ANSI_RESET, flag_str);
+            } else {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s", ANSI_GREEN, ANSI_RESET, sport, dport, flag_str);
+            }
 
             const unsigned char* payload = tcp + (tcp[12] >> 4) * 4;
             int payload_len = tcp_len - ((tcp[12] >> 4) * 4);
@@ -4363,7 +4479,7 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 flow_payload_len = payload_len;
             }
 
-            if (sport == 80 || dport == 80 || sport == 8080 || dport == 8080) {
+            if ((pname && (strcmp(pname, "HTTP") == 0 || strcmp(pname, "HTTPS") == 0)) || sport == 80 || dport == 80 || sport == 8080 || dport == 8080) {
                 // Parse HTTP
                 if (payload_len > 0) {
                     char http_info[256] = "";
@@ -4392,24 +4508,32 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 flow_payload_len = payload_len;
             }
 
-            if (dport == 4321 || sport == 4321) {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[Dante Audio]%s", ANSI_CYAN, ANSI_RESET, sport, dport, ANSI_MAGENTA, ANSI_RESET);
+            const char* pname = NULL;
+            const char* pcolor = NULL;
+            pname = LiveWire_IdentifyProtocol(sport, dport, true, &pcolor);
+
+            if (pname) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[%s]%s", ANSI_CYAN, ANSI_RESET, sport, dport, pcolor, pname, ANSI_RESET);
+            } else {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d Len=%d", ANSI_CYAN, ANSI_RESET, sport, dport, len);
+            }
+
+            // Parsing Logic
+            if ((pname && (strstr(pname, "Dante") || strstr(pname, "RTP"))) || dport == 4321 || sport == 4321) {
                 if (payload_len > 0) {
                     char rtp_info[256] = "";
                     LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
                     if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_MAGENTA, rtp_info, ANSI_RESET);
                 }
             }
-            else if (dport == 319 || dport == 320 || sport == 319 || sport == 320) {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d", ANSI_CYAN, ANSI_RESET, sport, dport);
+            else if ((pname && strstr(pname, "PTP")) || dport == 319 || dport == 320 || sport == 319 || sport == 320) {
                 if (payload_len > 0) {
                     char ptp_info[256] = "";
                     LiveWire_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
                     if (ptp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_CYAN, ptp_info, ANSI_RESET);
                 }
             }
-            else if (dport == 53 || sport == 53) {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d", ANSI_CYAN, ANSI_RESET, sport, dport);
+            else if ((pname && (strcmp(pname, "DNS") == 0 || strcmp(pname, "mDNS") == 0)) || dport == 53 || sport == 53) {
                 if (payload_len > 0) {
                     char dns_info[256] = "";
                     LiveWire_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
@@ -4417,17 +4541,12 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 }
             }
             else {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d Len=%d", ANSI_CYAN, ANSI_RESET, sport, dport, len);
                 // Heuristic RTP check
                 if (payload_len > 12 && (payload[0] & 0xC0) == 0x80) { // Version 2
                      // Maybe RTP? Check PT < 128?
                      if ((payload[1] & 0x7F) < 128) {
                          char rtp_info[256] = "";
                          LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
-                         // Only print if it looks valid? Just hint it.
-                         // Only print if we are sure? Let's just print if it parsed something successfully?
-                         // LiveWire_ParseRTP only checks version.
-                         // Let's add it if payload type is reasonable.
                          if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s?%s", ANSI_GRAY, rtp_info, ANSI_RESET);
                      }
                 }
@@ -5063,7 +5182,7 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
     }
     else if (ctx->state == 3) { // SEND
         char req[2048];
-        snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KTerm/2.6\r\nConnection: close\r\n\r\n", ctx->path, ctx->host);
+        snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KTerm/2.6.41\r\nConnection: close\r\n\r\n", ctx->path, ctx->host);
 
         ctx->request_start_time = KTerm_GetTime();
         ssize_t sent = send(ctx->sockfd, req, strlen(req), 0);
