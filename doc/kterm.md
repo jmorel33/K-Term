@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.36
+# kterm.h - Technical Reference Manual v2.6.37
 
 **(c) 2026 Jacques Morel**
 
@@ -881,97 +881,98 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
 -   **Parsing:** The payload is tokenized by semicolons.
     -   `Class`: Category of the command (e.g., "UI", "AUDIO", "MAT").
     -   `ID`: Target object identifier.
-    -   `Command`: The action to perform (e.g., "PLAY", "SET").
+    -   `Command`: The action to perform (e.g., "play", "set"). Commands are **case-insensitive** and normalized to lowercase.
     -   `Params`: Optional parameters for the command.
--   **Example:** `\033PGATE;AUDIO;BGM;PLAY;TRACK1\033\` might tell a game engine to play a music track.
+-   **Example:** `\033PGATE;AUDIO;BGM;play;TRACK1\033\` might tell a game engine to play a music track.
 
 **Internal Commands (KTERM Class):**
 The class ID `KTERM` is reserved for internal configuration.
 
 | Command | Params | Description |
 | :--- | :--- | :--- |
-| `SET;LEVEL` | `<Level>` | Sets VT emulation level (e.g., `100`, `525`, `1000` for XTERM, `1003` for ANSI.SYS). |
-| `SET;DEBUG` | `1`/`0` | Enables or disables debug logging. |
-| `SET;FONT` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
-| `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
-| `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
-| `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
-| `SET;KEYBOARD`| `REPEAT_RATE=<0-31>;DELAY=<ms>;REPEAT=<SOFTWARE\|HOST>` | Configures keyboard repeat behavior. `REPEAT_RATE`: 0 (Fast, 30Hz) to 30 (Slow, 2Hz), 31=Off. `DELAY`: Initial delay in milliseconds (default 500). `REPEAT`: Selects repeat engine (`SOFTWARE` for authentic VT timing, `HOST` for low-latency OS repeats). |
-| `SET;CURSOR`  | `SKIP_PROTECT=<1\|0>;HOME_MODE=<Mode>` | "Forms Mode" control.<br>- `SKIP_PROTECT`: If `1`, cursor movement (Arrow keys, Tab, Backspace) automatically skips protected cells (`DECSCA 1`).<br>- `HOME_MODE`: Defines behavior when cursor loops or no cells are valid. Options: `ABSOLUTE` (0,0), `FIRST_UNPROTECTED` (Scan from top), `FIRST_UNPROTECTED_LINE` (Scan current line), `LAST_FOCUSED` (Return to last known valid cell). |
-| `RESET;TABS` | `DEFAULT8` | Resets tab stops to every 8 columns (DECST8C behavior). |
-| `SET;OUTPUT` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
-| `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
-| `SET;CONCEAL`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |
-| `PIPE;BANNER`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
-| `PIPE;VT`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
-| `EXT;net`    | `connect;<target>[;pass]`| Initiates connection. Target format: `[user[:pass]@]host[:port]`. |
-| `EXT;net`    | `disconnect` | Closes the connection. |
-| `EXT;net`    | `ping;<host>` | Checks system connectivity to a host. Returns command output. |
-| `EXT;net`    | `myip` | Returns the local public-facing IP address. |
-| `EXT;net`    | `traceroute` | `host=...;maxhops=30;timeout=2000`. Async traceroute (UDP/ICMP). Returns `HOP;...` events. |
-| `EXT;net`    | `responsetime`| `host=...;count=10;interval=1;timeout=2000`. Async latency/jitter test. Returns `OK;SENT=...` stats. |
-| `EXT;net`    | `speedtest`   | `host=...;streams=4`. Multi-stream throughput test. Auto-selects server if host is omitted or `auto`. |
-| `EXT;net`    | `connections` | Lists active network sessions and their status. |
-| `EXT;net`    | `cancel_diag` | Stops any currently running asynchronous network diagnostics. |
-| `EXT;automate`| `trigger;add;pat;act`| Adds an automation trigger (Pattern -> Action). |
-| `EXT;automate`| `trigger;list`| Lists active triggers. |
-| `EXT;ssh`    | `connect;...` | Alias for `EXT;net`. |
-| `SET;SESSION`| `<ID>` | Sets the target session for subsequent Gateway commands. `<ID>` is the session index (0-3). Commands will apply to this session regardless of origin. |
-| `SET;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
-| `SET;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics. |
-| `SET;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics. |
-| `SET;SIXEL_SESSION` | `<ID>` | Sets the target session for Sixel graphics. |
-| `INIT;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics AND resets the ReGIS protocol state on that session. |
-| `INIT;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics AND resets the Tektronix protocol state. |
-| `INIT;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics AND resets the Kitty protocol state. |
-| `INIT;SIXEL_SESSION` | `<ID>` | Sets the target session for Sixel graphics AND resets the Sixel protocol state. |
-| `RESET;SESSION`| - | Resets the target session to default (commands apply to the session that received them). |
-| `RESET;REGIS_SESSION`| - | Resets the ReGIS target session to default (source session). |
-| `RESET;TEKTRONIX_SESSION`| - | Resets the Tektronix target session to default. |
-| `RESET;KITTY_SESSION`| - | Resets the Kitty target session to default. |
-| `RESET;SIXEL_SESSION`| - | Resets the Sixel target session to default. |
-| `RESET;GRAPHICS` | - | Resets all graphics states (Sixel, Kitty, ReGIS, Tektronix). Alias: `ALL_GRAPHICS`. |
-| `RESET;KITTY` | - | Resets Kitty graphics state (clears images) for the target session. |
-| `RESET;REGIS` | - | Resets ReGIS graphics state. |
-| `RESET;TEK` | - | Resets Tektronix graphics state. Alias: `TEKTRONIX`. |
-| `RESET;SIXEL` | - | Resets Sixel graphics state. |
-| `RESET;ATTR` | - | Resets all text attributes and colors to default. |
-| `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
-| `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
-| `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
-| `GET;STATE`   | - | Responds with `DCS GATE;KTERM;0;STATE;CURSOR:x,y\|SCROLL:t,b\|... ST`. |
-| `GET;OUTPUT` | - | Responds with `DCS GATE;KTERM;0;REPORT;OUTPUT=<1|0> ST`. |
-| `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
-| `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
-| `GET;STRIKE_COLOR` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
-| `SET;SHADER` | `KEY=VAL;...` | Sets visual effect parameters. Keys: `CRT_CURVATURE`, `SCANLINE_INTENSITY`, `GLOW_INTENSITY`, `NOISE_INTENSITY` (float 0.0-1.0), and flags `CRT_ENABLE`, `SCANLINE_ENABLE`, `GLOW_ENABLE`, `NOISE_ENABLE` (1/0). |
-| `GET;SHADER` | - | Responds with `...;REPORT;SHADER=CRT_CURVATURE:...,FLAGS:... ST` containing current settings. |
+| `help` | - | Displays a list of available Gateway commands. |
+| `set;level` | `<Level>` | Sets VT emulation level (e.g., `100`, `525`, `1000` for XTERM, `1003` for ANSI.SYS). |
+| `set;debug` | `1`/`0` | Enables or disables debug logging. |
+| `set;font` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
+| `set;size` | `<Cols>;<Rows>` | Resizes the terminal grid. |
+| `set;attr` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
+| `set;blink` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
+| `set;keyboard`| `REPEAT_RATE=<0-31>;DELAY=<ms>;REPEAT=<SOFTWARE\|HOST>` | Configures keyboard repeat behavior. `REPEAT_RATE`: 0 (Fast, 30Hz) to 30 (Slow, 2Hz), 31=Off. `DELAY`: Initial delay in milliseconds (default 500). `REPEAT`: Selects repeat engine (`SOFTWARE` for authentic VT timing, `HOST` for low-latency OS repeats). |
+| `set;cursor`  | `SKIP_PROTECT=<1\|0>;HOME_MODE=<Mode>` | "Forms Mode" control.<br>- `SKIP_PROTECT`: If `1`, cursor movement (Arrow keys, Tab, Backspace) automatically skips protected cells (`DECSCA 1`).<br>- `HOME_MODE`: Defines behavior when cursor loops or no cells are valid. Options: `ABSOLUTE` (0,0), `FIRST_UNPROTECTED` (Scan from top), `FIRST_UNPROTECTED_LINE` (Scan current line), `LAST_FOCUSED` (Return to last known valid cell). |
+| `reset;tabs` | `DEFAULT8` | Resets tab stops to every 8 columns (DECST8C behavior). |
+| `set;output` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
+| `set;grid` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
+| `set;conceal`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |
+| `pipe;banner`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
+| `pipe;vt`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
+| `ext;net`    | `connect;<target>[;pass]`| Initiates connection. Target format: `[user[:pass]@]host[:port]`. |
+| `ext;net`    | `disconnect` | Closes the connection. |
+| `ext;net`    | `ping;<host>` | Checks system connectivity to a host. Returns command output. |
+| `ext;net`    | `myip` | Returns the local public-facing IP address. |
+| `ext;net`    | `traceroute` | `host=...;maxhops=30;timeout=2000`. Async traceroute (UDP/ICMP). Returns `HOP;...` events. |
+| `ext;net`    | `responsetime`| `host=...;count=10;interval=1;timeout=2000`. Async latency/jitter test. Returns `OK;SENT=...` stats. |
+| `ext;net`    | `speedtest`   | `host=...;streams=4`. Multi-stream throughput test. Auto-selects server if host is omitted or `auto`. |
+| `ext;net`    | `connections` | Lists active network sessions and their status. |
+| `ext;net`    | `cancel_diag` | Stops any currently running asynchronous network diagnostics. |
+| `ext;automate`| `trigger;add;pat;act`| Adds an automation trigger (Pattern -> Action). |
+| `ext;automate`| `trigger;list`| Lists active triggers. |
+| `ext;ssh`    | `connect;...` | Alias for `ext;net`. |
+| `set;session`| `<ID>` | Sets the target session for subsequent Gateway commands. `<ID>` is the session index (0-3). Commands will apply to this session regardless of origin. |
+| `set;regis_session` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
+| `set;tektronix_session` | `<ID>` | Sets the target session for Tektronix graphics. |
+| `set;kitty_session` | `<ID>` | Sets the target session for Kitty graphics. |
+| `set;sixel_session` | `<ID>` | Sets the target session for Sixel graphics. |
+| `init;regis_session` | `<ID>` | Sets the target session for ReGIS graphics AND resets the ReGIS protocol state on that session. |
+| `init;tektronix_session` | `<ID>` | Sets the target session for Tektronix graphics AND resets the Tektronix protocol state. |
+| `init;kitty_session` | `<ID>` | Sets the target session for Kitty graphics AND resets the Kitty protocol state. |
+| `init;sixel_session` | `<ID>` | Sets the target session for Sixel graphics AND resets the Sixel protocol state. |
+| `reset;session`| - | Resets the target session to default (commands apply to the session that received them). |
+| `reset;regis_session`| - | Resets the ReGIS target session to default (source session). |
+| `reset;tektronix_session`| - | Resets the Tektronix target session to default. |
+| `reset;kitty_session`| - | Resets the Kitty target session to default. |
+| `reset;sixel_session`| - | Resets the Sixel target session to default. |
+| `reset;graphics` | - | Resets all graphics states (Sixel, Kitty, ReGIS, Tektronix). Alias: `ALL_GRAPHICS`. |
+| `reset;kitty` | - | Resets Kitty graphics state (clears images) for the target session. |
+| `reset;regis` | - | Resets ReGIS graphics state. |
+| `reset;tek` | - | Resets Tektronix graphics state. Alias: `TEKTRONIX`. |
+| `reset;sixel` | - | Resets Sixel graphics state. |
+| `reset;attr` | - | Resets all text attributes and colors to default. |
+| `reset;blink`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
+| `get;level` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
+| `get;version` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
+| `get;state`   | - | Responds with `DCS GATE;KTERM;0;STATE;CURSOR:x,y\|SCROLL:t,b\|... ST`. |
+| `get;output` | - | Responds with `DCS GATE;KTERM;0;REPORT;OUTPUT=<1|0> ST`. |
+| `get;fonts` | - | Responds with a comma-separated list of available fonts. |
+| `get;underline_color` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
+| `get;strike_color` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
+| `set;shader` | `KEY=VAL;...` | Sets visual effect parameters. Keys: `CRT_CURVATURE`, `SCANLINE_INTENSITY`, `GLOW_INTENSITY`, `NOISE_INTENSITY` (float 0.0-1.0), and flags `CRT_ENABLE`, `SCANLINE_ENABLE`, `GLOW_ENABLE`, `NOISE_ENABLE` (1/0). |
+| `get;shader` | - | Responds with `...;REPORT;SHADER=CRT_CURVATURE:...,FLAGS:... ST` containing current settings. |
 
 #### Gateway Extensions (v2.4.18+)
 
 Introduced in **v2.4.18**, Gateway Extensions provide a modular way to extend the terminal's capabilities without modifying the core library. This system allows the host application to register custom handlers for `EXT` commands sent via the Gateway Protocol.
 
-*   **Command:** `DCS GATE KTERM ; <ID> ; EXT ; <Name> ; <Args> ST`
+*   **Command:** `DCS GATE KTERM ; <ID> ; ext ; <Name> ; <Args> ST`
 *   **Registration API:** `KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHandler handler);`
 *   **Built-in Extensions:**
-    *   **`broadcast`**: Sends input characters to all active sessions. Usage: `EXT;broadcast;Hello`
-    *   **`themes`**: Sets terminal colors. Usage: `EXT;themes;set;bg=#RRGGBB`
-    *   **`icat`**: Injects an image using the Kitty Graphics Protocol (basic wrapper). Usage: `EXT;icat;<Base64Data>`
+    *   **`broadcast`**: Sends input characters to all active sessions. Usage: `ext;broadcast;Hello`
+    *   **`themes`**: Sets terminal colors. Usage: `ext;themes;set;bg=#RRGGBB`
+    *   **`icat`**: Injects an image using the Kitty Graphics Protocol (basic wrapper). Usage: `ext;icat;<Base64Data>`
     *   **`clipboard`**: A placeholder for clipboard integration.
-    *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `EXT;direct;1` (On) or `EXT;direct;0` (Off).
-    *   **`rawdump`**: Mirrors raw input bytes to a target session. Usage: `EXT;rawdump;START;SESSION=n`.
-    *   **`automate`**: Manages automation triggers. Usage: `EXT;automate;trigger;add;pat;act`.
-    *   **`voip`**: Controls the VoIP subsystem (SIP/RTP). Usage: `EXT;voip;dial;user@host`.
-    *   **`net`**: Controls networking diagnostics and connections. Usage: `EXT;net;connect;host`.
+    *   **`direct`**: Toggles Direct Input mode (Local Editing). Usage: `ext;direct;1` (On) or `ext;direct;0` (Off).
+    *   **`rawdump`**: Mirrors raw input bytes to a target session. Usage: `ext;rawdump;start;session=n`.
+    *   **`automate`**: Manages automation triggers. Usage: `ext;automate;trigger;add;pat;act`.
+    *   **`voip`**: Controls the VoIP subsystem (SIP/RTP). Usage: `ext;voip;dial;user@host`.
+    *   **`net`**: Controls networking diagnostics and connections. Usage: `ext;net;connect;host`.
     *   **`ssh`**: Alias for `net` extension.
-    *   **`voice`**: Controls the Voice Reactor subsystem. Usage: `EXT;voice;enable;1`.
+    *   **`voice`**: Controls the Voice Reactor subsystem. Usage: `ext;voice;enable;1`.
     *   **`grid`**: (v2.4.21+) Bulk screen manipulation extension. See section 4.12.1 for details.
 
 #### 4.12.1. Gateway Grid Extension (v2.4.21+)
 
 The **grid** extension provides high-performance primitives for bulk manipulation of the terminal screen buffer. It allows host applications to paint regions with specific characters, colors, and attributes without sending large volumes of text.
 
-**Base Command:** `DCS GATE KTERM ; <ID> ; EXT ; grid ; <Subcommand> ; <SessionID> ; <Params...> ST`
+**Base Command:** `DCS GATE KTERM ; <ID> ; ext ; grid ; <Subcommand> ; <SessionID> ; <Params...> ST`
 
 *   **SessionID:** The target session index (0-3). Use active session if set to `-1` or if omitted in some contexts (though explicit ID is recommended).
 
@@ -1093,7 +1094,7 @@ Gateway Grid commands bypass the `PROTECTED` attribute (DECSCA). This enables po
 
 **Example:**
 To fill a 10x10 red square with 'X' at (5,5) on Session 0:
-`DCS GATE KTERM;0;EXT;grid;fill;0;5;5;10;10;7;88;pal:1;pal:0;0;0;0 ST`
+`DCS GATE KTERM;0;ext;grid;fill;0;5;5;10;10;7;88;pal:1;pal:0;0;0;0 ST`
 (Mask 7 = 1+2+4 -> Char + FG + BG).
 
 **Example: Form Design:**
@@ -1195,7 +1196,7 @@ Introduced in **v2.4.20**, the **RAWDUMP** Gateway extension allows the terminal
 To dump the input of Session 0 to Session 1:
 ```bash
 # Send to KTerm (via Session 0)
-printf "\033PGATE;KTERM;0;RAWDUMP;START;SESSION=1\033\\"
+printf "\033PGATE;KTERM;0;rawdump;START;SESSION=1\033\\"
 ```
 
 ### 4.14. Kitty Protocols (Graphics & Keyboard)
@@ -1255,7 +1256,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
 
 *   **Mechanism:**
     *   **API:** `KTerm_SetFont(term, "Name")`.
-    *   **Gateway Protocol:** `SET;FONT;Name`.
+    *   **Gateway Protocol:** `set;FONT;Name`.
     *   **OSC 50:** `ESC ] 50 ; Name ST`.
 *   **Centering:** The renderer automatically calculates centering offsets. If a font's glyph data (e.g., 8x8) is smaller than the terminal cell size (e.g., 9x16), the glyph is perfectly centered within the cell.
 *   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and any TrueType font loaded via `KTerm_LoadFont`.
@@ -1334,7 +1335,7 @@ Added in **v2.3.2**, the **VT Pipe** feature allows a host application (or test 
 
 ```mermaid
 graph LR
-    TestHarness["Test Harness / Host"] -->|"DCS GATE ... PIPE;VT;B64;..."| Parser["Gateway Parser"]
+    TestHarness["Test Harness / Host"] -->|"DCS GATE ... pipe;VT;B64;..."| Parser["Gateway Parser"]
     Parser -->|"Decode Base64"| Decoder["KTerm Decoder"]
     Decoder -->|"Raw Bytes (ESC [ ...)"| Pipeline["Input Pipeline"]
     Pipeline -->|"Process Events"| Engine["Terminal Engine"]
@@ -1344,7 +1345,7 @@ graph LR
 **Example: Remote Color Change**
 To set the text color to Red (`ESC [ 31 m`) safely:
 1.  **Encode:** `\x1B[31m` -> Base64 `G1szMW0=`
-2.  **Send:** `\033PGATE;KTERM;0;PIPE;VT;B64;G1szMW0=\033\`
+2.  **Send:** `\033PGATE;KTERM;0;pipe;VT;B64;G1szMW0=\033\`
 3.  **Result:** The terminal decodes the payload and executes `ESC [ 31 m` as if it were typed locally.
 
 ### 4.23. Networking & SSH
@@ -1416,7 +1417,7 @@ KTerm_Net_Connect(term, session, "192.168.1.50", 23, "user", "password");
 
 **Gateway Command:**
 ```
-DCS GATE;KTERM;1;EXT;net;connect;192.168.1.50:23 ST
+DCS GATE;KTERM;1;ext;net;connect;192.168.1.50:23 ST
 ```
 
 **Diagnostics:**
@@ -1504,43 +1505,43 @@ KTerm_Net_SetProtocol(term, session, KTERM_NET_PROTO_FRAMED);
 |---|---|---|
 | `0x01` | DATA | Raw terminal I/O bytes |
 | `0x02` | RESIZE | `[Width:4][Height:4]` (Big Endian) |
-| `0x03` | GATEWAY | Gateway Command String (e.g. `EXT;grid;fill...`) |
+| `0x03` | GATEWAY | Gateway Command String (e.g. `ext;grid;fill...`) |
 | `0x04` | ATTACH | `[SessionID:1]` (Routes future traffic to session N) |
 
 #### 4.23.8. Session Routing
 
 Network connections are bound to specific `KTermSession` instances. In a multi-pane layout (multiplexer), you can map different connections to different sessions dynamically.
 
-*   **Gateway:** `DCS GATE;KTERM;1;ATTACH;SESSION=2 ST` directs all subsequent data received on the current connection to Session 2.
+*   **Gateway:** `DCS GATE;KTERM;1;attach;SESSION=2 ST` directs all subsequent data received on the current connection to Session 2.
 *   **API:** `KTerm_Net_SetTargetSession(term, session, target_idx)`.
 
 #### 4.23.9. Gateway Control Commands
 
 Networking can be inspected and controlled via `DCS GATE` commands (Extension `EXT`):
 
-*   `EXT;net;help`: Displays a list of available network commands and syntax.
-*   `EXT;net;connect;<target>`: Initiates a connection. Target: `[user[:pass]@]host[:port]`.
-*   `EXT;net;disconnect`: Closes the connection.
-*   `EXT;net;ping;<host>`: Checks system connectivity to a host. Returns command output.
-*   `EXT;net;myip`: Returns the local public-facing IP address.
-*   `EXT;net;traceroute;host=...;continuous=1`: Runs an asynchronous traceroute. If `continuous=1` is set, it loops indefinitely (MTR-like).
-*   `EXT;net;responsetime;host=...`: Measures latency and jitter.
-*   `EXT;net;dns;host`: Synchronously resolves a hostname to an IP address. Returns `OK;IP=...` or `ERR`.
-*   `EXT;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Usage: `host=192.168.1.1;ports=22,80,443`. Returns `HOST=...;PORT=...;STATUS=...` for each port.
-*   `EXT;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
-*   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted or `host=auto`. `graph=1` enables ASCII visualization.
-*   `EXT;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics. Usage: `EXT;net;httpprobe;http://example.com`.
-*   `EXT;net;connections`: Lists active network sessions.
-*   `EXT;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, etc.).
-*   `EXT;automate;trigger;...`: Manages automation triggers.
+*   `ext;net;help`: Displays a list of available network commands and syntax.
+*   `ext;net;connect;<target>`: Initiates a connection. Target: `[user[:pass]@]host[:port]`.
+*   `ext;net;disconnect`: Closes the connection.
+*   `ext;net;ping;<host>`: Checks system connectivity to a host. Returns command output.
+*   `ext;net;myip`: Returns the local public-facing IP address.
+*   `ext;net;traceroute;host=...;continuous=1`: Runs an asynchronous traceroute. If `continuous=1` is set, it loops indefinitely (MTR-like).
+*   `ext;net;responsetime;host=...`: Measures latency and jitter.
+*   `ext;net;dns;host`: Synchronously resolves a hostname to an IP address. Returns `OK;IP=...` or `ERR`.
+*   `ext;net;portscan;host=...;ports=...`: Runs an asynchronous TCP port scan on a comma-separated list of ports. Usage: `host=192.168.1.1;ports=22,80,443`. Returns `HOST=...;PORT=...;STATUS=...` for each port.
+*   `ext;net;whois;host=...`: Runs an asynchronous WHOIS query. Returns `DATA;...` (sanitized) and `DONE`.
+*   `ext;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted or `host=auto`. `graph=1` enables ASCII visualization.
+*   `ext;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics. Usage: `ext;net;httpprobe;http://example.com`.
+*   `ext;net;connections`: Lists active network sessions.
+*   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, etc.).
+*   `ext;automate;trigger;...`: Manages automation triggers.
 
 **Top-Level Network Diagnostics (v2.6.12):**
-In addition to `EXT;net;...`, these diagnostics are available as top-level Gateway commands for easier access:
-*   `PING;host;[count;interval;timeout]`: Measures response time (same as `EXT;net;responsetime`).
-*   `DNS;host`: Resolves hostname.
-*   `PORTSCAN;host;ports;[timeout]`: Scans TCP ports.
-*   `WHOIS;host;[query]`: Performs WHOIS lookup.
-*   `EXT;ssh;...`: Alias for `EXT;net`.
+In addition to `ext;net;...`, these diagnostics are available as top-level Gateway commands for easier access:
+*   `ping;host;[count;interval;timeout]`: Measures response time (same as `ext;net;responsetime`).
+*   `dns;host`: Resolves hostname.
+*   `portscan;host;ports;[timeout]`: Scans TCP ports.
+*   `whois;host;[query]`: Performs WHOIS lookup.
+*   `ext;ssh;...`: Alias for `ext;net`.
 
 **Speedtest Client (v2.6.18):**
 The `speedtest_client` example demonstrates a full network diagnostic application:
@@ -1590,7 +1591,7 @@ KTerm v2.6.1 introduces `kt_serialize.h`, a header-only library for persisting a
     *   `KTERM_PKT_AUDIO_STREAM` (0x12): High-quality inter-session streaming.
 *   **Visual Feedback:** A real-time VU meter is rendered on the right edge of the screen using compute shaders (`terminal.comp`). The meter's intensity and color (Green to Red) are driven by the `voice_energy` metric calculated from the capture buffer.
 *   **Integration:** Relies on `kt_voice.h` for lock-free ring buffering (SPSC) and `Situation` audio callbacks. It supports Voice Activity Detection (VAD) to trigger transmission or commands.
-*   **Control:** Managed via the Gateway Protocol (`EXT;voice`) or the C API.
+*   **Control:** Managed via the Gateway Protocol (`ext;voice`) or the C API.
 
 ---
 
@@ -3752,7 +3753,7 @@ These commands are sent via the `EXT` mechanism: `DCS GATE KTERM ; <ID> ; EXT ; 
 
 **Example:** Enable voice on the current session.
 ```bash
-printf "\033PGATE;KTERM;0;EXT;voice;enable;1\033\\"
+printf "\033PGATE;KTERM;0;ext;voice;enable;1\033\\"
 ```
 
 #### Internal C API
@@ -4296,7 +4297,7 @@ KTerm_Update(term);
 KTermStatus status = KTerm_GetStatus(term);
 if (status.graphics_vram_used > VRAM_THRESHOLD) {
     // Clear old graphics or reduce quality
-    KTerm_ExecuteGatewayCommand(term, "RESET;GRAPHICS");
+    KTerm_ExecuteGatewayCommand(term, "REset;GRAPHICS");
 }
 ```
 
@@ -4307,13 +4308,13 @@ For applications using multiple sessions:
 **Pattern: Session-Specific Graphics**
 ```c
 // Set graphics target to specific session
-KTerm_ExecuteGatewayCommand(term, "SET;SIXEL_SESSION;1");
+KTerm_ExecuteGatewayCommand(term, "set;SIXEL_SESSION;1");
 
 // Send Sixel data - goes to session 1
 KTerm_WriteString(term, sixel_data);
 
 // Reset to default
-KTerm_ExecuteGatewayCommand(term, "RESET;SIXEL_SESSION");
+KTerm_ExecuteGatewayCommand(term, "REset;SIXEL_SESSION");
 ```
 
 **Pattern: Background Session Updates**
@@ -4374,22 +4375,22 @@ void my_extension_handler(KTerm* term, const char* data) {
 // Register extension
 KTerm_RegisterGatewayExtension(term, "myext", my_extension_handler);
 
-// Host can now send: DCS GATE KTERM;0;EXT;myext;data ST
+// Host can now send: DCS GATE KTERM;0;ext;myext;data ST
 ```
 
 **Pattern: Grid-Based Dashboard**
 ```c
 // Fill background with protected cells
 KTerm_ExecuteGatewayCommand(term, 
-    "EXT;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
+    "ext;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
 
 // Draw title bar
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;banner;0;0;0;Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
+    "ext;grid;banner;0;0;0;Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
 
 // Draw status fields (unprotected for user input)
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
+    "ext;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
 ```
 
 ---
@@ -4649,7 +4650,7 @@ KTerm_PushInput(term, sixel_data, sixel_size);
 // Method 2: Via Gateway Protocol (for Kitty)
 char gateway_cmd[1024];
 snprintf(gateway_cmd, sizeof(gateway_cmd),
-    "\033PGATE;KTERM;0;EXT;icat;%s\033\\",
+    "\033PGATE;KTERM;0;ext;icat;%s\033\\",
     base64_encode(image_data));
 KTerm_WriteString(term, gateway_cmd);
 ```
@@ -4668,25 +4669,25 @@ KTerm_Draw(term);
 ```c
 // Fill entire screen with blue background
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
+    "ext;grid;fill;0;0;0;80;24;36;;;rgb:0000AA;;;PROTECTED");
 ```
 
 **Step 2: Add Title Bar**
 ```c
 // Draw title with yellow text on blue background
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;banner;0;0;0;System Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
+    "ext;grid;banner;0;0;0;System Dashboard;2;7;#;rgb:FFFF00;rgb:0000AA");
 ```
 
 **Step 3: Add Input Fields**
 ```c
 // Create unprotected input field
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
+    "ext;grid;fill;0;10;5;20;1;36;;;rgb:FFFFFF;;;0");
 
 // Add label
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;grid;banner;0;2;5;Input:;1;7;#;rgb:FFFFFF;rgb:0000AA");
+    "ext;grid;banner;0;2;5;Input:;1;7;#;rgb:FFFFFF;rgb:0000AA");
 ```
 
 **Step 4: Update Values**
@@ -4694,7 +4695,7 @@ KTerm_ExecuteGatewayCommand(term,
 // Update status line with current values
 char status[256];
 snprintf(status, sizeof(status),
-    "EXT;grid;banner;0;2;20;CPU: %d%% MEM: %d%%;1;7;#;rgb:00FF00;rgb:0000AA",
+    "ext;grid;banner;0;2;20;CPU: %d%% MEM: %d%%;1;7;#;rgb:00FF00;rgb:0000AA",
     cpu_usage, mem_usage);
 KTerm_ExecuteGatewayCommand(term, status);
 ```
@@ -4707,7 +4708,7 @@ KTerm_ExecuteGatewayCommand(term, status);
 ```c
 // Use Gateway Protocol networking
 KTerm_ExecuteGatewayCommand(term,
-    "EXT;net;connect;ssh://user@host.com");
+    "ext;net;connect;ssh://user@host.com");
 ```
 
 **Step 2: Handle Connection Events**
@@ -4821,7 +4822,7 @@ if (frame_time > 16.67) {  // Target 60 FPS
 - **Solution:** Clear graphics periodically
 - **Code:**
   ```c
-  KTerm_ExecuteGatewayCommand(term, "RESET;GRAPHICS");
+  KTerm_ExecuteGatewayCommand(term, "REset;GRAPHICS");
   ```
 
 ---

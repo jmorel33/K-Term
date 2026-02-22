@@ -69,6 +69,18 @@ typedef struct {
 } while(0)
 #endif
 
+#include <ctype.h>
+
+// Helper for case-insensitive string comparison
+#ifdef _WIN32
+    #define KTerm_Strncasecmp _strnicmp
+    #define KTerm_Strcasecmp _stricmp
+#else
+    #include <strings.h>
+    #define KTerm_Strncasecmp strncasecmp
+    #define KTerm_Strcasecmp strcasecmp
+#endif
+
 // Safe strtok replacement
 static char* KTerm_Strtok(char* str, const char* delim, char** saveptr) {
     char* token;
@@ -690,20 +702,22 @@ static void KTerm_Gateway_HandleDNS(KTerm* term, KTermSession* session, const ch
 static void KTerm_Gateway_HandlePing(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandlePortScan(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 static void KTerm_Gateway_HandleWhois(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleHelp(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
 static const GatewayCommand gateway_commands[] = {
-    { "ATTACH", KTerm_Gateway_HandleAttach },
-    { "DNS", KTerm_Gateway_HandleDNS },
-    { "EXT", KTerm_Gateway_HandleExt },
-    { "GET", KTerm_Gateway_HandleGet },
-    { "INIT", KTerm_Gateway_HandleInit },
-    { "PING", KTerm_Gateway_HandlePing },
-    { "PIPE", KTerm_Gateway_HandlePipeCmd },
-    { "PORTSCAN", KTerm_Gateway_HandlePortScan },
-    { "RAWDUMP", KTerm_Gateway_HandleRawDump },
-    { "RESET", KTerm_Gateway_HandleReset },
-    { "SET", KTerm_Gateway_HandleSet },
-    { "WHOIS", KTerm_Gateway_HandleWhois }
+    { "attach", KTerm_Gateway_HandleAttach },
+    { "dns", KTerm_Gateway_HandleDNS },
+    { "ext", KTerm_Gateway_HandleExt },
+    { "get", KTerm_Gateway_HandleGet },
+    { "help", KTerm_Gateway_HandleHelp },
+    { "init", KTerm_Gateway_HandleInit },
+    { "ping", KTerm_Gateway_HandlePing },
+    { "pipe", KTerm_Gateway_HandlePipeCmd },
+    { "portscan", KTerm_Gateway_HandlePortScan },
+    { "rawdump", KTerm_Gateway_HandleRawDump },
+    { "reset", KTerm_Gateway_HandleReset },
+    { "set", KTerm_Gateway_HandleSet },
+    { "whois", KTerm_Gateway_HandleWhois }
 };
 
 static int GatewayCommandCmp(const void* key, const void* elem) {
@@ -714,6 +728,29 @@ static int GatewayCommandCmp(const void* key, const void* elem) {
 
 // Handlers
 
+static void KTerm_Gateway_HandleHelp(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    (void)scanner;
+    const char* help_msg =
+        "OK;Available Commands:|"
+        "attach;session=<n> - Attach network to session|"
+        "dns;host - Resolve hostname|"
+        "ext;<name>;<args> - Execute extension|"
+        "get;<prop> - Get property (level, version, output, fonts, state, shader)|"
+        "init;<subsys>_session - Initialize subsystem|"
+        "ping;host - Ping host|"
+        "pipe;banner|vt - Inject content|"
+        "portscan;host;ports - Scan ports|"
+        "rawdump;start|stop - Raw input mirroring|"
+        "reset;graphics|attr|blink|tabs - Reset state|"
+        "set;level|font|size|attr|blink|keyboard|grid|shader - Set property|"
+        "whois;host - Query WHOIS|"
+        "help - Show this message";
+
+    char response[2048];
+    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;HELP;%s\x1B\\", id, help_msg);
+    KTerm_QueueResponse(term, response);
+}
+
 static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
 #ifdef KTERM_DISABLE_NET
     char response[64];
@@ -723,7 +760,7 @@ static void KTerm_Gateway_HandleAttach(KTerm* term, KTermSession* session, const
     char subcmd[64];
     if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
 
-    if (strcmp(subcmd, "SESSION") == 0) {
+    if (KTerm_Strcasecmp(subcmd, "SESSION") == 0) {
         if (Stream_Expect(scanner, '=')) {
             int s_idx;
             if (Stream_ReadInt(scanner, &s_idx)) {
@@ -975,42 +1012,42 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
     if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
 
     // Check for "SESSION" etc.
-    if (strcmp(subcmd, "SESSION") == 0) {
+    if (KTerm_Strcasecmp(subcmd, "SESSION") == 0) {
         if (Stream_Expect(scanner, ';')) {
             int s_idx;
             if (Stream_ReadInt(scanner, &s_idx)) {
                 if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->gateway_target_session = s_idx;
             }
         }
-    } else if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "REGIS_SESSION") == 0) {
         if (Stream_Expect(scanner, ';')) {
              int s_idx;
              if (Stream_ReadInt(scanner, &s_idx)) {
                  if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->regis_target_session = s_idx;
              }
         }
-    } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "TEKTRONIX_SESSION") == 0) {
         if (Stream_Expect(scanner, ';')) {
              int s_idx;
              if (Stream_ReadInt(scanner, &s_idx)) {
                  if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->tektronix_target_session = s_idx;
              }
         }
-    } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "KITTY_SESSION") == 0) {
         if (Stream_Expect(scanner, ';')) {
              int s_idx;
              if (Stream_ReadInt(scanner, &s_idx)) {
                  if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
              }
         }
-    } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SIXEL_SESSION") == 0) {
         if (Stream_Expect(scanner, ';')) {
              int s_idx;
              if (Stream_ReadInt(scanner, &s_idx)) {
                  if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->sixel_target_session = s_idx;
              }
         }
-    } else if (strcmp(subcmd, "CURSOR") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "CURSOR") == 0) {
         if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
@@ -1025,9 +1062,9 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                     if (next.type == KT_TOK_EQUALS) {
                         KTermToken val = KTerm_LexerNext(&lexer);
                         int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
-                        if (strcmp(key, "SKIP_PROTECT") == 0) {
+                        if (KTerm_Strcasecmp(key, "SKIP_PROTECT") == 0) {
                             target_session->skip_protect = (v != 0);
-                        } else if (strcmp(key, "HOME_MODE") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "HOME_MODE") == 0) {
                             if (val.type == KT_TOK_IDENTIFIER) {
                                 char valBuf[64];
                                 int vlen = val.length < 63 ? val.length : 63;
@@ -1048,7 +1085,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
         }
-    } else if (strcmp(subcmd, "ATTR") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "ATTR") == 0) {
         if (Stream_Expect(scanner, ';')) {
             // Revert to lexer for complex ATTR parsing
             KTermLexer lexer;
@@ -1088,7 +1125,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                         int r=0, g=0, b=0;
                         KTermToken lookahead = KTerm_LexerNext(&lexer);
 
-                        if ((strcmp(key, "UL") == 0 || strcmp(key, "ST") == 0) && lookahead.type == KT_TOK_COMMA) {
+                        if ((KTerm_Strcasecmp(key, "UL") == 0 || KTerm_Strcasecmp(key, "ST") == 0) && lookahead.type == KT_TOK_COMMA) {
                              r = v;
                              KTermToken tok_g = KTerm_LexerNext(&lexer);
                              if (tok_g.type == KT_TOK_NUMBER) g = tok_g.value.i;
@@ -1106,37 +1143,37 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                             else token = lookahead;
                         }
 
-                        if (strcmp(key, "BOLD") == 0) {
+                        if (KTerm_Strcasecmp(key, "BOLD") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_BOLD;
                             else target_session->current_attributes &= ~KTERM_ATTR_BOLD;
-                        } else if (strcmp(key, "DIM") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "DIM") == 0) {
                              if (v) target_session->current_attributes |= KTERM_ATTR_FAINT;
                              else target_session->current_attributes &= ~KTERM_ATTR_FAINT;
-                        } else if (strcmp(key, "ITALIC") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "ITALIC") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_ITALIC;
                             else target_session->current_attributes &= ~KTERM_ATTR_ITALIC;
-                        } else if (strcmp(key, "UNDERLINE") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "UNDERLINE") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_UNDERLINE;
                             else target_session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
-                        } else if (strcmp(key, "BLINK") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "BLINK") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_BLINK;
                             else target_session->current_attributes &= ~KTERM_ATTR_BLINK;
-                        } else if (strcmp(key, "REVERSE") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "REVERSE") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_REVERSE;
                             else target_session->current_attributes &= ~KTERM_ATTR_REVERSE;
-                        } else if (strcmp(key, "HIDDEN") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "HIDDEN") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_CONCEAL;
                             else target_session->current_attributes &= ~KTERM_ATTR_CONCEAL;
-                        } else if (strcmp(key, "STRIKE") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "STRIKE") == 0) {
                             if (v) target_session->current_attributes |= KTERM_ATTR_STRIKE;
                             else target_session->current_attributes &= ~KTERM_ATTR_STRIKE;
-                        } else if (strcmp(key, "FG") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "FG") == 0) {
                             target_session->current_fg.color_mode = 0;
                             target_session->current_fg.value.index = v & 0xFF;
-                        } else if (strcmp(key, "BG") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "BG") == 0) {
                             target_session->current_bg.color_mode = 0;
                             target_session->current_bg.value.index = v & 0xFF;
-                        } else if (strcmp(key, "UL") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "UL") == 0) {
                             if (is_rgb) {
                                 target_session->current_ul_color.color_mode = 1;
                                 target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
@@ -1147,7 +1184,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                                 target_session->current_ul_color.color_mode = 0;
                                 target_session->current_ul_color.value.index = v & 0xFF;
                             }
-                        } else if (strcmp(key, "ST") == 0) {
+                        } else if (KTerm_Strcasecmp(key, "ST") == 0) {
                             if (is_rgb) {
                                 target_session->current_st_color.color_mode = 1;
                                 target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
@@ -1164,7 +1201,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
         }
-    } else if (strcmp(subcmd, "KEYBOARD") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "KEYBOARD") == 0) {
         if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
@@ -1179,10 +1216,10 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                      if (next.type == KT_TOK_EQUALS) {
                          KTermToken val = KTerm_LexerNext(&lexer);
                          int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
-                         if (strcmp(key, "REPEAT_RATE") == 0) {
+                         if (KTerm_Strcasecmp(key, "REPEAT_RATE") == 0) {
                             if (v < 0) v = 0; if (v > 31) v = 31;
                             target_session->auto_repeat_rate = v;
-                         } else if (strcmp(key, "DELAY") == 0) {
+                         } else if (KTerm_Strcasecmp(key, "DELAY") == 0) {
                             if (v < 0) v = 0;
                             target_session->auto_repeat_delay = v;
                          }
@@ -1192,7 +1229,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
         }
-    } else if (strcmp(subcmd, "GRID") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "GRID") == 0) {
         if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
@@ -1211,10 +1248,10 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                             KTermToken val = KTerm_LexerNext(&lexer);
                             int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
                             if (v < 0) v = 0; if (v > 255) v = 255;
-                            if (strcmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
-                            else if (strcmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
-                            else if (strcmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
-                            else if (strcmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
+                            if (KTerm_Strcasecmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
+                            else if (KTerm_Strcasecmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
+                            else if (KTerm_Strcasecmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
+                            else if (KTerm_Strcasecmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
                             token = KTerm_LexerNext(&lexer);
                         } else token = next;
                     }
@@ -1222,14 +1259,14 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
         }
-    } else if (strcmp(subcmd, "CONCEAL") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "CONCEAL") == 0) {
         if (Stream_Expect(scanner, ';')) {
             int v;
             if (Stream_ReadInt(scanner, &v)) {
                 if (v >= 0) target_session->conceal_char_code = (uint32_t)v;
             }
         }
-    } else if (strcmp(subcmd, "SHADER") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SHADER") == 0) {
         if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
@@ -1247,14 +1284,14 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                         if (val.type == KT_TOK_NUMBER) v = val.value.f;
                         else v = strtof(val.start, NULL);
 
-                        if (strcmp(key, "CRT_CURVATURE") == 0) term->visual_effects.curvature = v;
-                        else if (strcmp(key, "SCANLINE_INTENSITY") == 0) term->visual_effects.scanline_intensity = v;
-                        else if (strcmp(key, "GLOW_INTENSITY") == 0) term->visual_effects.glow_intensity = v;
-                        else if (strcmp(key, "NOISE_INTENSITY") == 0) term->visual_effects.noise_intensity = v;
-                        else if (strcmp(key, "CRT_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_CRT; else term->visual_effects.flags &= ~SHADER_FLAG_CRT; }
-                        else if (strcmp(key, "SCANLINE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_SCANLINE; else term->visual_effects.flags &= ~SHADER_FLAG_SCANLINE; }
-                        else if (strcmp(key, "GLOW_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_GLOW; else term->visual_effects.flags &= ~SHADER_FLAG_GLOW; }
-                        else if (strcmp(key, "NOISE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_NOISE; else term->visual_effects.flags &= ~SHADER_FLAG_NOISE; }
+                        if (KTerm_Strcasecmp(key, "CRT_CURVATURE") == 0) term->visual_effects.curvature = v;
+                        else if (KTerm_Strcasecmp(key, "SCANLINE_INTENSITY") == 0) term->visual_effects.scanline_intensity = v;
+                        else if (KTerm_Strcasecmp(key, "GLOW_INTENSITY") == 0) term->visual_effects.glow_intensity = v;
+                        else if (KTerm_Strcasecmp(key, "NOISE_INTENSITY") == 0) term->visual_effects.noise_intensity = v;
+                        else if (KTerm_Strcasecmp(key, "CRT_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_CRT; else term->visual_effects.flags &= ~SHADER_FLAG_CRT; }
+                        else if (KTerm_Strcasecmp(key, "SCANLINE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_SCANLINE; else term->visual_effects.flags &= ~SHADER_FLAG_SCANLINE; }
+                        else if (KTerm_Strcasecmp(key, "GLOW_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_GLOW; else term->visual_effects.flags &= ~SHADER_FLAG_GLOW; }
+                        else if (KTerm_Strcasecmp(key, "NOISE_ENABLE") == 0) { if (v > 0.0f) term->visual_effects.flags |= SHADER_FLAG_NOISE; else term->visual_effects.flags &= ~SHADER_FLAG_NOISE; }
 
                         token = KTerm_LexerNext(&lexer);
                     } else token = next;
@@ -1262,7 +1299,7 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
         }
-    } else if (strcmp(subcmd, "BLINK") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "BLINK") == 0) {
          if (Stream_Expect(scanner, ';')) {
              KTermLexer lexer;
              KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
@@ -1278,9 +1315,9 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                          KTermToken val = KTerm_LexerNext(&lexer);
                          int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
                          if (v > 0) {
-                            if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
-                            else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
-                            else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
+                            if (KTerm_Strcasecmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
+                            else if (KTerm_Strcasecmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
+                            else if (KTerm_Strcasecmp(key, "BG") == 0) target_session->bg_blink_rate = v;
                          }
                          token = KTerm_LexerNext(&lexer);
                      } else token = next;
@@ -1311,34 +1348,34 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
                     }
              }
 
-             if (strcmp(param, "LEVEL") == 0) {
+             if (KTerm_Strcasecmp(param, "LEVEL") == 0) {
                     int level = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
-                    if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
+                    if (KTerm_Strcasecmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
                     KTerm_SetLevel(term, target_session, (VTLevel)level);
-             } else if (strcmp(param, "DEBUG") == 0) {
-                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+             } else if (KTerm_Strcasecmp(param, "DEBUG") == 0) {
+                    bool enable = (KTerm_Strcasecmp(val, "ON") == 0 || strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "TRUE") == 0);
                     KTerm_EnableDebug(term, enable);
-             } else if (strcmp(param, "OUTPUT") == 0) {
-                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+             } else if (KTerm_Strcasecmp(param, "OUTPUT") == 0) {
+                    bool enable = (KTerm_Strcasecmp(val, "ON") == 0 || strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "TRUE") == 0);
                     target_session->response_enabled = enable;
-             } else if (strcmp(param, "WIDE_CHARS") == 0) {
-                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+             } else if (KTerm_Strcasecmp(param, "WIDE_CHARS") == 0) {
+                    bool enable = (KTerm_Strcasecmp(val, "ON") == 0 || strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "TRUE") == 0);
                     target_session->enable_wide_chars = enable;
-             } else if (strcmp(param, "FONT") == 0) {
+             } else if (KTerm_Strcasecmp(param, "FONT") == 0) {
                     KTerm_SetFont(term, val);
-             } else if (strcmp(param, "WIDTH") == 0) {
+             } else if (KTerm_Strcasecmp(param, "WIDTH") == 0) {
                     int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     if (cols > 0) {
                         if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
                         KTerm_Resize(term, cols, term->height);
                     }
-             } else if (strcmp(param, "HEIGHT") == 0) {
+             } else if (KTerm_Strcasecmp(param, "HEIGHT") == 0) {
                     int rows = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     if (rows > 0) {
                         if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
                         KTerm_Resize(term, term->width, rows);
                     }
-             } else if (strcmp(param, "SIZE") == 0) {
+             } else if (KTerm_Strcasecmp(param, "SIZE") == 0) {
                     // Expecting second value: SIZE;W;H
                     // valTok is W.
                     int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
@@ -1382,7 +1419,7 @@ static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, cons
     // StreamScanner approach:
     char subcmd[64];
     if (Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) {
-         if (strcmp(subcmd, "BANNER") == 0) {
+         if (KTerm_Strcasecmp(subcmd, "BANNER") == 0) {
              if (Stream_Expect(scanner, ';')) {
                  BannerOptions options;
                  KTerm_ProcessBannerOptions(scanner->ptr + scanner->pos, &options);
@@ -1410,12 +1447,12 @@ static void KTerm_Gateway_HandleRawDump(KTerm* term, KTermSession* session, cons
     char* saveptr = NULL;
     char* token = KTerm_Strtok(buffer, ";", &saveptr);
     while (token) {
-        if (strcmp(token, "START") == 0) start = true;
-        else if (strcmp(token, "STOP") == 0) stop = true;
-        else if (strcmp(token, "TOGGLE") == 0) toggle = true;
-        else if (strncmp(token, "SESSION=", 8) == 0) {
+        if (KTerm_Strcasecmp(token, "START") == 0) start = true;
+        else if (KTerm_Strcasecmp(token, "STOP") == 0) stop = true;
+        else if (KTerm_Strcasecmp(token, "TOGGLE") == 0) toggle = true;
+        else if (KTerm_Strncasecmp(token, "SESSION=", 8) == 0) {
             target_id = atoi(token + 8);
-        } else if (strncmp(token, "FORCE_WOB=", 10) == 0) {
+        } else if (KTerm_Strncasecmp(token, "FORCE_WOB=", 10) == 0) {
             const char* v = token + 10;
             if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
             else force_wob = 0;
@@ -1473,16 +1510,16 @@ static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const c
     for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
 
     if (s_idx != -1) {
-        if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+        if (KTerm_Strcasecmp(subcmd, "REGIS_SESSION") == 0) {
              term->regis_target_session = s_idx;
              KTerm_InitReGIS(term, session);
-        } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+        } else if (KTerm_Strcasecmp(subcmd, "TEKTRONIX_SESSION") == 0) {
              term->tektronix_target_session = s_idx;
              KTerm_InitTektronix(term, session);
-        } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+        } else if (KTerm_Strcasecmp(subcmd, "KITTY_SESSION") == 0) {
              term->kitty_target_session = s_idx;
              KTerm_InitKitty(term, session);
-        } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+        } else if (KTerm_Strcasecmp(subcmd, "SIXEL_SESSION") == 0) {
              term->sixel_target_session = s_idx;
              KTerm_InitSixelGraphics(term, session);
         }
@@ -1494,41 +1531,41 @@ static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const 
     char subcmd[64];
     if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
 
-    if (strcmp(subcmd, "GRAPHICS") == 0 || strcmp(subcmd, "ALL_GRAPHICS") == 0) {
+    if (KTerm_Strcasecmp(subcmd, "GRAPHICS") == 0 || KTerm_Strcasecmp(subcmd, "ALL_GRAPHICS") == 0) {
         KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_ALL);
-    } else if (strcmp(subcmd, "KITTY") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "KITTY") == 0) {
         KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_KITTY);
-    } else if (strcmp(subcmd, "REGIS") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "REGIS") == 0) {
         KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_REGIS);
-    } else if (strcmp(subcmd, "TEK") == 0 || strcmp(subcmd, "TEKTRONIX") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "TEK") == 0 || KTerm_Strcasecmp(subcmd, "TEKTRONIX") == 0) {
         KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_TEK);
-    } else if (strcmp(subcmd, "SIXEL") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SIXEL") == 0) {
         KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_SIXEL);
-    } else if (strcmp(subcmd, "SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SESSION") == 0) {
          term->gateway_target_session = -1;
-    } else if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "REGIS_SESSION") == 0) {
          term->regis_target_session = -1;
-    } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "TEKTRONIX_SESSION") == 0) {
          term->tektronix_target_session = -1;
-    } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "KITTY_SESSION") == 0) {
          term->kitty_target_session = -1;
-    } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SIXEL_SESSION") == 0) {
          term->sixel_target_session = -1;
-    } else if (strcmp(subcmd, "ATTR") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "ATTR") == 0) {
          target_session->current_attributes = 0;
          target_session->current_fg.color_mode = 0;
          target_session->current_fg.value.index = COLOR_WHITE;
          target_session->current_bg.color_mode = 0;
          target_session->current_bg.value.index = COLOR_BLACK;
-    } else if (strcmp(subcmd, "BLINK") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "BLINK") == 0) {
          target_session->fast_blink_rate = 255;
          target_session->slow_blink_rate = 500;
          target_session->bg_blink_rate = 500;
-    } else if (strcmp(subcmd, "TABS") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "TABS") == 0) {
          if (Stream_Expect(scanner, ';')) {
              char opt[64];
              if (Stream_ReadIdentifier(scanner, opt, sizeof(opt))) {
-                 if (strcmp(opt, "DEFAULT8") == 0) {
+                 if (KTerm_Strcasecmp(opt, "DEFAULT8") == 0) {
                      KTerm_ClearAllTabStops(term);
                      for (int i = 8; i < term->width; i += 8) {
                          KTerm_SetTabStop(term, i);
@@ -1546,19 +1583,19 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
     char subcmd[64];
     if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
 
-    if (strcmp(subcmd, "LEVEL") == 0) {
+    if (KTerm_Strcasecmp(subcmd, "LEVEL") == 0) {
         char response[256];
         snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;LEVEL=%d\x1B\\", id, KTerm_GetLevel(term));
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "VERSION") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "VERSION") == 0) {
         char response[256];
         snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=%d.%d.%d\x1B\\", id, KTERM_VERSION_MAJOR, KTERM_VERSION_MINOR, KTERM_VERSION_PATCH);
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "OUTPUT") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "OUTPUT") == 0) {
         char response[256];
         snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, target_session->response_enabled ? 1 : 0);
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "FONTS") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "FONTS") == 0) {
          char response[4096];
          snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
          size_t current_len = strlen(response);
@@ -1581,7 +1618,7 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
              strcat(response, "\x1B\\");
          }
          KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "UNDERLINE_COLOR") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "UNDERLINE_COLOR") == 0) {
         char response[256];
         if (session->current_ul_color.color_mode == 1) {
             RGB_KTermColor c = session->current_ul_color.value.rgb;
@@ -1592,7 +1629,7 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d\x1B\\", id, session->current_ul_color.value.index);
         }
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "STRIKE_COLOR") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "STRIKE_COLOR") == 0) {
         char response[256];
         if (session->current_st_color.color_mode == 1) {
             RGB_KTermColor c = session->current_st_color.value.rgb;
@@ -1603,13 +1640,13 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
         }
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "SHADER") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "SHADER") == 0) {
         char response[512];
         snprintf(response, sizeof(response),
             "\x1BPGATE;KTERM;%s;REPORT;SHADER=CRT_CURVATURE:%f,SCANLINE_INTENSITY:%f,GLOW_INTENSITY:%f,NOISE_INTENSITY:%f,FLAGS:%u\x1B\\",
             id, term->visual_effects.curvature, term->visual_effects.scanline_intensity, term->visual_effects.glow_intensity, term->visual_effects.noise_intensity, term->visual_effects.flags);
         KTerm_QueueResponse(term, response);
-    } else if (strcmp(subcmd, "STATE") == 0) {
+    } else if (KTerm_Strcasecmp(subcmd, "STATE") == 0) {
         char response[1024];
         // Packed State: CURSOR:x,y|SCROLL:t,b|MODES:dec,ansi|ATTR:fg,bg,flags
         int cx = target_session->cursor.x + 1;
@@ -1644,7 +1681,7 @@ static void KTerm_Gateway_HandleExt(KTerm* term, KTermSession* session, const ch
 
     // Find extension
     for (int i = 0; i < term->gateway_extension_count; i++) {
-        if (strcmp(term->gateway_extensions[i].name, ext_name) == 0) {
+        if (KTerm_Strcasecmp(term->gateway_extensions[i].name, ext_name) == 0) {
             term->gateway_extensions[i].handler(term, session, id, args, KTerm_QueueSessionResponse);
             return;
         }
@@ -1705,11 +1742,11 @@ static void KTerm_Ext_Clipboard(KTerm* term, KTermSession* session, const char* 
     (void)term; (void)session; (void)id;
     // args: "set;text" or "get"
     if (!args) return;
-    if (strncmp(args, "set;", 4) == 0) {
+    if (KTerm_Strncasecmp(args, "set;", 4) == 0) {
         // Mock clipboard set
         // In real app, this calls platform clipboard API
         if (respond) respond(term, session, "OK");
-    } else if (strcmp(args, "get") == 0) {
+    } else if (KTerm_Strcasecmp(args, "get") == 0) {
         // Mock clipboard get
         if (respond) respond(term, session, "MOCK_CLIPBOARD_DATA");
     }
@@ -2030,7 +2067,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
     char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
-    if (strcmp(cmd, "connect") == 0) {
+    if (KTerm_Strcasecmp(cmd, "connect") == 0) {
         char* target = KTerm_Strtok(NULL, ";", &saveptr);
         char* password = KTerm_Strtok(NULL, ";", &saveptr); // Optional Password
 
@@ -2082,10 +2119,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
             if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (strcmp(cmd, "disconnect") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "disconnect") == 0) {
         KTerm_Net_Disconnect(term, session);
         if (respond) respond(term, session, "OK;DISCONNECTED");
-    } else if (strcmp(cmd, "status") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "status") == 0) {
         char status[64];
         KTerm_Net_GetStatus(term, session, status, sizeof(status));
         if (respond) {
@@ -2093,7 +2130,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             snprintf(msg, sizeof(msg), "OK;%s", status);
             respond(term, session, msg);
         }
-    } else if (strcmp(cmd, "ping") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "ping") == 0) {
         char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
              char output[1024];
@@ -2106,7 +2143,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
-    } else if (strcmp(cmd, "responsetime") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "responsetime") == 0) {
         char* host = NULL;
         int count = 10;
         int interval_sec = 1;
@@ -2114,10 +2151,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
-            else if (strncmp(arg, "count=", 6) == 0) count = atoi(arg+6);
-            else if (strncmp(arg, "interval=", 9) == 0) interval_sec = atoi(arg+9);
-            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            if (KTerm_Strncasecmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (KTerm_Strncasecmp(arg, "count=", 6) == 0) count = atoi(arg+6);
+            else if (KTerm_Strncasecmp(arg, "interval=", 9) == 0) interval_sec = atoi(arg+9);
+            else if (KTerm_Strncasecmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
             else if (!host) host = arg; // Fallback positional if not keyed
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
@@ -2140,11 +2177,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
-    } else if (strcmp(cmd, "myip") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "myip") == 0) {
         char ip[64];
         KTerm_Net_GetLocalIP(ip, sizeof(ip));
         if (respond) respond(term, session, ip);
-    } else if (strcmp(cmd, "traceroute") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "traceroute") == 0) {
         char* host = NULL;
         int max_hops = 30;
         int timeout_ms = 2000;
@@ -2152,10 +2189,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
-            else if (strncmp(arg, "maxhops=", 8) == 0) max_hops = atoi(arg+8);
-            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
-            else if (strncmp(arg, "continuous=", 11) == 0) continuous = (atoi(arg+11) != 0);
+            if (KTerm_Strncasecmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (KTerm_Strncasecmp(arg, "maxhops=", 8) == 0) max_hops = atoi(arg+8);
+            else if (KTerm_Strncasecmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            else if (KTerm_Strncasecmp(arg, "continuous=", 11) == 0) continuous = (atoi(arg+11) != 0);
             else if (!host) host = arg; // Fallback positional if not keyed
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
@@ -2172,7 +2209,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
-    } else if (strcmp(cmd, "dns") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "dns") == 0) {
         char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
             char ip[64];
@@ -2186,16 +2223,16 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
             if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
-    } else if (strcmp(cmd, "portscan") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "portscan") == 0) {
         char* host = NULL;
         char* ports = NULL;
         int timeout_ms = 1000;
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
-            else if (strncmp(arg, "ports=", 6) == 0) ports = arg + 6;
-            else if (strncmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
+            if (KTerm_Strncasecmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (KTerm_Strncasecmp(arg, "ports=", 6) == 0) ports = arg + 6;
+            else if (KTerm_Strncasecmp(arg, "timeout=", 8) == 0) timeout_ms = atoi(arg+8);
             else if (!host) host = arg; // 1st Positional
             else if (!ports) ports = arg; // 2nd Positional
             arg = KTerm_Strtok(NULL, ";", &saveptr);
@@ -2215,7 +2252,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_ARGS");
         }
-    } else if (strcmp(cmd, "whois") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "whois") == 0) {
         char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
              char* id_copy = (char*)malloc(strlen(id) + 1);
@@ -2232,7 +2269,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
-    } else if (strcmp(cmd, "speedtest") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "speedtest") == 0) {
         char* host = NULL;
         int port = 80;
         int streams = 4;
@@ -2241,11 +2278,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "host=", 5) == 0) host = arg + 5;
-            else if (strncmp(arg, "port=", 5) == 0) port = atoi(arg+5);
-            else if (strncmp(arg, "streams=", 8) == 0) streams = atoi(arg+8);
-            else if (strncmp(arg, "path=", 5) == 0) path = arg + 5;
-            else if (strncmp(arg, "graph=", 6) == 0) graph = atoi(arg+6);
+            if (KTerm_Strncasecmp(arg, "host=", 5) == 0) host = arg + 5;
+            else if (KTerm_Strncasecmp(arg, "port=", 5) == 0) port = atoi(arg+5);
+            else if (KTerm_Strncasecmp(arg, "streams=", 8) == 0) streams = atoi(arg+8);
+            else if (KTerm_Strncasecmp(arg, "path=", 5) == 0) path = arg + 5;
+            else if (KTerm_Strncasecmp(arg, "graph=", 6) == 0) graph = atoi(arg+6);
             else if (!host) host = arg; // 1st Positional
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
@@ -2266,7 +2303,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
                 free(id_copy);
             }
         }
-    } else if (strcmp(cmd, "connections") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "connections") == 0) {
         char list[4096];
         KTerm_Net_DumpConnections(term, list, sizeof(list));
         if (respond) {
@@ -2274,7 +2311,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
             snprintf(msg, sizeof(msg), "OK;%s", list);
             respond(term, session, msg);
         }
-    } else if (strcmp(cmd, "httpprobe") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "httpprobe") == 0) {
         char* url = KTerm_Strtok(NULL, ";", &saveptr);
         if (url) {
              char* id_copy = (char*)malloc(strlen(id) + 1);
@@ -2290,7 +2327,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_URL");
         }
-    } else if (strcmp(cmd, "mtu_probe") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "mtu_probe") == 0) {
         char* host = NULL;
         bool df = false;
         int start_size = 0;
@@ -2298,10 +2335,10 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
-            else if (strncmp(arg, "df=", 3) == 0) df = (atoi(arg+3) != 0);
-            else if (strncmp(arg, "start_size=", 11) == 0) start_size = atoi(arg+11);
-            else if (strncmp(arg, "max_size=", 9) == 0) max_size = atoi(arg+9);
+            if (KTerm_Strncasecmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (KTerm_Strncasecmp(arg, "df=", 3) == 0) df = (atoi(arg+3) != 0);
+            else if (KTerm_Strncasecmp(arg, "start_size=", 11) == 0) start_size = atoi(arg+11);
+            else if (KTerm_Strncasecmp(arg, "max_size=", 9) == 0) max_size = atoi(arg+9);
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
@@ -2319,16 +2356,16 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (strcmp(cmd, "frag_test") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "frag_test") == 0) {
         char* host = NULL;
         int size = 2000;
         int fragments = 2;
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
-            else if (strncmp(arg, "size=", 5) == 0) size = atoi(arg+5);
-            else if (strncmp(arg, "fragments=", 10) == 0) fragments = atoi(arg+10);
+            if (KTerm_Strncasecmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (KTerm_Strncasecmp(arg, "size=", 5) == 0) size = atoi(arg+5);
+            else if (KTerm_Strncasecmp(arg, "fragments=", 10) == 0) fragments = atoi(arg+10);
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
@@ -2346,7 +2383,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (strcmp(cmd, "ping_ext") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "ping_ext") == 0) {
         char* host = NULL;
         int count = 10;
         int interval = 200;
@@ -2355,11 +2392,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
         char* arg = KTerm_Strtok(NULL, ";", &saveptr);
         while(arg) {
-            if (strncmp(arg, "target=", 7) == 0) host = arg + 7;
-            else if (strncmp(arg, "count=", 6) == 0) count = atoi(arg+6);
-            else if (strncmp(arg, "interval=", 9) == 0) interval = (int)(atof(arg+9) * 1000);
-            else if (strncmp(arg, "size=", 5) == 0) size = atoi(arg+5);
-            else if (strncmp(arg, "graph=", 6) == 0) graph = (atoi(arg+6) != 0);
+            if (KTerm_Strncasecmp(arg, "target=", 7) == 0) host = arg + 7;
+            else if (KTerm_Strncasecmp(arg, "count=", 6) == 0) count = atoi(arg+6);
+            else if (KTerm_Strncasecmp(arg, "interval=", 9) == 0) interval = (int)(atof(arg+9) * 1000);
+            else if (KTerm_Strncasecmp(arg, "size=", 5) == 0) size = atoi(arg+5);
+            else if (KTerm_Strncasecmp(arg, "graph=", 6) == 0) graph = (atoi(arg+6) != 0);
             arg = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
@@ -2377,7 +2414,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (strcmp(cmd, "help") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "help") == 0) {
         const char* help =
             "OK;"
             "connect;[user@]host[:port]|"
@@ -2402,7 +2439,7 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 
 static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
     // Check for "cancel_diag" command first
-    if (args && strncmp(args, "cancel_diag", 11) == 0) {
+    if (args && KTerm_Strncasecmp(args, "cancel_diag", 11) == 0) {
 #ifndef KTERM_DISABLE_NET
         KTermNetSession* net = KTerm_Net_GetContext(session);
         if (net) {
@@ -2472,20 +2509,20 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
     char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
-    if (strcmp(cmd, "enable") == 0) {
+    if (KTerm_Strcasecmp(cmd, "enable") == 0) {
         char* val = KTerm_Strtok(NULL, ";", &saveptr);
         bool enable = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
         KTermSession* target = KTerm_GetTargetSession(term, session);
         KTerm_Voice_Enable(target, enable);
         if (respond) respond(term, session, enable ? "OK;ENABLED" : "OK;DISABLED");
-    } else if (strcmp(cmd, "target") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "target") == 0) {
         char* val = KTerm_Strtok(NULL, ";", &saveptr);
         if (val) {
              KTermSession* target = KTerm_GetTargetSession(term, session);
              KTerm_Voice_SetTarget(target, val);
              if (respond) respond(term, session, "OK;TARGET_SET");
         }
-    } else if (strcmp(cmd, "command") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "command") == 0) {
         // Remaining part is command text
         // But KTerm_Strtok might have messed up semicolons if command contains them.
         // Re-parse args to find command content.
@@ -2497,7 +2534,7 @@ static void KTerm_Ext_Voice(KTerm* term, KTermSession* session, const char* id, 
                  if (respond) respond(term, session, "OK;EXECUTED");
              }
         }
-    } else if (strcmp(cmd, "mute") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "mute") == 0) {
         char* val = KTerm_Strtok(NULL, ";", &saveptr);
         bool mute = (val && (strcmp(val, "1") == 0 || KTerm_Strcasecmp(val, "ON") == 0));
         KTerm_Voice_SetGlobalMute(mute);
@@ -2528,16 +2565,16 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
     char* cmd = KTerm_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
-    if (strcmp(cmd, "register") == 0) {
+    if (KTerm_Strcasecmp(cmd, "register") == 0) {
         char* user = NULL;
         char* pass = NULL;
         char* domain = NULL;
 
         char* token = KTerm_Strtok(NULL, ";", &saveptr);
         while (token) {
-            if (strncmp(token, "user=", 5) == 0) user = token + 5;
-            else if (strncmp(token, "pass=", 5) == 0) pass = token + 5;
-            else if (strncmp(token, "domain=", 7) == 0) domain = token + 7;
+            if (KTerm_Strncasecmp(token, "user=", 5) == 0) user = token + 5;
+            else if (KTerm_Strncasecmp(token, "pass=", 5) == 0) pass = token + 5;
+            else if (KTerm_Strncasecmp(token, "domain=", 7) == 0) domain = token + 7;
             token = KTerm_Strtok(NULL, ";", &saveptr);
         }
 
@@ -2547,7 +2584,7 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
         } else {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
         }
-    } else if (strcmp(cmd, "dial") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "dial") == 0) {
         char* target = KTerm_Strtok(NULL, ";", &saveptr);
         if (target) {
             KTerm_VoIP_Dial(target);
@@ -2555,13 +2592,13 @@ static void KTerm_Ext_Voip(KTerm* term, KTermSession* session, const char* id, c
         } else {
             if (respond) respond(term, session, "ERR;MISSING_TARGET");
         }
-    } else if (strcmp(cmd, "dtmf") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "dtmf") == 0) {
         char* digits = KTerm_Strtok(NULL, ";", &saveptr);
         if (digits) {
             KTerm_VoIP_DTMF(digits);
             if (respond) respond(term, session, "OK;DTMF_SENT");
         }
-    } else if (strcmp(cmd, "hangup") == 0) {
+    } else if (KTerm_Strcasecmp(cmd, "hangup") == 0) {
         KTerm_VoIP_Hangup();
         if (respond) respond(term, session, "OK;HANGUP");
     } else {
@@ -2587,12 +2624,12 @@ static void KTerm_Ext_RawDump(KTerm* term, KTermSession* session, const char* id
     char* saveptr = NULL;
     char* token = KTerm_Strtok(buffer, ";", &saveptr);
     while (token) {
-        if (strcmp(token, "START") == 0) start = true;
-        else if (strcmp(token, "STOP") == 0) stop = true;
-        else if (strcmp(token, "TOGGLE") == 0) toggle = true;
-        else if (strncmp(token, "SESSION=", 8) == 0) {
+        if (KTerm_Strcasecmp(token, "START") == 0) start = true;
+        else if (KTerm_Strcasecmp(token, "STOP") == 0) stop = true;
+        else if (KTerm_Strcasecmp(token, "TOGGLE") == 0) toggle = true;
+        else if (KTerm_Strncasecmp(token, "SESSION=", 8) == 0) {
             target_id = atoi(token + 8);
-        } else if (strncmp(token, "FORCE_WOB=", 10) == 0) {
+        } else if (KTerm_Strncasecmp(token, "FORCE_WOB=", 10) == 0) {
             const char* v = token + 10;
             if (strcmp(v, "1") == 0 || KTerm_Strcasecmp(v, "TRUE") == 0 || KTerm_Strcasecmp(v, "ON") == 0) force_wob = 1;
             else force_wob = 0;
@@ -2960,7 +2997,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
 
     int style_idx = -1;
     
-    if (strcmp(tokens[0], "fill") == 0) {
+    if (KTerm_Strcasecmp(tokens[0], "fill") == 0) {
         // Minimal args check reduced to allow optional trailing args if needed,
         // but style_idx is fixed offset.
         // fill;sid;x;y;w;h;mask... (index 6)
@@ -2969,28 +3006,28 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
             return;
         }
         style_idx = 6;
-    } else if (strcmp(tokens[0], "fill_circle") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "fill_circle") == 0) {
         // fill_circle;sid;cx;cy;r;mask... (index 5)
         if (count < 6) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 5;
-    } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "fill_line") == 0 || KTerm_Strcasecmp(tokens[0], "fill_span") == 0) {
         // fill_line;sid;sx;sy;dir;len;mask... (index 6)
         if (count < 7) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 6;
-    } else if (strcmp(tokens[0], "banner") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "banner") == 0) {
         // banner;sid;x;y;text;scale;mask... (index 6)
         if (count < 7) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
             return;
         }
         style_idx = 6;
-    } else if (strcmp(tokens[0], "stream") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "stream") == 0) {
         // stream;sid;x;y;w;h;mask;count;compress;data
         if (count < 10) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
@@ -2998,7 +3035,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
         }
         // stream handles mask differently (packed data), so style_idx logic below is skipped/custom
         style_idx = -1;
-    } else if (strcmp(tokens[0], "copy") == 0 || strcmp(tokens[0], "move") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "copy") == 0 || KTerm_Strcasecmp(tokens[0], "move") == 0) {
         // copy;sid;sx;sy;dx;dy;w;h;mode
         if (count < 9) {
             if (respond) respond(term, session, "ERR;MISSING_ARGS");
@@ -3044,7 +3081,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
     // Dispatch
     int cells_applied = 0;
 
-    if (strcmp(tokens[0], "fill") == 0) {
+    if (KTerm_Strcasecmp(tokens[0], "fill") == 0) {
         int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         int w = atoi(tokens[4]);
@@ -3057,13 +3094,13 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
         if (w == 0) w = 1; // Legacy behavior
         if (h == 0) h = 1; // Legacy behavior
         cells_applied = KTerm_QueueGridOp(target, x, y, w, h, &style);
-    } else if (strcmp(tokens[0], "fill_circle") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "fill_circle") == 0) {
         int cx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int cy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         int r = atoi(tokens[4]);
         if (r < 0) r = -r; // Absolute radius
         cells_applied = KTerm_Grid_FillCircle(target, cx, cy, r, &style);
-    } else if (strcmp(tokens[0], "fill_line") == 0 || strcmp(tokens[0], "fill_span") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "fill_line") == 0 || KTerm_Strcasecmp(tokens[0], "fill_span") == 0) {
         int sx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int sy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         char dir = tokens[4][0];
@@ -3084,7 +3121,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
             wrap = (atoi(tokens[13]) != 0);
         }
         cells_applied = KTerm_Grid_FillSpan(target, sx, sy, dir, len, wrap, &style);
-    } else if (strcmp(tokens[0], "banner") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "banner") == 0) {
         int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
         const char* text = tokens[4];
@@ -3098,7 +3135,7 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
             opt_count = count - 13;
         }
         cells_applied = KTerm_Grid_Banner(target, x, y, text, scale, &style, opts, opt_count);
-    } else if (strcmp(tokens[0], "copy") == 0 || strcmp(tokens[0], "move") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "copy") == 0 || KTerm_Strcasecmp(tokens[0], "move") == 0) {
         // copy;sid;src_x;src_y;dst_x;dst_y;w;h;mode
         int sx = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int sy = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
@@ -3108,14 +3145,14 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
         int h = atoi(tokens[7]);
         uint32_t mode = (uint32_t)strtoul(tokens[8], NULL, 0);
 
-        if (strcmp(tokens[0], "move") == 0) {
+        if (KTerm_Strcasecmp(tokens[0], "move") == 0) {
             mode |= 0x2; // Set Clear Source
         }
 
         KTermRect src = {sx, sy, w, h};
         KTerm_QueueCopyRectWithMode(target, src, dx, dy, mode);
         cells_applied = w * h;
-    } else if (strcmp(tokens[0], "stream") == 0) {
+    } else if (KTerm_Strcasecmp(tokens[0], "stream") == 0) {
         // stream;sid;x;y;w;h;mask;count;compress;data
         int x = KTerm_ParseGridCoord(term, target, tokens[2], target->cursor.x);
         int y = KTerm_ParseGridCoord(term, target, tokens[3], target->cursor.y);
@@ -3277,7 +3314,16 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
         goto call_user_callback;
     }
 
-    const GatewayCommand* cmd = (const GatewayCommand*)bsearch(command, gateway_commands, sizeof(gateway_commands)/sizeof(GatewayCommand), sizeof(GatewayCommand), GatewayCommandCmp);
+    // Normalize command to lowercase
+    char cmd_lower[64];
+    size_t cmd_len = strlen(command);
+    if (cmd_len >= sizeof(cmd_lower)) cmd_len = sizeof(cmd_lower) - 1;
+    for(size_t i=0; i<cmd_len; i++) {
+        cmd_lower[i] = (char)tolower((unsigned char)command[i]);
+    }
+    cmd_lower[cmd_len] = '\0';
+
+    const GatewayCommand* cmd = (const GatewayCommand*)bsearch(cmd_lower, gateway_commands, sizeof(gateway_commands)/sizeof(GatewayCommand), sizeof(GatewayCommand), GatewayCommandCmp);
 
     if (cmd) {
         StreamScanner scanner = { .ptr = params, .len = strlen(params), .pos = 0 };
