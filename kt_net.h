@@ -24,7 +24,7 @@ typedef struct KTermHttpProbeContext KTermHttpProbeContext;
 typedef struct KTermMtuProbeContext KTermMtuProbeContext;
 typedef struct KTermFragTestContext KTermFragTestContext;
 typedef struct KTermPingExtContext KTermPingExtContext;
-typedef struct KTermLiveWireContext KTermLiveWireContext;
+typedef struct KTermWireDiagContext KTermWireDiagContext;
 
 // Protocol Definition (Public for introspection)
 typedef struct {
@@ -36,6 +36,13 @@ typedef struct {
     const char *ansi_color;     // ANSI escape, e.g., ANSI_MAGENTA
     bool is_udp_preferred;      // true if typically UDP/multicast (for filtering/display priority)
     bool is_multicast;          // true if commonly multicast (e.g., Dante/PTP/mDNS)
+    bool supports_auth;
+    bool plaintext_auth;
+    bool supports_ntlm;
+    bool supports_kerberos;
+    bool high_bruteforce_risk;
+    bool high_relay_risk;
+    const char *auth_notes;
     const char *notes;          // Optional: "Multicast only", "Dynamic in some cases", etc.
 } KTermProtocolDef;
 
@@ -314,19 +321,23 @@ typedef void (*KTermPingExtCallback)(KTerm* term, KTermSession* session, const K
 // graph: Enable ASCII graph generation
 bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data);
 
-// Starts the LiveWire packet sniffer.
+// Starts the WireDiag packet sniffer.
 // params: Key-value pairs (interface, filter, snaplen, count, promisc, timeout)
-bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* params);
-void KTerm_Net_LiveWire_Stop(KTerm* term, KTermSession* session);
-void KTerm_Net_LiveWire_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
+bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* params);
+void KTerm_Net_WireDiag_Stop(KTerm* term, KTermSession* session);
+void KTerm_Net_WireDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len);
 
-void KTerm_Net_LiveWire_Pause(KTerm* term, KTermSession* session);
-void KTerm_Net_LiveWire_Resume(KTerm* term, KTermSession* session);
-bool KTerm_Net_LiveWire_SetFilter(KTerm* term, KTermSession* session, const char* filter);
-bool KTerm_Net_LiveWire_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
-bool KTerm_Net_LiveWire_Follow(KTerm* term, KTermSession* session, uint32_t flow_id);
-bool KTerm_Net_LiveWire_GetStats(KTerm* term, KTermSession* session, char* out, size_t max);
-bool KTerm_Net_LiveWire_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max);
+void KTerm_Net_WireDiag_Pause(KTerm* term, KTermSession* session);
+void KTerm_Net_WireDiag_Resume(KTerm* term, KTermSession* session);
+bool KTerm_Net_WireDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter);
+bool KTerm_Net_WireDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max);
+bool KTerm_Net_WireDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id);
+bool KTerm_Net_WireDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max);
+bool KTerm_Net_WireDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max);
+
+// Advanced Auth / Protocol Analysis
+const KTermProtocolDef* KTerm_Net_QueryProtocol(uint16_t port, bool is_udp);
+bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size_t max);
 
 // Cleanup Functions (Internal/Advanced use)
 void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx);
@@ -338,7 +349,7 @@ void KTerm_Net_FreeHttpProbe(KTermHttpProbeContext* ctx);
 void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx);
 void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx);
 void KTerm_Net_FreePingExt(KTermPingExtContext* ctx);
-void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx);
+void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx);
 
 #ifdef __cplusplus
 }
@@ -366,8 +377,8 @@ void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx);
 #include <pthread.h>
 #endif
 
-#ifdef KTERM_ENABLE_LIVEWIRE
-// Include pcap.h if LiveWire is enabled.
+#ifdef KTERM_ENABLE_WIREDIAG
+// Include pcap.h if WireDiag is enabled.
 // Use "deps/pcap.h" if bundled, otherwise assume system path.
 #ifdef KTERM_USE_BUNDLED_PCAP
     #include "deps/pcap.h"
@@ -417,7 +428,7 @@ void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx);
 static double KTerm_GetTime(void);
 static unsigned short KTerm_Checksum(void *b, int len);
 
-// ANSI Colors for Protocol ID and LiveWire
+// ANSI Colors for Protocol ID and WireDiag
 #define ANSI_RESET "\x1B[0m"
 #define ANSI_GRAY  "\x1B[90m"
 #define ANSI_RED   "\x1B[31m"
@@ -427,169 +438,54 @@ static unsigned short KTerm_Checksum(void *b, int len);
 #define ANSI_MAGENTA "\x1B[35m"
 #define ANSI_PURPLE "\x1B[35m" // Mapped to Magenta for standard ANSI
 #define ANSI_CYAN  "\x1B[36m"
+#define ANSI_WHITE "\x1B[37m"
 
 static const KTermProtocolDef kterm_protocols[] = {
     // ── Web / Modern ─────────────────────────────────────────────────────────────
-    { 80,    0,    "HTTP",      "Hypertext Transfer Protocol",               "Web",     ANSI_YELLOW,  false, false, NULL },
-    { 443,   0,    "HTTPS",     "HTTPS / HTTP/3 (QUIC)",                      "Web",     ANSI_YELLOW,  false, false, "TCP classic; UDP for QUIC/HTTP/3" },
-    { 8080,  0,    "HTTP-Alt",  "HTTP Alternate / Proxy",                     "Web",     ANSI_YELLOW,  false, false, "Dev/testing" },
-    { 8443,  0,    "HTTPS-Alt", "HTTPS Alternate",                            "Web",     ANSI_YELLOW,  false, false, NULL },
-    { 853,   0,    "DoT/DoQ",   "DNS over TLS / DNS over QUIC",               "Web",     ANSI_CYAN,    true,  false, "Secure/encrypted DNS" },
+    // port_s, port_e, short, full, cat, color, udp, mcast, [Auth, Plain, NTLM, Kerb, Brute, Relay, AuthNote], Note
+    { 80,    0,    "HTTP",      "Hypertext Transfer Protocol",               "Web",     ANSI_YELLOW,  false, false, true,  true,  true,  true,  false, true,  "Basic Auth / NTLM", NULL },
+    { 443,   0,    "HTTPS",     "HTTPS / HTTP/3 (QUIC)",                      "Web",     ANSI_YELLOW,  false, false, true,  false, false, false, false, false, NULL, "Encrypted web traffic" },
+    { 853,   0,    "DoT/DoQ",   "DNS over TLS / DNS over QUIC",               "Infra",   ANSI_CYAN,    true,  false, false, false, false, false, false, false, NULL, "Encrypted DNS" },
 
-    // ── Legacy / Obsolete Protocols (Pre-2000 Classics) ──────────────────────────
-    {    7,   0,   "Echo",        "Echo Service",                               "Legacy", ANSI_WHITE, true,  false, "TCP/UDP test echo" },
-    {   13,   0,   "Daytime",     "Daytime Protocol",                          "Legacy", ANSI_WHITE, true,  false, "Time string response" },
-    {   19,   0,   "Chargen",     "Character Generator",                       "Legacy", ANSI_WHITE, true,  false, "Random chars (DoS vector)" },
-    {   43,   0,   "Whois",       "NICNAME/WHOIS",                             "Legacy", ANSI_WHITE, false, false, "Domain queries" },
-    {   79,   0,   "Finger",      "Finger User Info",                           "Legacy", ANSI_WHITE, false, false, "User status (privacy risk)" },
-    {   70,   0,   "Gopher",      "Gopher Menu System",                         "Legacy", ANSI_WHITE, false, false, "Pre-Web hypertext" },
-    {  210,   0,   "WAIS",        "Wide Area Information Server",              "Legacy", ANSI_WHITE, false, false, "Search engine precursor" },
-    { 1525,   0,   "Prospero",    "Prospero Directory Service (Archie)",       "Legacy", ANSI_WHITE, false, false, "FTP index/search" },
-    {  512,   0,   "rexec",       "Remote Execution (r-services)",              "Legacy", ANSI_WHITE, false, false, "Insecure remote cmd" },
-    {  513,   0,   "rlogin",      "Rlogin Remote Login",                        "Legacy", ANSI_WHITE, false, false, "No auth remote shell" },
-    {  514,   0,   "rsh",         "Remote Shell (rcmd)",                        "Legacy", ANSI_WHITE, false, false, "Trust-based remote exec" },
-    {  119,   0,   "NNTP",        "Network News Transfer Protocol",            "Legacy", ANSI_WHITE, false, false, "Usenet news" },
-    { 179,   0,   "BGP",          "Border Gateway Protocol (early)",            "Legacy", ANSI_WHITE, false, false, "Routing (still used but old spec)" },
-
-    // ── File Transfer ────────────────────────────────────────────────────────────
-    { 20,    0,    "FTP-Data",  "File Transfer Protocol (Data)",               "File",    ANSI_YELLOW,  true,  false, "Active mode data; often dynamic in passive" },
-    { 21,    0,    "FTP",       "File Transfer Protocol (Control)",           "File",    ANSI_YELLOW,  false, false, "Commands/auth; RFC 959" },
-    { 69,    0,    "TFTP",      "Trivial File Transfer Protocol",             "File",    ANSI_YELLOW,  true,  false, "UDP only; boot/firmware/simple transfers" },
-    { 873,   0,    "rsync",     "rsync File Synchronization",                 "File",    ANSI_YELLOW,  false, false, "Efficient delta transfers; often over SSH" },
-    { 989,   0,    "FTPS-Data", "FTPS Protocol (Data over TLS/SSL)",           "File",    ANSI_YELLOW,  true,  false, "Implicit FTPS data; RFC 4217" },
-    { 990,   0,    "FTPS",      "FTPS Protocol (Control over TLS/SSL)",        "File",    ANSI_YELLOW,  false, false, "Implicit FTPS control; often 21 for explicit" },
-    {137,    0,    "NetBIOS-NS","NetBIOS Name Service (SMB discovery)",        "File",    ANSI_YELLOW,  true,  false, "Legacy SMB; UDP for name resolution" },
-    {138,    0,    "NetBIOS-DGM","NetBIOS Datagram (SMB legacy)",              "File",    ANSI_YELLOW,  true,  false, "Legacy SMB; UDP broadcast" },
-    {139,    0,    "NetBIOS-SSN","NetBIOS Session (SMB legacy)",               "File",    ANSI_YELLOW,  false, false, "Legacy SMB over TCP; pre-Win2000" },
-    { 445,   0,    "SMB",       "Server Message Block / CIFS",                 "File",    ANSI_YELLOW,  false, false, "Modern Windows file sharing; TCP primary" },
-    {2049,   0,    "NFS",       "Network File System",                        "File",    ANSI_YELLOW,  true,  false, "Unix/Linux shares; TCP/UDP" },
-    {6881, 6999,  "BitTorrent", "BitTorrent Peer-to-Peer (main range)",       "File",    ANSI_YELLOW,  true,  false, "P2P file distribution; dynamic often" },
-    { 80,    0,    "WebDAV",    "WebDAV over HTTP",                           "File",    ANSI_YELLOW,  false, false, "HTTP-based file access; often 80/443" },
-    { 443,   0,    "WebDAVS",   "WebDAV over HTTPS",                          "File",    ANSI_YELLOW,  false, false, "Secure WebDAV; common in cloud storage" },
-    { 22,    0,    "SFTP/SCP",  "SSH File Transfer Protocol / Secure Copy",   "File",    ANSI_YELLOW,  false, false, "Secure over SSH; port 22" },
-
-    // ── Email ────────────────────────────────────────────────────────────────────
-    { 25,    0,    "SMTP",      "Simple Mail Transfer Protocol",              "Mail",    ANSI_YELLOW,  false, false, NULL },
-    { 465,   0,    "SMTPS",     "SMTP over TLS (implicit)",                   "Mail",    ANSI_YELLOW,  false, false, "Preferred secure submission" },
-    { 587,   0,    "SMTP-Sub",  "SMTP Submission (STARTTLS)",                 "Mail",    ANSI_YELLOW,  false, false, NULL },
-    { 110,   0,    "POP3",      "Post Office Protocol v3",                    "Mail",    ANSI_YELLOW,  false, false, NULL },
-    { 995,   0,    "POP3S",     "POP3 Secure",                                "Mail",    ANSI_YELLOW,  false, false, NULL },
-    { 143,   0,    "IMAP",      "Internet Message Access Protocol",           "Mail",    ANSI_YELLOW,  false, false, NULL },
-    { 993,   0,    "IMAPS",     "IMAP Secure",                                "Mail",    ANSI_YELLOW,  false, false, NULL },
-
-    // ── Remote Access ────────────────────────────────────────────────────────────
-    { 22,    0,    "SSH",       "Secure Shell (Secure Login / Tunnels)",       "Remote",  ANSI_RED,     false, false, "Encrypted; also SFTP/SCP/X11 forwarding" },
-    { 23,    0,    "Telnet",    "Telnet (Unencrypted Remote Login)",           "Remote",  ANSI_RED,     false, false, "Insecure—avoid over Internet; plaintext" },
-    {1494,   0,    "Citrix-ICA","Citrix Independent Computing Architecture",   "Remote",  ANSI_RED,     false, false, "Legacy Citrix; often 2598 for Session Reliability" },
-    {3389,   0,    "RDP",       "Remote Desktop Protocol (Microsoft)",         "Remote",  ANSI_RED,     false, false, "TCP primary + UDP for acceleration; frequently targeted" },
-    {5631,   0,    "pcAnywhere", "Symantec pcAnywhere (Legacy)",               "Remote",  ANSI_RED,     true,  false, "Old remote control; TCP/UDP" },
-    {5800,5900,"VNC-HTTP",     "VNC HTTP Viewer (Web-based)",                  "Remote",  ANSI_RED,     false, false, "Browser access to VNC; often 5800 + display offset" },
-    {5900,   0,    "VNC",       "Virtual Network Computing (RFB)",              "Remote",  ANSI_RED,     false, false, "Default; +display offset (e.g., 5901 for display :1)" },
-    {5938,   0,    "TeamViewer", "TeamViewer (Primary Port)",                   "Remote",  ANSI_RED,     true,  false, "Outbound preferred; fallback 80/443; proprietary" },
-    {6568,   0,    "AnyDesk",    "AnyDesk (Primary Port)",                      "Remote",  ANSI_RED,     true,  false, "Outbound; fallback 80/443/7070; proprietary" },
-    {7070,   0,    "AnyDesk-Alt","AnyDesk Alternate / Discovery",               "Remote",  ANSI_RED,     false, false, "Fallback port" },
-    { 443,   0,    "RDP-GW",     "RDP over HTTPS (RD Gateway / Web Access)",    "Remote",  ANSI_RED,     false, false, "Secure RDP tunneling; also TeamViewer/AnyDesk fallback" },
+    // ── File Transfer & Sharing ──────────────────────────────────────────────────
+    { 21,    0,    "FTP",       "File Transfer Protocol (Control)",           "File",    ANSI_YELLOW,  false, false, true,  true,  false, true,  true,  false, "Plaintext credentials", "Plain FTP control" },
+    { 20,    0,    "FTP-Data",  "FTP Data",                                   "File",    ANSI_YELLOW,  true,  false, false, false, false, false, false, false, NULL, "Active mode data" },
+    { 69,    0,    "TFTP",      "Trivial File Transfer Protocol",             "File",    ANSI_YELLOW,  true,  false, false, false, false, false, false, false, NULL, "UDP boot/simple transfers" },
+    { 873,   0,    "rsync",     "rsync File Synchronization",                 "File",    ANSI_YELLOW,  false, false, true,  false, false, false, true,  false, "Weak auth often", "Delta transfers" },
+    { 22,    0,    "SFTP/SCP",  "SSH File Transfer / Secure Copy",            "File",    ANSI_YELLOW,  false, false, true,  false, false, false, true,  false, "Uses SSH Auth", "Secure file transfer over SSH" },
+    { 445,   0,    "SMB",       "Server Message Block",                       "File",    ANSI_YELLOW,  false, false, true,  false, true,  true,  true,  true,  "Relay Risk", "Modern file sharing" },
+    {2049,   0,    "NFS",       "Network File System",                        "File",    ANSI_YELLOW,  true,  false, true,  false, false, true,  false, false, "IP-based / Kerberos", "Unix/Linux shares" },
 
     // ── Infrastructure / Discovery ───────────────────────────────────────────────
-    { 53,    0,    "DNS",       "Domain Name System",                         "Infra",   ANSI_CYAN,    true,  false, "UDP primary" },
-    { 67,    0,    "DHCP-S",    "DHCP Server",                                "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 68,    0,    "DHCP-C",    "DHCP Client",                                "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 123,   0,    "NTP",       "Network Time Protocol",                      "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 161,   0,    "SNMP",      "Simple Network Management Protocol",         "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 162,   0,    "SNMP-Trap", "SNMP Trap",                                  "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 514,   0,    "Syslog",    "System Logging Protocol",                    "Infra",   ANSI_CYAN,    true,  false, NULL },
-    { 5353,  0,    "mDNS",      "Multicast DNS / Bonjour",                    "Infra",   ANSI_CYAN,    true,  true,  "224.0.0.251 multicast" },
+    { 53,    0,    "DNS",       "Domain Name System",                         "Infra",   ANSI_CYAN,    true,  false, false, false, false, false, false, false, NULL, "UDP primary" },
+    { 67,    0,    "DHCP-S",    "DHCP Server",                                "Infra",   ANSI_CYAN,    true,  false, false, false, false, false, false, false, NULL, NULL },
+    { 68,    0,    "DHCP-C",    "DHCP Client",                                "Infra",   ANSI_CYAN,    true,  false, false, false, false, false, false, false, NULL, NULL },
+    { 123,   0,    "NTP",       "Network Time Protocol",                      "Infra",   ANSI_CYAN,    true,  false, true,  false, false, false, false, false, "Auth Optional", NULL },
+    { 161,   0,    "SNMP",      "Simple Network Management Protocol",         "Infra",   ANSI_CYAN,    true,  false, true,  true,  false, false, true,  false, "Community String (v1/2c)", NULL },
+    { 162,   0,    "SNMP-Trap", "SNMP Trap",                                  "Infra",   ANSI_CYAN,    true,  false, false, false, false, false, false, false, NULL, NULL },
+    { 514,   0,    "Syslog",    "System Logging Protocol",                    "Infra",   ANSI_CYAN,    true,  false, false, true,  false, false, false, false, NULL, NULL },
+    { 5353,  0,    "mDNS",      "Multicast DNS",                               "Infra",   ANSI_CYAN,    true,  true,  false, false, false, false, false, false, NULL,  "Local discovery" },
 
-    // ── VPN / Tunneling ──────────────────────────────────────────────────────────
-    { 500,   0,    "IKE",       "Internet Key Exchange (IPsec)",              "VPN",     ANSI_RED,     true,  false, NULL },
-    { 4500,  0,    "IPsec-NAT", "IPsec NAT Traversal",                        "VPN",     ANSI_RED,     true,  false, NULL },
-    { 1194,  0,    "OpenVPN",   "OpenVPN",                                    "VPN",     ANSI_RED,     true,  false, NULL },
-    { 1701,  0,    "L2TP",      "Layer 2 Tunneling Protocol",                 "VPN",     ANSI_RED,     true,  false, NULL },
+    // ── Remote Access (Secure only) ──────────────────────────────────────────────
+    // Note: SSH duplicates port 22, but useful for category distinction if scanning specifically for remote access
+    { 22,    0,    "SSH",       "Secure Shell",                               "Remote",  ANSI_RED,     false, false, true,  false, false, false, true,  false, "Encrypted remote access", "Encrypted remote access" },
+    { 23,    0,    "Telnet",    "Telnet (Unencrypted Remote Login)",           "Remote",  ANSI_RED,     false, false, true,  true,  false, false, true,  false, "Plaintext credentials — NEVER use over Internet", "Insecure—avoid over Internet; plaintext" },
 
-    // ── Databases ────────────────────────────────────────────────────────────────
-    { 1433,  0,    "MSSQL",     "Microsoft SQL Server",                       "DB",      ANSI_GREEN,   false, false, NULL },
-    { 3306,  0,    "MySQL",     "MySQL / MariaDB",                            "DB",      ANSI_GREEN,   false, false, NULL },
-    { 5432,  0,    "PostgreSQL","PostgreSQL",                                 "DB",      ANSI_GREEN,   false, false, NULL },
-    { 27017, 0,    "MongoDB",   "MongoDB",                                    "DB",      ANSI_GREEN,   false, false, NULL },
-    { 6379,  0,    "Redis",     "Redis Key-Value Store",                      "DB",      ANSI_GREEN,   false, false, NULL },
-    { 9042,  0,    "Cassandra", "Apache Cassandra CQL",                       "DB",      ANSI_GREEN,   false, false, NULL },
-    { 9200,  0,    "Elasticsearch","Elasticsearch HTTP",                      "DB",      ANSI_GREEN,   false, false, NULL },
-
-    // ── Media / AV / Dante / AES67 / VoIP ────────────────────────────────────────
-    { 319,   0,    "PTP-Evt",   "PTP Event (IEEE 1588 v1/v2)",                 "Media",   ANSI_CYAN,    true,  true,  "Multicast 224.0.1.129-132; DSCP CS7(56)/EF(46)" },
-    { 320,   0,    "PTP-Gen",   "PTP General (IEEE 1588 v1/v2)",               "Media",   ANSI_CYAN,    true,  true,  "Clock sync critical for Dante/AES67" },
-    { 4321,  0,    "Dante-M",   "Dante Multicast Audio/Video",                 "Media",   ANSI_MAGENTA, true,  true,  "Multicast 239.255.0.0/16; DSCP EF(46)" },
-    {14336,14600,"Dante-U",    "Dante Unicast Audio/Video",                   "Media",   ANSI_MAGENTA, true,  false, "Dynamic range; often 14336-14591" },
-    {34336,34600,"Dante-Via",  "Dante Via Unicast Audio",                     "Media",   ANSI_MAGENTA, true,  false, "Dante Via specific range" },
-    { 4440,  0,    "Dante-Ctrl", "Dante Audio Control (unicast)",              "Media",   ANSI_MAGENTA, true,  false, "Internal routing/control" },
-    { 4444,  0,    "Dante-Ctrl", "Dante Audio Control (unicast)",              "Media",   ANSI_MAGENTA, true,  false, NULL },
-    { 4455,  0,    "Dante-Ctrl", "Dante Audio Control (unicast)",              "Media",   ANSI_MAGENTA, true,  false, NULL },
-    { 8700, 8708,"Dante-MC",   "Dante Multicast Control/Monitoring",           "Media",   ANSI_MAGENTA, true,  true,  "Multicast 224.0.0.230-233" },
-    { 8751,  0,    "Dante-Meter","Dante Controller Metering",                  "Media",   ANSI_MAGENTA, true,  false, "Unicast metering data" },
-    { 8800,  0,    "Dante-C&M", "Dante Control & Monitoring (unicast)",        "Media",   ANSI_MAGENTA, true,  false, NULL },
-    { 5004,  0,    "AES67-RTP", "AES67 / RTP Audio (Multicast/Unicast)",       "Media",   ANSI_MAGENTA, true,  true,  "AES67 multicast 239.69.0.0/16; DSCP AF41(34)/EF(46)" },
-    { 5005,  0,    "AES67-RTCP","AES67 RTCP Control",                          "Media",   ANSI_MAGENTA, true,  false, "Usually RTP+1" },
-    { 9875,  0,    "AES67-SAP", "AES67 Session Announcement Protocol",         "Media",   ANSI_MAGENTA, true,  true,  "Discovery multicast 239.255.255.255" },
-    { 554,   0,    "RTSP",      "Real Time Streaming Protocol (management)",   "Media",   ANSI_MAGENTA, false, false, "Session setup; Ravenna often uses" },
-    { 5060,  0,    "SIP",       "Session Initiation Protocol (VoIP)",          "VoIP",    ANSI_MAGENTA, false, false, "UDP/TCP signaling" },
-    { 5061,  0,    "SIPS",      "SIP Secure (TLS)",                            "VoIP",    ANSI_MAGENTA, false, false, NULL },
-    { 1720,  0,    "H.323",     "H.323 Signaling (VoIP legacy)",               "VoIP",    ANSI_MAGENTA, false, false, "TCP call setup; dynamic RTP" },
-    { 2427,  0,    "MGCP-GW",   "Media Gateway Control Protocol",              "VoIP",    ANSI_MAGENTA, true,  false, "UDP gateway control" },
-    {16384,32768,"RTP-Dyn",    "Dynamic RTP/RTCP (VoIP/Audio)",               "Media",   ANSI_MAGENTA, true,  false, "Common VoIP RTP range (e.g., SIP calls)" },
-    { 6454,  0,    "Art-Net",   "Art-Net Lighting Control",                    "Media",   ANSI_MAGENTA, true,  false, "UDP broadcast/unicast DMX" },
-    { 5568,  0,    "sACN-E1.31","Streaming ACN (E1.31) Lighting",              "Media",   ANSI_MAGENTA, true,  true,  "Multicast DMX over IP" },
-
-    // ── IoT / Messaging ──────────────────────────────────────────────────────────
-    { 1883,  0,    "MQTT",      "MQTT",                                       "IoT",     ANSI_YELLOW,  false, false, NULL },
-    { 8883,  0,    "MQTTS",     "MQTT Secure",                                "IoT",     ANSI_YELLOW,  false, false, NULL },
-    { 5683,  0,    "CoAP",      "Constrained Application Protocol",           "IoT",     ANSI_YELLOW,  true,  false, "Lightweight IoT" },
-
-    // ── Gaming (Modern + Platforms) ──────────────────────────────────────────────
-    { 27015, 27050, "Steam",      "Steam Multiplayer / Servers / P2P",         "Gaming", ANSI_BLUE,  true,  false, "Core Steam traffic; GoldSrc/Source engine (CS, HL)" },
-    {27000, 27250, "Steam-Game",  "Steam Game Sessions (UDP heavy)",           "Gaming", ANSI_BLUE,  true,  false, "Downloads, matchmaking" },
-    {27031, 27036, "Steam-Play",  "Steam Remote Play / In-Home Streaming",     "Gaming", ANSI_BLUE,  true,  false, "UDP local/remote" },
-    { 3074,   0,   "Xbox-Live",  "Xbox Live / Games for Windows Live",       "Gaming", ANSI_BLUE, true,  false, "TCP/UDP core for multiplayer" },
-    { 3478, 3480,  "STUN/PSN",    "STUN/TURN NAT Traversal (PSN, Xbox)",       "Gaming", ANSI_BLUE,  true,  false, "PlayStation Network" },
-    { 5000, 5500,  "LoL-Client",  "League of Legends Game Client",             "Gaming", ANSI_BLUE,  true,  false, "UDP primary" },
-    { 2099,   0,   "LoL-PVP",     "League PVP.net",                            "Gaming", ANSI_BLUE,  false, false, "TCP patching" },
-    {5222, 5223,  "LoL-Match",    "League Matchmaking",                        "Gaming", ANSI_BLUE,  false, false, NULL },
-    { 7000, 8000,  "Valorant",    "Valorant Game Client",                      "Gaming", ANSI_BLUE,  true,  false, "UDP; +8180-8181" },
-    {1024, 1124,  "Valorant-VC",  "Valorant Voice Chat",                       "Gaming", ANSI_BLUE,  false, false, "TCP range" },
-    {37000,40000, "Apex-Legends", "Apex Legends Multiplayer",                 "Gaming", ANSI_BLUE,  true,  false, "UDP heavy; TCP 9960-9969,3216" },
-    { 7777, 7780,  "PUBG/Epic",    "PUBG / Epic Gamesports",                   "Gaming", ANSI_BLUE,  true,  false, "UDP; TCP 27015-27030" },
-    {5222, 5847,  "Fortnite",     "Fortnite (Epic XMPP/Voice)",                "Gaming", ANSI_BLUE,  true,  false, "UDP 5795-5847 voice" },
-    { 25565,  0,   "Minecraft",  "Minecraft Java/Bedrock Server",            "Gaming", ANSI_BLUE, false, false, "TCP primary, UDP optional" },
-    { 3724,   0,   "WoW/Blizz",  "World of Warcraft / Blizzard Games",       "Gaming", ANSI_BLUE, true,  false, "TCP/UDP for many Blizzard titles" },
-    { 1119,   0,   "WoW/Overwatch","World of Warcraft / Overwatch Login",      "Gaming", ANSI_BLUE,  true,  false, "Blizzard; +3724,6112-6119" },
-    {49152,65535, "Roblox-Dyn",   "Roblox P2P / Voice",                        "Gaming", ANSI_BLUE,  true,  false, "Dynamic high ports" },
-
-    // ── Gaming (Classic / Old Games) ─────────────────────────────────────────────
-    {26000,  0,    "Quake",       "Quake / QuakeWorld Server",                 "Gaming", ANSI_BLUE,  true,  false, "Classic FPS; UDP" },
-    {27500,  0,    "Quake-Master","Quake Master Server Query",                "Gaming", ANSI_BLUE,  true,  false, "UDP client queries" },
-    {27900,  0,    "Quake2/UT",   "Quake II / Unreal Tournament Master",       "Gaming", ANSI_BLUE,  true,  false, "UDP; UT game 7777-7779" },
-    { 7777, 7779,  "UT-Quake3",   "Unreal Tournament / Quake III Game Ports",  "Gaming", ANSI_BLUE,  true,  false, "UDP multiplayer" },
-    {27000,27015, "HL-CS-TFC",    "Half-Life / CS 1.6 / Team Fortress Classic","Gaming", ANSI_BLUE,  true,  false, "GoldSrc engine UDP" },
-    { 6112,  0,    "Doom/Blizz",  "Doom TCP/IP Mods / Battle.net Legacy",      "Gaming", ANSI_BLUE,  true,  false, "Classic multiplayer" },
-
-    // ── Messaging / Chat ─────────────────────────────────────────────────────────
-    { 443,    0,   "Discord",    "Discord (HTTPS + Voice/Chat)",             "Messaging", ANSI_PURPLE, true, false, "TCP/UDP; voice often 50000–65535 UDP" },
-    {50000,65535,"Discord-Voice","Discord Voice RTP/UDP",                   "Messaging", ANSI_PURPLE, true, false, "Dynamic high ports for audio" },
-    { 443,    0,   "Slack",      "Slack (WebSocket/HTTPS)",                  "Messaging", ANSI_PURPLE, false, false, "Primary for team chat" },
-    {5222, 5228,  "WhatsApp",    "WhatsApp (XMPP-based client)",             "Messaging", ANSI_PURPLE, false, false, "TCP; encrypted messaging" },
-    { 443,    0,   "Signal",     "Signal (HTTPS fallback)",                  "Messaging", ANSI_PURPLE, true,  false, "No fixed port; often 443 TCP/UDP" },
-    { 443,    0,   "Telegram",   "Telegram (MTProto over HTTPS)",            "Messaging", ANSI_PURPLE, true,  false, "TCP/UDP; voice calls dynamic" },
-    { 5222,   0,   "XMPP/Jabber","XMPP Client Connection (Jabber)",          "Messaging", ANSI_PURPLE, false, false, "Standard for many federated chats" },
-    { 5269,   0,   "XMPP-S2S",   "XMPP Server-to-Server",                    "Messaging", ANSI_PURPLE, false, false, "Federation port" },
-    { 8448,   0,   "Matrix-Fed", "Matrix Federation (HTTPS)",                "Messaging", ANSI_PURPLE, false, false, "Server-to-server" },
-    { 5222,   0,   "Matrix-Clnt", "Matrix Client-Server (often 5222-like)", "Messaging", ANSI_PURPLE, false, false, "Synapse default or 8008/8448" },
-    { 6667,   0,   "IRC",        "Internet Relay Chat (classic)",            "Messaging", ANSI_PURPLE, false, false, "Plaintext IRC" },
-    { 6697,   0,   "IRC-TLS",    "IRC over TLS",                              "Messaging", ANSI_PURPLE, false, false, "Secure IRC" },
-
-    // ── Low Priority / Broad Ranges ──────────────────────────────────────────────
-    {49152,65535,  "Roblox-Dyn","Roblox Dynamic Ports (P2P/Voice)",          "Gaming", ANSI_BLUE, true,  false, "High ephemeral range" },
+    // ── Media / AV / Dante / AES67 / RTP ─────────────────────────────────────────
+    { 319,   0,    "PTP-Evt",   "PTP Event (IEEE 1588)",                      "Media",   ANSI_CYAN,    true,  true,  false, false, false, false, false, false, NULL,  "Clock sync (multicast)" },
+    { 320,   0,    "PTP-Gen",   "PTP General (IEEE 1588)",                    "Media",   ANSI_CYAN,    true,  true,  false, false, false, false, false, false, NULL,  "Clock sync" },
+    { 4321,  0,    "Dante-M",   "Multicast Audio Flow",                       "Media",   ANSI_MAGENTA, true,  true,  false, false, false, false, false, false, NULL,  "Multicast audio" },
+    {14336,14600,"Dante-U",    "Unicast Audio Flow",                         "Media",   ANSI_MAGENTA, true,  false, false, false, false, false, false, false, NULL, "Unicast audio range" },
+    { 5004,  0,    "RTP",       "Real-time Transport Protocol",               "Media",   ANSI_MAGENTA, true,  true,  false, false, false, false, false, false, NULL,  "Audio/video RTP" },
+    { 5005,  0,    "RTCP",      "RTP Control Protocol",                       "Media",   ANSI_MAGENTA, true,  false, false, false, false, false, false, false, NULL, "RTP control" },
+    { 554,   0,    "RTSP",      "Real Time Streaming Protocol",               "Media",   ANSI_MAGENTA, false, false, true,  true,  false, false, true,  false, "Digest/Basic", "Streaming control" },
+    { 5060,  0,    "SIP",       "Session Initiation Protocol",                "Media",   ANSI_MAGENTA, false, false, true,  true,  false, false, true,  false, "Digest Auth", "VoIP signaling" },
+    { 5061,  0,    "SIPS",      "SIP Secure",                                 "Media",   ANSI_MAGENTA, false, false, true,  false, false, false, true,  false, NULL, "Encrypted SIP" },
+    { 6454,  0,    "Art-Net",   "Art-Net Lighting Control",                   "Media",   ANSI_MAGENTA, true,  false, false, false, false, false, false, false, NULL, "DMX lighting" },
+    { 5568,  0,    "sACN",      "Streaming ACN (E1.31)",                      "Media",   ANSI_MAGENTA, true,  true,  false, false, false, false, false, false, NULL,  "DMX over IP multicast" },
 
     // Sentinel (must be last)
-    { 0,     0,    NULL,        NULL,                                         NULL,      NULL,         false, false, NULL }
+    { 0,     0,    NULL,        NULL,                                         NULL,      NULL,         false, false, false, false, false, false, false, false, NULL, NULL }
 };
 
 static const KTermProtocolDef* KTerm_Net_IdentifyProtocol(uint16_t port, bool is_udp) {
@@ -613,12 +509,22 @@ static const KTermProtocolDef* KTerm_Net_IdentifyProtocol(uint16_t port, bool is
                     best_match = &kterm_protocols[i];
                 } else if (kterm_protocols[i].is_udp_preferred == is_udp) {
                     // Both exact, prefer matching transport
-                    best_match = &kterm_protocols[i];
+                    // Only overwrite if previous match did NOT match transport preference
+                    if (best_match->is_udp_preferred != is_udp) {
+                        best_match = &kterm_protocols[i];
+                    }
                 }
             } else {
                 // Range match. Keep looking for exact match.
                 if (!best_match) {
                     best_match = &kterm_protocols[i];
+                } else if (best_match->port_end > 0) {
+                    // Both are ranges. Prefer the smaller range (more specific).
+                    int curr_len = best_match->port_end - best_match->port_start;
+                    int new_len = kterm_protocols[i].port_end - kterm_protocols[i].port_start;
+                    if (new_len < curr_len) {
+                         best_match = &kterm_protocols[i];
+                    }
                 }
             }
         }
@@ -643,7 +549,7 @@ struct KTermHttpProbeContext;
 struct KTermMtuProbeContext;
 struct KTermFragTestContext;
 struct KTermPingExtContext;
-struct KTermLiveWireContext;
+struct KTermWireDiagContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -727,7 +633,7 @@ typedef struct {
     struct KTermMtuProbeContext* mtu_probe;
     struct KTermFragTestContext* frag_test;
     struct KTermPingExtContext* ping_ext;
-    struct KTermLiveWireContext* livewire;
+    struct KTermWireDiagContext* wirediag;
 
     int target_session_index;
 
@@ -1004,7 +910,7 @@ typedef struct {
     uint16_t src_port;
     uint16_t dst_port;
     uint8_t proto;
-} LiveWireFlowKey;
+} WireDiagFlowKey;
 
 typedef struct {
     uint32_t seq;
@@ -1013,7 +919,7 @@ typedef struct {
     // Buffer for reassembly
     char buffer[4096];
     int buf_len;
-} LiveWireStream;
+} WireDiagStream;
 
 typedef struct {
     uint64_t packets;
@@ -1025,20 +931,26 @@ typedef struct {
     // Protocol specific
     bool is_rtp;
     uint32_t ssrc;
-} LiveWireFlowStats;
+} WireDiagFlowStats;
 
-typedef struct LiveWireFlow {
-    LiveWireFlowKey key;
-    LiveWireStream stream;
-    LiveWireFlowStats stats;
-    struct LiveWireFlow* next; // Chaining for hash collisions
+typedef struct WireDiagFlow {
+    WireDiagFlowKey key;
+    WireDiagStream stream;
+    WireDiagFlowStats stats;
+    struct WireDiagFlow* next; // Chaining for hash collisions
     uint32_t id; // Unique ID for referencing
-} LiveWireFlow;
 
-typedef struct KTermLiveWireContext {
+    // Auth Tracking
+    bool auth_detected;
+    char auth_proto[16];
+    char auth_user[64];
+    bool auth_risk;
+} WireDiagFlow;
+
+typedef struct KTermWireDiagContext {
     void* pcap_handle; // void* to avoid pcap dependency in header if possible, but we included pcap.h in impl
     // Actually this struct is in IMPLEMENTATION block, so we can use pcap_t if included
-#ifdef KTERM_ENABLE_LIVEWIRE
+#ifdef KTERM_ENABLE_WIREDIAG
     pcap_t* handle;
 #else
     void* handle;
@@ -1080,7 +992,7 @@ typedef struct KTermLiveWireContext {
     int ring_count; // Total packets processed (redundant with captured_count but used for relative index)
 
     // Flow Tracking & Stats
-    struct LiveWireFlow* flow_table[256]; // Hash table
+    struct WireDiagFlow* flow_table[256]; // Hash table
     uint32_t next_flow_id;
     uint32_t follow_flow_id; // 0 = None
 
@@ -1097,7 +1009,7 @@ typedef struct KTermLiveWireContext {
     KTerm* term;
     int session_index;
 
-} KTermLiveWireContext;
+} KTermWireDiagContext;
 
 // --- Helper Functions ---
 
@@ -1213,7 +1125,7 @@ void KTerm_Net_FreePingExt(KTermPingExtContext* ctx) {
     free(ctx);
 }
 
-void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx) {
+void KTerm_Net_FreeWireDiag(KTermWireDiagContext* ctx) {
     if (!ctx) return;
     if (ctx->running) {
         // Should have been stopped, but just in case
@@ -1223,9 +1135,9 @@ void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx) {
 
     // Cleanup Flows
     for (int i = 0; i < 256; i++) {
-        LiveWireFlow* flow = ctx->flow_table[i];
+        WireDiagFlow* flow = ctx->flow_table[i];
         while (flow) {
-            LiveWireFlow* next = flow->next;
+            WireDiagFlow* next = flow->next;
             free(flow);
             flow = next;
         }
@@ -1249,10 +1161,10 @@ static void KTerm_Net_DestroyContext(KTermSession* session) {
     if (net->mtu_probe) { KTerm_Net_FreeMtuProbe(net->mtu_probe); net->mtu_probe = NULL; }
     if (net->frag_test) { KTerm_Net_FreeFragTest(net->frag_test); net->frag_test = NULL; }
     if (net->ping_ext) { KTerm_Net_FreePingExt(net->ping_ext); net->ping_ext = NULL; }
-    if (net->livewire) {
-        KTerm_Net_LiveWire_Stop(NULL, session); // Stop if active
-        KTerm_Net_FreeLiveWire(net->livewire);
-        net->livewire = NULL;
+    if (net->wirediag) {
+        KTerm_Net_WireDiag_Stop(NULL, session); // Stop if active
+        KTerm_Net_FreeWireDiag(net->wirediag);
+        net->wirediag = NULL;
     }
 
     if (net->security.close) {
@@ -2918,11 +2830,11 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         KTerm_Net_ProcessPingExt(term, session);
     }
 
-#ifdef KTERM_ENABLE_LIVEWIRE
-    // Process LiveWire
-    if (net && net->livewire) {
-        void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session); // Forward
-        KTerm_Net_ProcessLiveWire(term, session);
+#ifdef KTERM_ENABLE_WIREDIAG
+    // Process WireDiag
+    if (net && net->wirediag) {
+        void KTerm_Net_ProcessWireDiag(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessWireDiag(term, session);
     }
 #endif
 
@@ -3714,18 +3626,18 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     return true;
 }
 
-bool KTerm_Net_LiveWire_Follow(KTerm* term, KTermSession* session, uint32_t flow_id) {
+bool KTerm_Net_WireDiag_Follow(KTerm* term, KTermSession* session, uint32_t flow_id) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return false;
-    net->livewire->follow_flow_id = flow_id;
+    if (!net || !net->wirediag) return false;
+    net->wirediag->follow_flow_id = flow_id;
     return true;
 }
 
-bool KTerm_Net_LiveWire_GetStats(KTerm* term, KTermSession* session, char* out, size_t max) {
+bool KTerm_Net_WireDiag_GetStats(KTerm* term, KTermSession* session, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return false;
-    KTermLiveWireContext* ctx = net->livewire;
+    if (!net || !net->wirediag) return false;
+    KTermWireDiagContext* ctx = net->wirediag;
 
     snprintf(out, max, "PKTS=%llu;BYTES=%llu;TCP=%llu;UDP=%llu;ICMP=%llu;OTHER=%llu",
         (unsigned long long)ctx->stats.total_packets,
@@ -3737,11 +3649,11 @@ bool KTerm_Net_LiveWire_GetStats(KTerm* term, KTermSession* session, char* out, 
     return true;
 }
 
-bool KTerm_Net_LiveWire_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
+bool KTerm_Net_WireDiag_GetFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return false;
-    KTermLiveWireContext* ctx = net->livewire;
+    if (!net || !net->wirediag) return false;
+    KTermWireDiagContext* ctx = net->wirediag;
 
     out[0] = '\0';
     size_t offset = 0;
@@ -3754,7 +3666,7 @@ bool KTerm_Net_LiveWire_GetFlows(KTerm* term, KTermSession* session, char* out, 
 #endif
 
     for (int i = 0; i < 256; i++) {
-        LiveWireFlow* flow = ctx->flow_table[i];
+        WireDiagFlow* flow = ctx->flow_table[i];
         while (flow) {
             char src[16], dst[16];
             struct in_addr sa = { .s_addr = flow->key.src_ip };
@@ -4319,11 +4231,60 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
     return true;
 }
 
-// --- LiveWire Implementation ---
+// --- WireDiag Implementation ---
 
-#ifdef KTERM_ENABLE_LIVEWIRE
+#ifdef KTERM_ENABLE_WIREDIAG
 
-static const char* LiveWire_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp, const char** color_out) {
+// --- Heuristics & Auth Detection ---
+
+static void* KTerm_Memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len) {
+    if (haystack_len < needle_len || !needle_len || !haystack_len) return NULL;
+    const char* h = (const char*)haystack;
+    const char* n = (const char*)needle;
+    for (size_t i = 0; i <= haystack_len - needle_len; i++) {
+        if (memcmp(h + i, n, needle_len) == 0) return (void*)(h + i);
+    }
+    return NULL;
+}
+
+typedef struct {
+    const char* sig;
+    const char* proto;
+    bool is_risk;
+} KTermAuthSig;
+
+static const KTermAuthSig kterm_auth_sigs[] = {
+    { "SSH-", "SSH", false },
+    { "NTLMSSP", "NTLM", true },
+    { "KRB5", "Kerberos", false }, // Rough signature
+    { "Basic ", "HTTP-Basic", true }, // Cleartext!
+    { "Authorization: Basic", "HTTP-Basic", true },
+    { "user ", "FTP/Pop3", true }, // Generic cleartext user command
+    { "pass ", "FTP/Pop3", true },
+    { "USER ", "FTP/Pop3", true },
+    { "PASS ", "FTP/Pop3", true },
+    { "Action: Login", "AMI", true }, // Asterisk Manager
+    { "RTSP/1.0 401 Unauthorized", "RTSP", false },
+    { "SIP/2.0 401 Unauthorized", "SIP", false },
+    { NULL, NULL, false }
+};
+
+static bool KTerm_Net_ScanPayloadForAuth(const unsigned char* payload, int len, char* out_proto, char* out_user, bool* out_risk) {
+    if (!payload || len < 4) return false;
+
+    for (int i = 0; kterm_auth_sigs[i].sig != NULL; i++) {
+        if (KTerm_Memmem(payload, len, kterm_auth_sigs[i].sig, strlen(kterm_auth_sigs[i].sig))) {
+            if (out_proto) strcpy(out_proto, kterm_auth_sigs[i].proto);
+            if (out_risk) *out_risk = kterm_auth_sigs[i].is_risk;
+            // Attempt to grab user? (Too complex for simple heuristic, just flag it)
+            if (out_user) out_user[0] = '\0';
+            return true;
+        }
+    }
+    return false;
+}
+
+static const KTermProtocolDef* WireDiag_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp) {
     const KTermProtocolDef* p_src = KTerm_Net_IdentifyProtocol(src_port, is_udp);
     const KTermProtocolDef* p_dst = KTerm_Net_IdentifyProtocol(dst_port, is_udp);
     const KTermProtocolDef* p = NULL;
@@ -4349,14 +4310,10 @@ static const char* LiveWire_IdentifyProtocol(uint16_t src_port, uint16_t dst_por
         }
     }
 
-    if (p) {
-        if (color_out) *color_out = p->ansi_color;
-        return p->short_name;
-    }
-    return NULL;
+    return p;
 }
 
-static void LiveWire_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
+static void WireDiag_ParseRTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 12) return;
     int version = (data[0] >> 6) & 0x03;
     if (version != 2) return;
@@ -4367,7 +4324,7 @@ static void LiveWire_ParseRTP(const unsigned char* data, int len, char* out, int
     snprintf(out, max_len, " RTP v2 PT=%d Seq=%d TS=%u SSRC=0x%X", pt, seq, ts, ssrc);
 }
 
-static void LiveWire_ParsePTP(const unsigned char* data, int len, char* out, int max_len) {
+static void WireDiag_ParsePTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 34) return;
     int msgType = data[0] & 0x0F;
     int ver = data[1] & 0x0F;
@@ -4389,7 +4346,7 @@ static void LiveWire_ParsePTP(const unsigned char* data, int len, char* out, int
     snprintf(out, max_len, " PTPv%d %s Seq=%d Dom=%d", ver, typeStr, seq, domain);
 }
 
-static void LiveWire_ParseDNS(const unsigned char* data, int len, char* out, int max_len) {
+static void WireDiag_ParseDNS(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 12) return;
     int qr = (data[2] >> 7) & 0x01;
     int qdcount = (data[4] << 8) | data[5];
@@ -4418,7 +4375,7 @@ static void LiveWire_ParseDNS(const unsigned char* data, int len, char* out, int
     }
 }
 
-static void LiveWire_ParseHTTP(const unsigned char* data, int len, char* out, int max_len) {
+static void WireDiag_ParseHTTP(const unsigned char* data, int len, char* out, int max_len) {
     if (len < 10) return;
     char prefix[16];
     int copy_len = (len < 15) ? len : 15;
@@ -4454,7 +4411,7 @@ static void LiveWire_ParseHTTP(const unsigned char* data, int len, char* out, in
     }
 }
 
-static void LiveWire_WriteToBuffer(KTermLiveWireContext* ctx, const char* fmt, ...) {
+static void WireDiag_WriteToBuffer(KTermWireDiagContext* ctx, const char* fmt, ...) {
     char buf[1024];
     va_list args;
     va_start(args, fmt);
@@ -4480,8 +4437,8 @@ static void LiveWire_WriteToBuffer(KTermLiveWireContext* ctx, const char* fmt, .
 #endif
 }
 
-static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *pkt) {
-    KTermLiveWireContext* ctx = (KTermLiveWireContext*)user;
+static void WireDiag_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *pkt) {
+    KTermWireDiagContext* ctx = (KTermWireDiagContext*)user;
     if (!ctx || !ctx->running) return;
     if (ctx->paused) return;
 
@@ -4598,12 +4555,21 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
             if (flags & 0x04) strcat(flag_str, "RST ");
             if (flags & 0x08) strcat(flag_str, "PSH ");
 
-            const char* pname = NULL;
-            const char* pcolor = NULL;
-            pname = LiveWire_IdentifyProtocol(sport, dport, false, &pcolor);
+            const KTermProtocolDef* pdef = WireDiag_IdentifyProtocol(sport, dport, false);
 
-            if (pname) {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s[%s]%s %s", ANSI_GREEN, ANSI_RESET, sport, dport, pcolor, pname, ANSI_RESET, flag_str);
+            if (pdef) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s[%s]%s %s",
+                                ANSI_GREEN, ANSI_RESET, sport, dport, pdef->ansi_color, pdef->short_name, ANSI_RESET, flag_str);
+
+                if (pdef->supports_auth) {
+                    if (pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[33m[Auth]\x1B[0m");
+                    if (pdef->plaintext_auth && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[PLAIN]\x1B[0m");
+                    if (pdef->high_bruteforce_risk && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[BRUTE]\x1B[0m");
+                    if (pdef->high_relay_risk && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[RELAY]\x1B[0m");
+                    if (pdef->auth_notes && *pdef->auth_notes && pos < sizeof(out)) {
+                        pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[90m(%s)\x1B[0m", pdef->auth_notes);
+                    }
+                }
             } else {
                 pos += snprintf(out + pos, sizeof(out) - pos, "%sTCP%s %d\xE2\x86\x92%d %s", ANSI_GREEN, ANSI_RESET, sport, dport, flag_str);
             }
@@ -4618,11 +4584,12 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 flow_payload_len = payload_len;
             }
 
+            const char* pname = pdef ? pdef->short_name : NULL;
             if ((pname && (strcmp(pname, "HTTP") == 0 || strcmp(pname, "HTTPS") == 0)) || sport == 80 || dport == 80 || sport == 8080 || dport == 8080) {
                 // Parse HTTP
                 if (payload_len > 0) {
                     char http_info[256] = "";
-                    LiveWire_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
+                    WireDiag_ParseHTTP(payload, payload_len, http_info, sizeof(http_info));
                     if (http_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, http_info, ANSI_RESET);
                 }
             }
@@ -4647,35 +4614,45 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                 flow_payload_len = payload_len;
             }
 
-            const char* pname = NULL;
-            const char* pcolor = NULL;
-            pname = LiveWire_IdentifyProtocol(sport, dport, true, &pcolor);
+            const KTermProtocolDef* pdef = WireDiag_IdentifyProtocol(sport, dport, true);
 
-            if (pname) {
-                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[%s]%s", ANSI_CYAN, ANSI_RESET, sport, dport, pcolor, pname, ANSI_RESET);
+            if (pdef) {
+                pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d %s[%s]%s", ANSI_CYAN, ANSI_RESET, sport, dport, pdef->ansi_color, pdef->short_name, ANSI_RESET);
+
+                if (pdef->supports_auth) {
+                    if (pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[33m[Auth]\x1B[0m");
+                    if (pdef->plaintext_auth && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[PLAIN]\x1B[0m");
+                    if (pdef->high_bruteforce_risk && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[BRUTE]\x1B[0m");
+                    if (pdef->high_relay_risk && pos < sizeof(out)) pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[31m[RELAY]\x1B[0m");
+                    if (pdef->auth_notes && *pdef->auth_notes && pos < sizeof(out)) {
+                        pos += snprintf(out + pos, sizeof(out) - pos, " \x1B[90m(%s)\x1B[0m", pdef->auth_notes);
+                    }
+                }
             } else {
                 pos += snprintf(out + pos, sizeof(out) - pos, "%sUDP%s %d\xE2\x86\x92%d Len=%d", ANSI_CYAN, ANSI_RESET, sport, dport, len);
             }
+
+            const char* pname = pdef ? pdef->short_name : NULL;
 
             // Parsing Logic
             if ((pname && (strstr(pname, "Dante") || strstr(pname, "RTP"))) || dport == 4321 || sport == 4321) {
                 if (payload_len > 0) {
                     char rtp_info[256] = "";
-                    LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                    WireDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
                     if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_MAGENTA, rtp_info, ANSI_RESET);
                 }
             }
             else if ((pname && strstr(pname, "PTP")) || dport == 319 || dport == 320 || sport == 319 || sport == 320) {
                 if (payload_len > 0) {
                     char ptp_info[256] = "";
-                    LiveWire_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
+                    WireDiag_ParsePTP(payload, payload_len, ptp_info, sizeof(ptp_info));
                     if (ptp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_CYAN, ptp_info, ANSI_RESET);
                 }
             }
             else if ((pname && (strcmp(pname, "DNS") == 0 || strcmp(pname, "mDNS") == 0)) || dport == 53 || sport == 53) {
                 if (payload_len > 0) {
                     char dns_info[256] = "";
-                    LiveWire_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
+                    WireDiag_ParseDNS(payload, payload_len, dns_info, sizeof(dns_info));
                     if (dns_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s%s", ANSI_YELLOW, dns_info, ANSI_RESET);
                 }
             }
@@ -4685,7 +4662,7 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
                      // Maybe RTP? Check PT < 128?
                      if ((payload[1] & 0x7F) < 128) {
                          char rtp_info[256] = "";
-                         LiveWire_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
+                         WireDiag_ParseRTP(payload, payload_len, rtp_info, sizeof(rtp_info));
                          if (rtp_info[0]) pos += snprintf(out + pos, sizeof(out) - pos, "%s%s?%s", ANSI_GRAY, rtp_info, ANSI_RESET);
                      }
                 }
@@ -4698,7 +4675,7 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     }
 
     // Update Stats & Flows
-    LiveWireFlowKey key = {0};
+    WireDiagFlowKey key = {0};
     bool has_key = false;
     char stream_out_buf[512] = {0};
 
@@ -4729,13 +4706,13 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
     // Update Flow
     if (has_key) {
         uint8_t hash = (key.src_ip ^ key.dst_ip ^ key.src_port ^ key.dst_port ^ key.proto) & 0xFF;
-        LiveWireFlow* flow = ctx->flow_table[hash];
+        WireDiagFlow* flow = ctx->flow_table[hash];
         while (flow) {
             if (memcmp(&flow->key, &key, sizeof(key)) == 0) break;
             flow = flow->next;
         }
         if (!flow && ctx->next_flow_id < 1024) {
-            flow = (LiveWireFlow*)calloc(1, sizeof(LiveWireFlow));
+            flow = (WireDiagFlow*)calloc(1, sizeof(WireDiagFlow));
             if (flow) {
                 flow->key = key;
                 flow->id = ++ctx->next_flow_id;
@@ -4747,6 +4724,13 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
         if (flow) {
             flow->stats.packets++;
             flow->stats.bytes += pkthdr->len;
+
+            // Deep Inspection for Auth
+            if (!flow->auth_detected && flow_payload && flow_payload_len > 0) {
+                 if (KTerm_Net_ScanPayloadForAuth(flow_payload, flow_payload_len, flow->auth_proto, flow->auth_user, &flow->auth_risk)) {
+                     flow->auth_detected = true;
+                 }
+            }
 
             // Jitter calc (Inter-Arrival Variance)
             double now = (double)pkthdr->ts.tv_sec + (double)pkthdr->ts.tv_usec / 1000000.0;
@@ -4792,37 +4776,37 @@ static void LiveWire_PacketHandler(u_char *user, const struct pcap_pkthdr *pkthd
 #endif
 
     if (stream_out_buf[0]) {
-        LiveWire_WriteToBuffer(ctx, "%s", stream_out_buf);
+        WireDiag_WriteToBuffer(ctx, "%s", stream_out_buf);
     }
 
     pos += snprintf(out + pos, sizeof(out) - pos, "\r\n");
 
     // Output
-    LiveWire_WriteToBuffer(ctx, "%s", out);
+    WireDiag_WriteToBuffer(ctx, "%s", out);
 }
 
 #ifndef _WIN32
-static void* LiveWire_Thread(void* arg) {
+static void* WireDiag_Thread(void* arg) {
 #else
-static DWORD WINAPI LiveWire_Thread(LPVOID arg) {
+static DWORD WINAPI WireDiag_Thread(LPVOID arg) {
 #endif
-    KTermLiveWireContext* ctx = (KTermLiveWireContext*)arg;
+    KTermWireDiagContext* ctx = (KTermWireDiagContext*)arg;
     if (!ctx) return 0;
 
-    pcap_loop(ctx->handle, ctx->count > 0 ? ctx->count : -1, LiveWire_PacketHandler, (u_char*)ctx);
+    pcap_loop(ctx->handle, ctx->count > 0 ? ctx->count : -1, WireDiag_PacketHandler, (u_char*)ctx);
 
     ctx->running = false;
 
     // Notify stopped
-    LiveWire_WriteToBuffer(ctx, "%s[LiveWire] Stopped.%s\r\n", ANSI_YELLOW, ANSI_RESET);
+    WireDiag_WriteToBuffer(ctx, "%s[WireDiag] Stopped.%s\r\n", ANSI_YELLOW, ANSI_RESET);
 
     return 0;
 }
 
-void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session) {
+void KTerm_Net_ProcessWireDiag(KTerm* term, KTermSession* session) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return;
-    KTermLiveWireContext* ctx = net->livewire;
+    if (!net || !net->wirediag) return;
+    KTermWireDiagContext* ctx = net->wirediag;
 
 #ifndef _WIN32
     pthread_mutex_lock(&ctx->mutex);
@@ -4863,11 +4847,11 @@ void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session) {
     }
 }
 
-#endif // KTERM_ENABLE_LIVEWIRE
+#endif // KTERM_ENABLE_WIREDIAG
 
-bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* params) {
-#ifndef KTERM_ENABLE_LIVEWIRE
-    KTerm_Net_Log(term, (int)(session - term->sessions), "LiveWire not enabled in build.");
+bool KTerm_Net_WireDiag_Start(KTerm* term, KTermSession* session, const char* params) {
+#ifndef KTERM_ENABLE_WIREDIAG
+    KTerm_Net_Log(term, (int)(session - term->sessions), "WireDiag not enabled in build.");
     return false;
 #else
     if (!term || !session) return false;
@@ -4876,10 +4860,10 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
     if (!net) net = KTerm_Net_CreateContext(session);
 
     // Stop if already running
-    if (net->livewire) KTerm_Net_LiveWire_Stop(term, session);
+    if (net->wirediag) KTerm_Net_WireDiag_Stop(term, session);
 
-    net->livewire = (KTermLiveWireContext*)calloc(1, sizeof(KTermLiveWireContext));
-    KTermLiveWireContext* ctx = net->livewire;
+    net->wirediag = (KTermWireDiagContext*)calloc(1, sizeof(KTermWireDiagContext));
+    KTermWireDiagContext* ctx = net->wirediag;
 
     ctx->term = term;
     ctx->session_index = (int)(session - term->sessions);
@@ -4945,7 +4929,7 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
         pcap_if_t* alldevs;
         if (pcap_findalldevs(&alldevs, errbuf) == -1) {
             KTerm_Net_Log(term, ctx->session_index, "Failed to find devices");
-            free(ctx); net->livewire = NULL;
+            free(ctx); net->wirediag = NULL;
             return false;
         }
         if (alldevs) {
@@ -4954,7 +4938,7 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
             pcap_freealldevs(alldevs);
         } else {
             KTerm_Net_Log(term, ctx->session_index, "No devices found");
-            free(ctx); net->livewire = NULL;
+            free(ctx); net->wirediag = NULL;
             return false;
         }
     }
@@ -4970,7 +4954,7 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
 #else
         DeleteCriticalSection(&ctx->mutex);
 #endif
-        free(ctx); net->livewire = NULL;
+        free(ctx); net->wirediag = NULL;
         return false;
     }
 
@@ -4985,7 +4969,7 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
 #else
             DeleteCriticalSection(&ctx->mutex);
 #endif
-            free(ctx); net->livewire = NULL;
+            free(ctx); net->wirediag = NULL;
             return false;
         }
         if (pcap_setfilter(ctx->handle, &fp) == -1) {
@@ -4996,7 +4980,7 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
 #else
             DeleteCriticalSection(&ctx->mutex);
 #endif
-            free(ctx); net->livewire = NULL;
+            free(ctx); net->wirediag = NULL;
             return false;
         }
     }
@@ -5005,35 +4989,35 @@ bool KTerm_Net_LiveWire_Start(KTerm* term, KTermSession* session, const char* pa
 
     // Spawn Thread
 #ifndef _WIN32
-    if (pthread_create(&ctx->thread, NULL, LiveWire_Thread, ctx) != 0) {
+    if (pthread_create(&ctx->thread, NULL, WireDiag_Thread, ctx) != 0) {
         KTerm_Net_Log(term, ctx->session_index, "Failed to create thread");
         pcap_close(ctx->handle);
         pthread_mutex_destroy(&ctx->mutex);
-        free(ctx); net->livewire = NULL;
+        free(ctx); net->wirediag = NULL;
         return false;
     }
 #else
-    ctx->thread = CreateThread(NULL, 0, LiveWire_Thread, ctx, 0, NULL);
+    ctx->thread = CreateThread(NULL, 0, WireDiag_Thread, ctx, 0, NULL);
     if (ctx->thread == NULL) {
         KTerm_Net_Log(term, ctx->session_index, "Failed to create thread");
         pcap_close(ctx->handle);
         DeleteCriticalSection(&ctx->mutex);
-        free(ctx); net->livewire = NULL;
+        free(ctx); net->wirediag = NULL;
         return false;
     }
 #endif
 
-    LiveWire_WriteToBuffer(ctx, "%s[LiveWire] Started on %s%s\r\n", ANSI_GREEN, iface, ANSI_RESET);
+    WireDiag_WriteToBuffer(ctx, "%s[WireDiag] Started on %s%s\r\n", ANSI_GREEN, iface, ANSI_RESET);
     return true;
 #endif
 }
 
-void KTerm_Net_LiveWire_Stop(KTerm* term, KTermSession* session) {
-#ifdef KTERM_ENABLE_LIVEWIRE
+void KTerm_Net_WireDiag_Stop(KTerm* term, KTermSession* session) {
+#ifdef KTERM_ENABLE_WIREDIAG
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->livewire) {
-        KTermLiveWireContext* ctx = net->livewire;
+    if (net && net->wirediag) {
+        KTermWireDiagContext* ctx = net->wirediag;
         if (ctx->running && ctx->handle) {
             pcap_breakloop(ctx->handle);
             // Join thread
@@ -5055,18 +5039,18 @@ void KTerm_Net_LiveWire_Stop(KTerm* term, KTermSession* session) {
 #endif
 }
 
-void KTerm_Net_LiveWire_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len) {
-#ifdef KTERM_ENABLE_LIVEWIRE
+void KTerm_Net_WireDiag_GetStatus(KTerm* term, KTermSession* session, char* buffer, size_t max_len) {
+#ifdef KTERM_ENABLE_WIREDIAG
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->livewire) {
+    if (net && net->wirediag) {
         const char* warn = "";
 #ifdef _WIN32
         warn = ";WARN=WIN_RESTRICTED";
 #endif
         snprintf(buffer, max_len, "RUNNING;CAPTURED=%d%s%s",
-                 net->livewire->captured_count,
-                 net->livewire->paused ? ";PAUSED" : "",
+                 net->wirediag->captured_count,
+                 net->wirediag->paused ? ";PAUSED" : "",
                  warn);
     } else {
         snprintf(buffer, max_len, "STOPPED");
@@ -5076,41 +5060,41 @@ void KTerm_Net_LiveWire_GetStatus(KTerm* term, KTermSession* session, char* buff
 #endif
 }
 
-void KTerm_Net_LiveWire_Pause(KTerm* term, KTermSession* session) {
+void KTerm_Net_WireDiag_Pause(KTerm* term, KTermSession* session) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->livewire) {
-        net->livewire->paused = true;
+    if (net && net->wirediag) {
+        net->wirediag->paused = true;
     }
 }
 
-void KTerm_Net_LiveWire_Resume(KTerm* term, KTermSession* session) {
+void KTerm_Net_WireDiag_Resume(KTerm* term, KTermSession* session) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (net && net->livewire) {
-        net->livewire->paused = false;
+    if (net && net->wirediag) {
+        net->wirediag->paused = false;
     }
 }
 
-bool KTerm_Net_LiveWire_SetFilter(KTerm* term, KTermSession* session, const char* filter) {
+bool KTerm_Net_WireDiag_SetFilter(KTerm* term, KTermSession* session, const char* filter) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return false;
+    if (!net || !net->wirediag) return false;
 
     // Reconstruct params
-    KTermLiveWireContext* ctx = net->livewire;
+    KTermWireDiagContext* ctx = net->wirediag;
     char params[512];
     snprintf(params, sizeof(params), "interface=%s;filter=%s;snaplen=%d;count=%d;promisc=%d;timeout=%d",
              ctx->dev, filter, ctx->snaplen, ctx->count, ctx->promisc, ctx->timeout_ms);
 
     // Restart (Start handles stop/restart)
-    return KTerm_Net_LiveWire_Start(term, session, params);
+    return KTerm_Net_WireDiag_Start(term, session, params);
 }
 
-bool KTerm_Net_LiveWire_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max) {
+bool KTerm_Net_WireDiag_GetDetail(KTerm* term, KTermSession* session, int packet_id, char* out, size_t max) {
     (void)term;
     KTermNetSession* net = KTerm_Net_GetContext(session);
-    if (!net || !net->livewire) return false;
-    KTermLiveWireContext* ctx = net->livewire;
+    if (!net || !net->wirediag) return false;
+    KTermWireDiagContext* ctx = net->wirediag;
 
     if (packet_id < 0) return false;
 
@@ -5647,6 +5631,66 @@ bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, in
     ctx->sockfd = INVALID_SOCKET;
 
     return true;
+}
+
+// --- Advanced Auth / Protocol Analysis API ---
+
+const KTermProtocolDef* KTerm_Net_QueryProtocol(uint16_t port, bool is_udp) {
+    return KTerm_Net_IdentifyProtocol(port, is_udp);
+}
+
+bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size_t max) {
+#ifdef KTERM_ENABLE_WIREDIAG
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->wirediag) return false;
+    KTermWireDiagContext* ctx = net->wirediag;
+
+    out[0] = '\0';
+    size_t offset = 0;
+    int count = 0;
+
+#ifndef _WIN32
+    pthread_mutex_lock(&ctx->mutex);
+#else
+    EnterCriticalSection(&ctx->mutex);
+#endif
+
+    for (int i = 0; i < 256; i++) {
+        WireDiagFlow* flow = ctx->flow_table[i];
+        while (flow) {
+            if (flow->auth_detected) {
+                char src[16], dst[16];
+                struct in_addr sa = { .s_addr = flow->key.src_ip };
+                struct in_addr da = { .s_addr = flow->key.dst_ip };
+                inet_ntop(AF_INET, &sa, src, sizeof(src));
+                inet_ntop(AF_INET, &da, dst, sizeof(dst));
+
+                int n = snprintf(out + offset, max - offset,
+                    "ID=%u;%s:%d->%s:%d;PROTO=%s;RISK=%d|",
+                    flow->id, src, flow->key.src_port, dst, flow->key.dst_port,
+                    flow->auth_proto, flow->auth_risk);
+
+                if (n > 0) offset += n;
+                if (offset >= max) break;
+                count++;
+            }
+            flow = flow->next;
+        }
+        if (offset >= max) break;
+    }
+
+#ifndef _WIN32
+    pthread_mutex_unlock(&ctx->mutex);
+#else
+    LeaveCriticalSection(&ctx->mutex);
+#endif
+
+    if (count == 0) snprintf(out, max, "NO_AUTH_DETECTED");
+    return true;
+#else
+    snprintf(out, max, "WIREDIAG_DISABLED");
+    return false;
+#endif
 }
 
 #endif // KTERM_DISABLE_NET

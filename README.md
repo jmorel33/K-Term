@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.42
+# K-Term Emulation Library v2.6.43
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,14 +65,21 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.6.43: Advanced Protocol Identification & Security Analysis**
+This release transforms K-Term's network inspector into a security-aware tool.
+*   **Security Context:** Protocols now expose `[Auth]`, `[PLAIN]`, `[BRUTE]`, and `[RELAY]` risk flags in WireDiag output.
+*   **Deep Inspection:** Added heuristic payload scanning (`KTerm_Net_ScanPayloadForAuth`) to detect SSH versions, NTLM SSP, and Basic Auth in active flows.
+*   **Gateway API:** New commands `PROTO_QUERY` and `SCAN_AUTH` allow external tools to query the protocol database and retrieve authenticated flow details.
+*   **Maintenance:** Bumped library version to 2.6.43.
+
 **New in v2.6.42: Enhanced Protocol Identification & Range Support**
-This release significantly expands the protocol definitions for LiveWire and Gateway Port Scanning.
+This release significantly expands the protocol definitions for WireDiag and Gateway Port Scanning.
 *   **Enhanced Protocols:** Added support for port ranges (Dante Unicast/Via), Gaming (Steam, Xbox, Minecraft), and Messaging (Discord, Slack, Matrix).
 *   **Gateway:** The `PORTSCAN` command now returns service names based on the identified protocol.
 *   **Maintenance:** Bumped library version to 2.6.42.
 
-**New in v2.6.41: LiveWire Protocol Map**
-This release enhances the LiveWire packet sniffer with automatic protocol identification and visualization.
+**New in v2.6.41: WireDiag Protocol Map**
+This release enhances the WireDiag packet sniffer with automatic protocol identification and visualization.
 *   **Protocol Map:** Expanded identification logic covers 40+ protocols including standard IT (FTP, SSH, RDP) and AV/Control (Dante, PTP, Art-Net, sACN).
 *   **Visuals:** Output now includes color-coded protocol labels (e.g., `[Dante Audio]`) for instant traffic recognition.
 *   **Maintenance:** Bumped library version to 2.6.41.
