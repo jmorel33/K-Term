@@ -1,3 +1,7 @@
+## [v2.6.35] - Performance Optimization
+- **Performance**: Optimized Gateway Protocol banner generation (`PIPE;BANNER`) to use stack allocation instead of heap, significantly reducing allocation overhead and memory fragmentation during frequent updates.
+- **Maintenance**: Bumped library version to 2.6.35.
+
 ## [v2.6.34] - Performance & Maintenance
 - **Performance**: Optimized Base64 decoding in Gateway Protocol using a lookup table (~3-5x faster).
 - **Maintenance**: Bumped library version to 2.6.34.
