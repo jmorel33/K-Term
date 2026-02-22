@@ -7,6 +7,14 @@
 - **Testing**: Included a mock `libpcap` implementation to facilitate unit testing of the packet capture logic without external dependencies.
 - **Maintenance**: Bumped library version to 2.6.38.
 
+## [v2.6.39] - Advanced LiveWire Dissectors
+- **Feature**: Added advanced protocol dissectors to `LiveWire` packet handler.
+- **Feature**: Dante Audio detection (UDP port 4321) with RTP header parsing.
+- **Feature**: PTP (Precision Time Protocol) parsing (UDP ports 319/320).
+- **Feature**: HTTP method and status line parsing (TCP port 80/8080).
+- **Feature**: DNS query and response parsing (UDP port 53).
+- **Maintenance**: Bumped library version to 2.6.39.
+
 ## [v2.6.37] - Gateway Protocol Hardening
 - **Case Insensitivity**: Implemented full case insensitivity for all Gateway Protocol commands and parameters (e.g., `PING`, `ping`, `PiNg` are equivalent).
 - **Standardization**: Normalized all documentation and examples to use lowercase syntax for consistency.
