@@ -546,6 +546,7 @@ typedef struct KTermHttpProbeContext {
 
     int status_code;
     uint64_t size_bytes;
+    uint64_t content_length; // For keep-alive support
 
     KTermHttpProbeCallback callback;
     void* user_data;
@@ -1633,6 +1634,15 @@ static void KTerm_Net_ProcessPortScan(KTerm* term, KTermSession* session) {
     else if (ps->state == 1) { // CONNECTING
         fd_set wfds; struct timeval tv = {0, 0};
         FD_ZERO(&wfds);
+#ifndef _WIN32
+        if (ps->sockfd >= FD_SETSIZE) {
+            // Trigger error, fd is too high for select()
+            ps->callback(term, session, -1, false, ps->user_data); // Report error? Or just skip
+            KTerm_Net_FreePortScan(net->port_scan);
+            net->port_scan = NULL;
+            return;
+        }
+#endif
         FD_SET(ps->sockfd, &wfds);
 
         int res = select(ps->sockfd + 1, NULL, &wfds, NULL, &tv);
@@ -1673,6 +1683,12 @@ static void KTerm_Net_ProcessWhois(KTerm* term, KTermSession* session) {
     if (ctx->state == 1) { // CONNECTING
         fd_set wfds; struct timeval tv = {0, 0};
         FD_ZERO(&wfds);
+#ifndef _WIN32
+        if (ctx->sockfd >= FD_SETSIZE) {
+            ctx->state = 4; // Fail
+            return;
+        }
+#endif
         FD_SET(ctx->sockfd, &wfds);
 
         int res = select(ctx->sockfd + 1, NULL, &wfds, NULL, &tv);
@@ -2312,7 +2328,16 @@ void KTerm_Net_GetLocalIP(char* buffer, size_t max_len) {
     serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Google DNS (any routed IP works)
     serv.sin_port = htons(53);
 
-    if (connect(sock, (const struct sockaddr*)&serv, sizeof(serv)) != -1) {
+    // Try Google DNS first
+    int res = connect(sock, (const struct sockaddr*)&serv, sizeof(serv));
+    if (res == -1) {
+        // Fallback for Air-Gapped/Intranet: Try a private range IP (10.255.255.255)
+        // This forces the OS to pick the interface that would route to private LAN.
+        serv.sin_addr.s_addr = inet_addr("10.255.255.255");
+        res = connect(sock, (const struct sockaddr*)&serv, sizeof(serv));
+    }
+
+    if (res != -1) {
          struct sockaddr_in name;
          socklen_t namelen = sizeof(name);
          if (getsockname(sock, (struct sockaddr*)&name, &namelen) != -1) {
@@ -2637,7 +2662,15 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
             }
 
             fd_set wfds; struct timeval tv = {0, 0};
-            FD_ZERO(&wfds); FD_SET(st->config_fd, &wfds);
+        FD_ZERO(&wfds);
+#ifndef _WIN32
+        if (st->config_fd >= FD_SETSIZE) {
+            // Should probably close and fail
+            st->state = 6;
+            return;
+        }
+#endif
+        FD_SET(st->config_fd, &wfds);
             if (select(st->config_fd + 1, NULL, &wfds, NULL, &tv) > 0) {
                 st->auto_state = 1; // SEND
             }
@@ -3162,6 +3195,12 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
     if (ctx->state == 2) { // CONNECT
         fd_set wfds; struct timeval tv = {0, 0};
         FD_ZERO(&wfds);
+#ifndef _WIN32
+        if (ctx->sockfd >= FD_SETSIZE) {
+            ctx->state = 6; // Fail
+            return;
+        }
+#endif
         FD_SET(ctx->sockfd, &wfds);
 
         int res = select(ctx->sockfd + 1, NULL, &wfds, NULL, &tv);
@@ -3209,7 +3248,14 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
     else if (ctx->state == 4) { // WAIT_HEAD
         // Check for readability
         fd_set rfds; struct timeval tv = {0, 0};
-        FD_ZERO(&rfds); FD_SET(ctx->sockfd, &rfds);
+        FD_ZERO(&rfds);
+#ifndef _WIN32
+        if (ctx->sockfd >= FD_SETSIZE) {
+            ctx->state = 6; // Fail
+            return;
+        }
+#endif
+        FD_SET(ctx->sockfd, &rfds);
 
         if (select(ctx->sockfd + 1, &rfds, NULL, NULL, &tv) > 0) {
             ctx->first_byte_time = KTerm_GetTime();
@@ -3230,8 +3276,9 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
         ssize_t n = recv(ctx->sockfd, buf, sizeof(buf), KTERM_MSG_DONTWAIT);
         if (n > 0) {
             ctx->size_bytes += n;
-            // Parse Status Code if not done
-            if (ctx->status_code == 0) {
+            // Parse Headers if not fully done or if body separator not found yet
+            char* body_start = strstr(ctx->buffer, "\r\n\r\n");
+            if (!body_start) {
                 // Append to internal small buffer for parsing
                 if (ctx->buffer_len < (int)sizeof(ctx->buffer) - 1) {
                     int space = sizeof(ctx->buffer) - ctx->buffer_len - 1;
@@ -3240,15 +3287,39 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
                     ctx->buffer_len += copy;
                     ctx->buffer[ctx->buffer_len] = '\0';
 
-                    if (strncmp(ctx->buffer, "HTTP/", 5) == 0) {
+                    if (ctx->status_code == 0 && strncmp(ctx->buffer, "HTTP/", 5) == 0) {
                         char* space1 = strchr(ctx->buffer, ' ');
                         if (space1) {
                             ctx->status_code = atoi(space1 + 1);
                         }
                     }
+
+                    // Look for Content-Length (Case-insensitive approximation: check common cases)
+                    if (ctx->content_length == 0) {
+                        char* cl = strstr(ctx->buffer, "Content-Length: ");
+                        if (!cl) cl = strstr(ctx->buffer, "content-length: ");
+                        if (!cl) cl = strstr(ctx->buffer, "Content-length: ");
+                        if (cl) {
+                            ctx->content_length = strtoull(cl + 16, NULL, 10);
+                        }
+                    }
+
+                    // Update body_start check after append
+                    body_start = strstr(ctx->buffer, "\r\n\r\n");
                 }
             }
-        } else if (n == 0) {
+
+            // Check if done based on content length (Keep-Alive support)
+            if (ctx->content_length > 0 && body_start) {
+                uint64_t header_size = (uint64_t)(body_start - ctx->buffer) + 4;
+                if (ctx->size_bytes >= header_size + ctx->content_length) {
+                    n = 0; // Trigger done
+                }
+            }
+
+        }
+
+        if (n == 0) {
             // Done
             double end_time = KTerm_GetTime();
 

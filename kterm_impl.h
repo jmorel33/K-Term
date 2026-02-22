@@ -5236,6 +5236,12 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
     unsigned char buffer[1024];
 
     while (chars_processed < target_chars) {
+        // Backpressure: If OpQueue is dangerously full, stop processing input
+        // to give rendering a chance to drain the queue.
+        if (session->op_queue.count >= KTERM_OP_QUEUE_SIZE - 100) {
+            break;
+        }
+
         if (KTerm_TimerGetTime() - start_time > session->VTperformance.time_budget) {
             break;
         }
@@ -10404,8 +10410,11 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
                 if (img->frames) {
                     for (int f = 0; f < img->frame_count; f++) {
                         if (img->frames[f].data) {
-                            if (kitty->current_memory_usage >= img->frames[f].capacity)
+                            if (kitty->current_memory_usage >= img->frames[f].capacity) {
                                 kitty->current_memory_usage -= img->frames[f].capacity;
+                            } else {
+                                kitty->current_memory_usage = 0;
+                            }
                             KTerm_Free(img->frames[f].data);
                         }
                         if (img->frames[f].texture.slot_index != 0) KTerm_DestroyTexture(&img->frames[f].texture);

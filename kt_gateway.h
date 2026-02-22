@@ -2196,6 +2196,29 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
 }
 
 static void KTerm_Ext_Net(KTerm* term, KTermSession* session, const char* id, const char* args, GatewayResponseCallback respond) {
+    // Check for "cancel_diag" command first
+    if (args && strncmp(args, "cancel_diag", 11) == 0) {
+#ifndef KTERM_DISABLE_NET
+        KTermNetSession* net = KTerm_Net_GetContext(session);
+        if (net) {
+            // Free/Reset all diagnostic contexts
+            if (net->traceroute) { KTerm_Net_FreeTraceroute(net->traceroute); net->traceroute = NULL; }
+            if (net->response_time) { KTerm_Net_FreeResponseTime(net->response_time); net->response_time = NULL; }
+            if (net->port_scan) { KTerm_Net_FreePortScan(net->port_scan); net->port_scan = NULL; }
+            if (net->whois) { KTerm_Net_FreeWhois(net->whois); net->whois = NULL; }
+            if (net->speedtest) { KTerm_Net_FreeSpeedtest(net->speedtest); net->speedtest = NULL; }
+            if (net->http_probe) { KTerm_Net_FreeHttpProbe(net->http_probe); net->http_probe = NULL; }
+
+            if (respond) respond(term, session, "OK;CANCELLED");
+        } else {
+            if (respond) respond(term, session, "OK;NO_ACTIVE_SESSION");
+        }
+#else
+        if (respond) respond(term, session, "ERR;NET_DISABLED");
+#endif
+        return;
+    }
+
     KTerm_Ext_SSH(term, session, id, args, respond);
 }
 
@@ -2984,6 +3007,16 @@ static void KTerm_Ext_Grid(KTerm* term, KTermSession* session, const char* id, c
 }
 
 void KTerm_RegisterBuiltinExtensions(KTerm* term) {
+#ifdef KTERM_DEBUG
+    // Verify gateway_commands sorting for bsearch safety
+    for (size_t i = 0; i < sizeof(gateway_commands)/sizeof(GatewayCommand) - 1; i++) {
+        if (strcmp(gateway_commands[i].name, gateway_commands[i+1].name) >= 0) {
+            fprintf(stderr, "[KTerm] FATAL: Gateway commands unsorted: %s >= %s\n",
+                    gateway_commands[i].name, gateway_commands[i+1].name);
+        }
+    }
+#endif
+
     KTerm_RegisterGatewayExtension(term, "broadcast", KTerm_Ext_Broadcast);
     KTerm_RegisterGatewayExtension(term, "themes", KTerm_Ext_Themes);
     KTerm_RegisterGatewayExtension(term, "clipboard", KTerm_Ext_Clipboard);

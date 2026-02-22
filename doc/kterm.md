@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.31
+# kterm.h - Technical Reference Manual v2.6.32
 
 **(c) 2026 Jacques Morel**
 
@@ -300,6 +300,7 @@ graph TD
     Parser --> OpQueue
     OpQueue --> Flush
     Flush --> Session
+    Parser -.->|Backpressure| Input
     Session --> Prep
     LayoutTree --> Prep
     Prep --> Draw
@@ -911,6 +912,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `EXT;net`    | `responsetime`| `host=...;count=10;interval=1;timeout=2000`. Async latency/jitter test. Returns `OK;SENT=...` stats. |
 | `EXT;net`    | `speedtest`   | `host=...;streams=4`. Multi-stream throughput test. Auto-selects server if host is omitted or `auto`. |
 | `EXT;net`    | `connections` | Lists active network sessions and their status. |
+| `EXT;net`    | `cancel_diag` | Stops any currently running asynchronous network diagnostics. |
 | `EXT;automate`| `trigger;add;pat;act`| Adds an automation trigger (Pattern -> Action). |
 | `EXT;automate`| `trigger;list`| Lists active triggers. |
 | `EXT;ssh`    | `connect;...` | Alias for `EXT;net`. |
@@ -1524,6 +1526,7 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `EXT;net;speedtest;host=...`: Runs a multi-stream throughput/latency test. Auto-selects server if host is omitted or `host=auto`. `graph=1` enables ASCII visualization.
 *   `EXT;net;httpprobe;url`: Runs an HTTP timing probe returning DNS, TCP, TTFB, and Transfer metrics. Usage: `EXT;net;httpprobe;http://example.com`.
 *   `EXT;net;connections`: Lists active network sessions.
+*   `EXT;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, etc.).
 *   `EXT;automate;trigger;...`: Manages automation triggers.
 
 **Top-Level Network Diagnostics (v2.6.12):**

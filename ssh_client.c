@@ -772,13 +772,21 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_write_cstring(&p, &rem, "exec");
                 ssh_write_bool(&p, &rem, true); // Want reply
 
-                char cmd[12000]; // Large buffer for base64
-                // kterm_terminfo_base64 is ~2KB, so 12KB is plenty
-                snprintf(cmd, sizeof(cmd), "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
-
-                ssh_write_cstring(&p, &rem, cmd);
-                send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
-                ssh->state = SSH_STATE_WAIT_EXEC_RESULT;
+                // Large buffer for base64 - allocated on heap to save stack
+                char* cmd = (char*)malloc(12000);
+                if (cmd) {
+                    // kterm_terminfo_base64 is ~2KB, so 12KB is plenty
+                    snprintf(cmd, 12000, "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
+                    ssh_write_cstring(&p, &rem, cmd);
+                    free(cmd);
+                    send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
+                    ssh->state = SSH_STATE_WAIT_EXEC_RESULT;
+                } else {
+                    // OOM - Skip exec, proceed to shell? Or fail?
+                    // Skipping might leave terminfo missing, but safer than crashing/malformed packet.
+                    // Let's just proceed to channel open to avoid getting stuck.
+                    ssh->state = SSH_STATE_CHANNEL_OPEN;
+                }
             }
             return KTERM_SEC_AGAIN;
 
