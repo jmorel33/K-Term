@@ -478,10 +478,17 @@ static const KTermProtocolDef kterm_protocols[] = {
     { 993,   0,    "IMAPS",     "IMAP Secure",                                "Mail",    ANSI_YELLOW,  false, false, NULL },
 
     // ── Remote Access ────────────────────────────────────────────────────────────
-    { 22,    0,    "SSH",       "Secure Shell / SFTP",                        "Remote",  ANSI_RED,     false, false, NULL },
-    { 23,    0,    "Telnet",    "Telnet (insecure)",                          "Remote",  ANSI_RED,     false, false, NULL },
-    { 3389,  0,    "RDP",       "Remote Desktop Protocol",                    "Remote",  ANSI_RED,     false, false, NULL },
-    { 5900,  0,    "VNC",       "Virtual Network Computing",                  "Remote",  ANSI_RED,     false, false, NULL },
+    { 22,    0,    "SSH",       "Secure Shell (Secure Login / Tunnels)",       "Remote",  ANSI_RED,     false, false, "Encrypted; also SFTP/SCP/X11 forwarding" },
+    { 23,    0,    "Telnet",    "Telnet (Unencrypted Remote Login)",           "Remote",  ANSI_RED,     false, false, "Insecure—avoid over Internet; plaintext" },
+    {1494,   0,    "Citrix-ICA","Citrix Independent Computing Architecture",   "Remote",  ANSI_RED,     false, false, "Legacy Citrix; often 2598 for Session Reliability" },
+    {3389,   0,    "RDP",       "Remote Desktop Protocol (Microsoft)",         "Remote",  ANSI_RED,     false, false, "TCP primary + UDP for acceleration; frequently targeted" },
+    {5631,   0,    "pcAnywhere", "Symantec pcAnywhere (Legacy)",               "Remote",  ANSI_RED,     true,  false, "Old remote control; TCP/UDP" },
+    {5800,5900,"VNC-HTTP",     "VNC HTTP Viewer (Web-based)",                  "Remote",  ANSI_RED,     false, false, "Browser access to VNC; often 5800 + display offset" },
+    {5900,   0,    "VNC",       "Virtual Network Computing (RFB)",              "Remote",  ANSI_RED,     false, false, "Default; +display offset (e.g., 5901 for display :1)" },
+    {5938,   0,    "TeamViewer", "TeamViewer (Primary Port)",                   "Remote",  ANSI_RED,     true,  false, "Outbound preferred; fallback 80/443; proprietary" },
+    {6568,   0,    "AnyDesk",    "AnyDesk (Primary Port)",                      "Remote",  ANSI_RED,     true,  false, "Outbound; fallback 80/443/7070; proprietary" },
+    {7070,   0,    "AnyDesk-Alt","AnyDesk Alternate / Discovery",               "Remote",  ANSI_RED,     false, false, "Fallback port" },
+    { 443,   0,    "RDP-GW",     "RDP over HTTPS (RD Gateway / Web Access)",    "Remote",  ANSI_RED,     false, false, "Secure RDP tunneling; also TeamViewer/AnyDesk fallback" },
 
     // ── Infrastructure / Discovery ───────────────────────────────────────────────
     { 53,    0,    "DNS",       "Domain Name System",                         "Infra",   ANSI_CYAN,    true,  false, "UDP primary" },
