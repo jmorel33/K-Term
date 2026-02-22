@@ -96,14 +96,24 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
 static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const BannerOptions* options);
 
 // VT Pipe Helpers
-static int KTerm_Base64Value(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
+static const int8_t kterm_base64_table[256] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
+    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1,
+    -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1,
+    -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+};
 
 // Decode Base64 to a raw buffer (caller must free if it returns a pointer, but here we use output buffer)
 // Returns number of bytes written.
@@ -115,7 +125,7 @@ static size_t KTerm_Base64DecodeBuffer(const char* in, unsigned char* out, size_
     size_t out_pos = 0;
     for (size_t i = 0; i < len; i++) {
         if (in[i] == '=') break;
-        int c = KTerm_Base64Value(in[i]);
+        int c = kterm_base64_table[(unsigned char)in[i]];
         if (c == -1) continue;
         val = (val << 6) + c;
         valb += 6;
@@ -136,7 +146,7 @@ static void KTerm_Base64StreamDecode(KTerm* term, int session_idx, const char* i
     int valb = -8;
     for (size_t i = 0; i < len; i++) {
         if (in[i] == '=') break;
-        int c = KTerm_Base64Value(in[i]);
+        int c = kterm_base64_table[(unsigned char)in[i]];
         if (c == -1) continue;
         val = (val << 6) + c;
         valb += 6;
