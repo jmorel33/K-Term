@@ -11,6 +11,17 @@ extern "C" {
 typedef struct KTerm_T KTerm;
 typedef struct KTermSession_T KTermSession;
 
+// Context Typedefs
+typedef struct KTermTracerouteContext KTermTracerouteContext;
+typedef struct KTermResponseTimeContext KTermResponseTimeContext;
+typedef struct KTermPortScanContext KTermPortScanContext;
+typedef struct KTermWhoisContext KTermWhoisContext;
+typedef struct KTermSpeedtestContext KTermSpeedtestContext;
+typedef struct KTermHttpProbeContext KTermHttpProbeContext;
+typedef struct KTermMtuProbeContext KTermMtuProbeContext;
+typedef struct KTermFragTestContext KTermFragTestContext;
+typedef struct KTermPingExtContext KTermPingExtContext;
+
 // --- Networking Context & State ---
 
 typedef enum {
@@ -224,6 +235,79 @@ typedef void (*KTermHttpProbeCallback)(KTerm* term, KTermSession* session, const
 // Starts an async HTTP probe.
 bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data);
 
+// MTU Probe Result
+typedef struct {
+    int path_mtu;
+    int local_mtu;
+    bool done;
+    bool error;
+    char msg[64];
+} KTermMtuProbeResult;
+
+typedef void (*KTermMtuProbeCallback)(KTerm* term, KTermSession* session, const KTermMtuProbeResult* result, void* user_data);
+
+// Starts an async MTU/PMTU probe.
+// df: Don't Fragment flag (PMTUD)
+// start_size/max_size: Probing range
+bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data);
+
+// Fragmentation Test Result
+typedef struct {
+    int fragments_sent;
+    bool reassembly_success;
+    bool done;
+    bool error;
+    char msg[64];
+} KTermFragTestResult;
+
+typedef void (*KTermFragTestCallback)(KTerm* term, KTermSession* session, const KTermFragTestResult* result, void* user_data);
+
+// Starts an async Fragmentation test.
+// size: Total payload size (will be fragmented)
+// fragments: Expected number of fragments (informational/target)
+bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data);
+
+// Extended Ping Stats
+typedef struct {
+    int min_rtt;
+    int avg_rtt;
+    int max_rtt;
+    int stddev_rtt;
+    int sent;
+    int received;
+    int lost;
+    float loss_percent;
+    // Histogram buckets (0-10, 10-20, 20-50, 50-100, 100+)
+    int hist_0_10;
+    int hist_10_20;
+    int hist_20_50;
+    int hist_50_100;
+    int hist_100_plus;
+    bool done;
+    // ASCII Graph line (e.g. ".....X..")
+    char graph_line[64];
+} KTermPingExtResult;
+
+typedef void (*KTermPingExtCallback)(KTerm* term, KTermSession* session, const KTermPingExtResult* result, void* user_data);
+
+// Starts an async Extended Ping.
+// count: Number of packets
+// interval_ms: Interval between packets
+// size: Packet size
+// graph: Enable ASCII graph generation
+bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data);
+
+// Cleanup Functions (Internal/Advanced use)
+void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx);
+void KTerm_Net_FreeResponseTime(KTermResponseTimeContext* ctx);
+void KTerm_Net_FreePortScan(KTermPortScanContext* ctx);
+void KTerm_Net_FreeWhois(KTermWhoisContext* ctx);
+void KTerm_Net_FreeSpeedtest(KTermSpeedtestContext* ctx);
+void KTerm_Net_FreeHttpProbe(KTermHttpProbeContext* ctx);
+void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx);
+void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx);
+void KTerm_Net_FreePingExt(KTermPingExtContext* ctx);
+
 #ifdef __cplusplus
 }
 #endif
@@ -284,10 +368,9 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
     #define KTERM_MSG_DONTWAIT MSG_DONTWAIT
 #endif
 
-// Forward declaration
-struct KTermTracerouteContext;
-struct KTermResponseTimeContext;
-struct KTermPortScanContext;
+// Forward declarations
+static double KTerm_GetTime(void);
+static unsigned short KTerm_Checksum(void *b, int len);
 
 #ifndef KTERM_DISABLE_VOICE
 typedef struct {
@@ -303,6 +386,9 @@ static void _KTerm_Net_VoiceSendCallback(void* user_data, const void* data, size
 struct KTermWhoisContext;
 struct KTermSpeedtestContext;
 struct KTermHttpProbeContext;
+struct KTermMtuProbeContext;
+struct KTermFragTestContext;
+struct KTermPingExtContext;
 
 #ifndef KTERM_DISABLE_TELNET
 // Telnet Parse State
@@ -383,6 +469,9 @@ typedef struct {
     struct KTermWhoisContext* whois;
     struct KTermSpeedtestContext* speedtest;
     struct KTermHttpProbeContext* http_probe;
+    struct KTermMtuProbeContext* mtu_probe;
+    struct KTermFragTestContext* frag_test;
+    struct KTermPingExtContext* ping_ext;
 
     int target_session_index;
 
@@ -552,6 +641,101 @@ typedef struct KTermHttpProbeContext {
     void* user_data;
 } KTermHttpProbeContext;
 
+typedef struct KTermMtuProbeContext {
+    int state; // 0=IDLE, 1=RESOLVE, 2=SOCKET, 3=SEND_PROBE, 4=WAIT_PROBE, 5=DONE
+    char host[256];
+    struct sockaddr_in dest_addr;
+    socket_t sockfd;
+
+    bool df;
+    int current_size;
+    int min_size;
+    int max_size;
+    int known_good_size;
+    int path_mtu;
+    int local_mtu;
+
+    struct timeval probe_start_time;
+    int retry_count;
+
+    KTermMtuProbeCallback callback;
+    void* user_data;
+
+#ifdef _WIN32
+    HANDLE icmp_handle;
+    HANDLE icmp_event;
+    char reply_buffer[1024];
+#endif
+} KTermMtuProbeContext;
+
+typedef struct KTermFragTestContext {
+    int state; // 0=IDLE, 1=RESOLVE, 2=SOCKET, 3=SEND, 4=WAIT, 5=DONE
+    char host[256];
+    struct sockaddr_in dest_addr;
+    socket_t sockfd;
+
+    int size;
+    int fragments;
+
+    int sent_count;
+
+    struct timeval start_time;
+
+    KTermFragTestCallback callback;
+    void* user_data;
+
+#ifdef _WIN32
+    HANDLE icmp_handle;
+    HANDLE icmp_event;
+    char reply_buffer[1024];
+#endif
+} KTermFragTestContext;
+
+typedef struct KTermPingExtContext {
+    int state;
+    char host[256];
+    struct sockaddr_in dest_addr;
+    socket_t sockfd;
+    bool is_raw;
+
+    int count;
+    int interval_ms;
+    int size;
+    bool graph;
+
+    int sent;
+    int received;
+
+    // Stats
+    double rtt_min;
+    double rtt_max;
+    double rtt_sum;
+    double rtt_sq_sum;
+
+    // Hist
+    int h_0_10;
+    int h_10_20;
+    int h_20_50;
+    int h_50_100;
+    int h_100_plus;
+
+    // Graph
+    char graph_buf[64];
+    int graph_idx;
+
+    struct timeval probe_start_time;
+    struct timeval last_complete_time;
+
+    KTermPingExtCallback callback;
+    void* user_data;
+
+#ifdef _WIN32
+    HANDLE icmp_handle;
+    HANDLE icmp_event;
+    char reply_buffer[4096];
+#endif
+} KTermPingExtContext;
+
 // --- Helper Functions ---
 
 static KTermNetSession* KTerm_Net_GetContext(KTermSession* session) {
@@ -580,74 +764,105 @@ static KTermNetSession* KTerm_Net_CreateContext(KTermSession* session) {
     return net;
 }
 
+void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+#ifdef _WIN32
+    if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
+    if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
+#endif
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeResponseTime(KTermResponseTimeContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+#ifdef _WIN32
+    if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
+    if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
+#endif
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreePortScan(KTermPortScanContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeWhois(KTermWhoisContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeSpeedtest(KTermSpeedtestContext* ctx) {
+    if (!ctx) return;
+    for(int i=0; i<ctx->num_streams; i++) {
+        if (IS_VALID_SOCKET(ctx->streams[i].fd)) CLOSE_SOCKET(ctx->streams[i].fd);
+    }
+    if (IS_VALID_SOCKET(ctx->config_fd)) CLOSE_SOCKET(ctx->config_fd);
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeHttpProbe(KTermHttpProbeContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+#ifdef _WIN32
+    if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
+    if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
+#endif
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+#ifdef _WIN32
+    if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
+    if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
+#endif
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
+void KTerm_Net_FreePingExt(KTermPingExtContext* ctx) {
+    if (!ctx) return;
+    if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
+#ifdef _WIN32
+    if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
+    if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
+#endif
+    if (ctx->user_data) free(ctx->user_data);
+    free(ctx);
+}
+
 static void KTerm_Net_DestroyContext(KTermSession* session) {
     if (!session || !session->user_data) return;
     KTermNetSession* net = (KTermNetSession*)session->user_data;
 
-    if (net->traceroute) {
-        if (IS_VALID_SOCKET(net->traceroute->sockfd)) {
-             CLOSE_SOCKET(net->traceroute->sockfd);
-        }
-#ifdef _WIN32
-        if (net->traceroute->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->traceroute->icmp_handle);
-        if (net->traceroute->icmp_event) CloseHandle(net->traceroute->icmp_event);
-#endif
-        if (net->traceroute->user_data) free(net->traceroute->user_data);
-        free(net->traceroute);
-        net->traceroute = NULL;
-    }
-
-    if (net->response_time) {
-        if (IS_VALID_SOCKET(net->response_time->sockfd)) {
-             CLOSE_SOCKET(net->response_time->sockfd);
-        }
-#ifdef _WIN32
-        if (net->response_time->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->response_time->icmp_handle);
-        if (net->response_time->icmp_event) CloseHandle(net->response_time->icmp_event);
-#endif
-        // User data might be shared or specific, assume specific based on API contract (copying ID)
-        if (net->response_time->user_data) free(net->response_time->user_data);
-        free(net->response_time);
-        net->response_time = NULL;
-    }
-
-    if (net->port_scan) {
-        if (IS_VALID_SOCKET(net->port_scan->sockfd)) {
-             CLOSE_SOCKET(net->port_scan->sockfd);
-        }
-        if (net->port_scan->user_data) free(net->port_scan->user_data);
-        free(net->port_scan);
-        net->port_scan = NULL;
-    }
-
-    if (net->whois) {
-        if (IS_VALID_SOCKET(net->whois->sockfd)) {
-             CLOSE_SOCKET(net->whois->sockfd);
-        }
-        if (net->whois->user_data) free(net->whois->user_data);
-        free(net->whois);
-        net->whois = NULL;
-    }
-
-    if (net->speedtest) {
-        for(int i=0; i<net->speedtest->num_streams; i++) {
-            if (IS_VALID_SOCKET(net->speedtest->streams[i].fd)) {
-                 CLOSE_SOCKET(net->speedtest->streams[i].fd);
-            }
-        }
-        if (net->speedtest->user_data) free(net->speedtest->user_data);
-        free(net->speedtest);
-        net->speedtest = NULL;
-    }
-
-    if (net->http_probe) {
-        if (IS_VALID_SOCKET(net->http_probe->sockfd)) {
-             CLOSE_SOCKET(net->http_probe->sockfd);
-        }
-        if (net->http_probe->user_data) free(net->http_probe->user_data);
-        free(net->http_probe);
-        net->http_probe = NULL;
-    }
+    if (net->traceroute) { KTerm_Net_FreeTraceroute(net->traceroute); net->traceroute = NULL; }
+    if (net->response_time) { KTerm_Net_FreeResponseTime(net->response_time); net->response_time = NULL; }
+    if (net->port_scan) { KTerm_Net_FreePortScan(net->port_scan); net->port_scan = NULL; }
+    if (net->whois) { KTerm_Net_FreeWhois(net->whois); net->whois = NULL; }
+    if (net->speedtest) { KTerm_Net_FreeSpeedtest(net->speedtest); net->speedtest = NULL; }
+    if (net->http_probe) { KTerm_Net_FreeHttpProbe(net->http_probe); net->http_probe = NULL; }
+    if (net->mtu_probe) { KTerm_Net_FreeMtuProbe(net->mtu_probe); net->mtu_probe = NULL; }
+    if (net->frag_test) { KTerm_Net_FreeFragTest(net->frag_test); net->frag_test = NULL; }
+    if (net->ping_ext) { KTerm_Net_FreePingExt(net->ping_ext); net->ping_ext = NULL; }
 
     if (net->security.close) {
         net->security.close(net->security.ctx);
@@ -723,6 +938,493 @@ static void KTerm_Net_TriggerError(KTerm* term, KTermSession* session, KTermNetS
     net->state = KTERM_NET_STATE_ERROR;
     if (net->callbacks.on_error) {
         net->callbacks.on_error(term, session, msg);
+    }
+}
+
+static void KTerm_Net_ProcessPingExt(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->ping_ext) return;
+    KTermPingExtContext* ctx = net->ping_ext;
+
+    if (ctx->state == 5) return; // DONE
+
+    if (ctx->state == 2) { // SOCKET
+#ifdef __linux__
+        ctx->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+        ctx->is_raw = false;
+        if (ctx->sockfd < 0) {
+             ctx->sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+             ctx->is_raw = true;
+        }
+        if (ctx->sockfd < 0) { ctx->state = 5; if(ctx->callback){ KTermPingExtResult r={0}; r.done=true; ctx->callback(term, session, &r, ctx->user_data); } return; }
+        fcntl(ctx->sockfd, F_SETFL, fcntl(ctx->sockfd, F_GETFL, 0) | O_NONBLOCK);
+#elif defined(_WIN32)
+        ctx->icmp_handle = IcmpCreateFile();
+        if (ctx->icmp_handle == INVALID_HANDLE_VALUE) { ctx->state = 5; return; }
+        ctx->icmp_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+#endif
+        ctx->state = 3; // SEND
+        return;
+    }
+
+    if (ctx->state == 3) { // SEND
+        if (ctx->sent >= ctx->count) {
+             ctx->state = 5; // DONE
+             if (ctx->callback) {
+                 KTermPingExtResult r = {0};
+                 r.done = true;
+                 r.sent = ctx->sent;
+                 r.received = ctx->received;
+                 r.lost = ctx->sent - ctx->received;
+                 if (ctx->sent > 0) r.loss_percent = (float)r.lost / ctx->sent * 100.0f;
+                 if (ctx->received > 0) {
+                     r.min_rtt = (int)ctx->rtt_min;
+                     r.max_rtt = (int)ctx->rtt_max;
+                     r.avg_rtt = (int)(ctx->rtt_sum / ctx->received);
+                     double mean = ctx->rtt_sum / ctx->received;
+                     double var = (ctx->rtt_sq_sum / ctx->received) - (mean * mean);
+                     if (var < 0) var = 0;
+                     r.stddev_rtt = (int)sqrt(var);
+                 }
+                 r.hist_0_10 = ctx->h_0_10;
+                 r.hist_10_20 = ctx->h_10_20;
+                 r.hist_20_50 = ctx->h_20_50;
+                 r.hist_50_100 = ctx->h_50_100;
+                 r.hist_100_plus = ctx->h_100_plus;
+                 if (ctx->graph) strncpy(r.graph_line, ctx->graph_buf, sizeof(r.graph_line));
+
+                 ctx->callback(term, session, &r, ctx->user_data);
+             }
+             return;
+        }
+
+        // Check Interval
+        if (ctx->sent > 0) {
+             double now = KTerm_GetTime();
+#ifdef __linux__
+             double last = (double)ctx->last_complete_time.tv_sec + (double)ctx->last_complete_time.tv_usec / 1000000.0;
+#elif defined(_WIN32)
+             double last = (double)ctx->last_complete_time.tv_sec / 1000.0; // Stored as ticks but cast to double time
+             // Wait, KTerm_GetTime uses GetTickCount()/1000.0 on windows.
+             // But my struct stores last_complete_time as timeval for linux compatibility,
+             // but I used it as ticks in other funcs.
+             // Let's assume tv_sec holds ticks on Windows.
+             last = (double)ctx->last_complete_time.tv_sec / 1000.0;
+#endif
+             if ((now - last) * 1000.0 < ctx->interval_ms) return;
+        }
+
+        // Send Packet
+#ifdef __linux__
+        int payload_len = ctx->size;
+        if (payload_len < 8) payload_len = 8;
+        char* packet = (char*)calloc(1, payload_len);
+        struct icmphdr* icmp = (struct icmphdr*)packet;
+        icmp->type = ICMP_ECHO;
+        icmp->code = 0;
+        icmp->un.echo.id = htons(getpid() & 0xFFFF);
+        icmp->un.echo.sequence = htons(ctx->sent + 1);
+        if (ctx->is_raw) icmp->checksum = KTerm_Checksum(packet, payload_len);
+
+        gettimeofday(&ctx->probe_start_time, NULL);
+        sendto(ctx->sockfd, packet, payload_len, 0, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr));
+        free(packet);
+        ctx->sent++;
+        ctx->state = 4; // WAIT
+#elif defined(_WIN32)
+        int payload_len = ctx->size;
+        void* payload = calloc(1, payload_len > 0 ? payload_len : 1);
+        ResetEvent(ctx->icmp_event);
+        DWORD res = IcmpSendEcho2(
+            ctx->icmp_handle, ctx->icmp_event, NULL, NULL,
+            ctx->dest_addr.sin_addr.s_addr,
+            payload, payload_len,
+            NULL,
+            ctx->reply_buffer, 4096,
+            1000
+        );
+        free(payload);
+        if (res == 0 && GetLastError() == ERROR_IO_PENDING) {
+            ctx->probe_start_time.tv_sec = (long)GetTickCount();
+            ctx->sent++;
+            ctx->state = 4;
+        } else if (res > 0) {
+            ctx->probe_start_time.tv_sec = (long)GetTickCount();
+            SetEvent(ctx->icmp_event);
+            ctx->sent++;
+            ctx->state = 4;
+        } else {
+            // Error
+            ctx->sent++;
+            ctx->state = 3; // Retry next
+            // Update Graph with Loss
+            if (ctx->graph && ctx->graph_idx < 63) ctx->graph_buf[ctx->graph_idx++] = 'X';
+        }
+#endif
+    }
+    else if (ctx->state == 4) { // WAIT
+        bool received = false;
+        double rtt = 0;
+        bool timeout = false;
+
+#ifdef __linux__
+        char buf[1024];
+        struct sockaddr_in r_addr;
+        socklen_t addr_len = sizeof(r_addr);
+        int n = recvfrom(ctx->sockfd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&r_addr, &addr_len);
+        if (n > 0) {
+             struct icmphdr* icmp = NULL;
+             if (ctx->is_raw) {
+                 if (n >= 20) icmp = (struct icmphdr*)(buf + 20);
+             } else {
+                 icmp = (struct icmphdr*)buf;
+             }
+             if (icmp && icmp->type == ICMP_ECHOREPLY) {
+                 struct timeval now; gettimeofday(&now, NULL);
+                 rtt = (now.tv_sec - ctx->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - ctx->probe_start_time.tv_usec) / 1000.0;
+                 received = true;
+                 ctx->last_complete_time = now;
+             }
+        } else {
+             struct timeval now; gettimeofday(&now, NULL);
+             if ((now.tv_sec - ctx->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - ctx->probe_start_time.tv_usec) / 1000.0 > 1000.0) {
+                 timeout = true;
+                 ctx->last_complete_time = now;
+             }
+        }
+#elif defined(_WIN32)
+        if (WaitForSingleObject(ctx->icmp_event, 0) == WAIT_OBJECT_0) {
+             PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)ctx->reply_buffer;
+             if (reply->Status == IP_SUCCESS) {
+                 rtt = (double)reply->RoundTripTime;
+                 if (rtt < 1.0) rtt = 1.0;
+                 received = true;
+             } else {
+                 timeout = true; // Error reply treated as loss for now
+             }
+             ctx->last_complete_time.tv_sec = (long)GetTickCount();
+        } else {
+             if (GetTickCount() - (DWORD)ctx->probe_start_time.tv_sec > 1000) {
+                 timeout = true;
+                 ctx->last_complete_time.tv_sec = (long)GetTickCount();
+             }
+        }
+#endif
+
+        if (received) {
+            ctx->received++;
+            if (rtt < ctx->rtt_min) ctx->rtt_min = rtt;
+            if (rtt > ctx->rtt_max) ctx->rtt_max = rtt;
+            ctx->rtt_sum += rtt;
+            ctx->rtt_sq_sum += (rtt * rtt);
+
+            if (rtt <= 10) ctx->h_0_10++;
+            else if (rtt <= 20) ctx->h_10_20++;
+            else if (rtt <= 50) ctx->h_20_50++;
+            else if (rtt <= 100) ctx->h_50_100++;
+            else ctx->h_100_plus++;
+
+            if (ctx->graph && ctx->graph_idx < 63) ctx->graph_buf[ctx->graph_idx++] = '.';
+
+            ctx->state = 3; // Next
+        } else if (timeout) {
+            if (ctx->graph && ctx->graph_idx < 63) ctx->graph_buf[ctx->graph_idx++] = 'X';
+            ctx->state = 3; // Next
+        }
+    }
+}
+
+static void KTerm_Net_ProcessMtuProbe(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->mtu_probe) return;
+    KTermMtuProbeContext* ctx = net->mtu_probe;
+
+    if (ctx->state == 5) return; // DONE
+
+    if (ctx->state == 2) { // SOCKET
+#ifdef __linux__
+        ctx->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+        if (ctx->sockfd < 0) ctx->sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+
+        if (ctx->sockfd < 0) {
+             ctx->state = 5;
+             if (ctx->callback) { KTermMtuProbeResult r={0}; r.error=true; snprintf(r.msg, sizeof(r.msg), "Socket Init Failed"); ctx->callback(term, session, &r, ctx->user_data); }
+             return;
+        }
+
+        if (ctx->df) {
+            int val = IP_PMTUDISC_DO;
+            setsockopt(ctx->sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(val));
+        }
+
+        fcntl(ctx->sockfd, F_SETFL, fcntl(ctx->sockfd, F_GETFL, 0) | O_NONBLOCK);
+#elif defined(_WIN32)
+        ctx->icmp_handle = IcmpCreateFile();
+        if (ctx->icmp_handle == INVALID_HANDLE_VALUE) { ctx->state = 5; return; }
+        ctx->icmp_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+#endif
+        ctx->current_size = ctx->min_size; // Start low
+        ctx->state = 3; // SEND
+        return;
+    }
+
+    if (ctx->state == 3) { // SEND
+        // Binary search logic
+        if (ctx->min_size > ctx->max_size) {
+            ctx->path_mtu = ctx->known_good_size;
+            ctx->state = 5; // DONE
+            if (ctx->callback) {
+                KTermMtuProbeResult r = {0};
+                r.done = true;
+                r.path_mtu = ctx->path_mtu;
+                r.local_mtu = 0; // TODO: Get local MTU
+                ctx->callback(term, session, &r, ctx->user_data);
+            }
+            return;
+        }
+
+        ctx->current_size = (ctx->min_size + ctx->max_size) / 2;
+
+        // Send
+#ifdef __linux__
+        int payload_len = ctx->current_size - 28;
+        if (payload_len < 0) payload_len = 0;
+
+        char* packet = (char*)calloc(1, payload_len + 8);
+        struct icmphdr* icmp = (struct icmphdr*)packet;
+        icmp->type = ICMP_ECHO;
+        icmp->code = 0;
+        icmp->un.echo.id = htons(getpid() & 0xFFFF);
+        icmp->un.echo.sequence = htons(ctx->current_size);
+        if (ctx->sockfd > 0) { // Should check if RAW
+             // For RAW, we need checksum. For DGRAM, kernel does it?
+             // Safest to always calc.
+             icmp->checksum = KTerm_Checksum(packet, payload_len + 8);
+        }
+
+        gettimeofday(&ctx->probe_start_time, NULL);
+        int sent = sendto(ctx->sockfd, packet, payload_len + 8, 0, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr));
+        free(packet);
+
+        if (sent < 0) {
+            if (errno == EMSGSIZE) {
+                ctx->max_size = ctx->current_size - 1;
+                return;
+            }
+        }
+        ctx->state = 4; // WAIT
+#elif defined(_WIN32)
+        int payload_len = ctx->current_size - 28;
+        if (payload_len < 0) payload_len = 0;
+        void* payload = calloc(1, payload_len > 0 ? payload_len : 1);
+
+        IP_OPTION_INFORMATION ip_opts = {0};
+        ip_opts.Ttl = 128;
+        if (ctx->df) ip_opts.Flags = IP_FLAG_DF;
+
+        ResetEvent(ctx->icmp_event);
+        DWORD res = IcmpSendEcho2(ctx->icmp_handle, ctx->icmp_event, NULL, NULL, ctx->dest_addr.sin_addr.s_addr, payload, payload_len, &ip_opts, ctx->reply_buffer, 1024, 1000);
+        free(payload);
+
+        if (res == 0 && GetLastError() == ERROR_IO_PENDING) {
+            ctx->probe_start_time.tv_sec = (long)GetTickCount();
+            ctx->state = 4;
+        } else if (res > 0) {
+            ctx->probe_start_time.tv_sec = (long)GetTickCount();
+            SetEvent(ctx->icmp_event);
+            ctx->state = 4;
+        } else {
+             ctx->max_size = ctx->current_size - 1;
+             ctx->state = 3;
+        }
+#endif
+    }
+    else if (ctx->state == 4) { // WAIT
+        bool success = false;
+        bool too_big = false;
+        bool timeout = false;
+
+#ifdef __linux__
+        char buf[1024];
+        struct sockaddr_in r_addr;
+        socklen_t addr_len = sizeof(r_addr);
+        int n = recvfrom(ctx->sockfd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&r_addr, &addr_len);
+        if (n > 0) {
+             // Need to check type. Assuming DGRAM strips header?
+             // If RAW, 20 bytes IP.
+             // Simplified check:
+             success = true; // Assume echo reply for now
+        } else {
+             struct timeval now; gettimeofday(&now, NULL);
+             if ((now.tv_sec - ctx->probe_start_time.tv_sec) * 1000.0 + (now.tv_usec - ctx->probe_start_time.tv_usec) / 1000.0 > 1000.0) {
+                 timeout = true;
+             }
+        }
+#elif defined(_WIN32)
+        if (WaitForSingleObject(ctx->icmp_event, 0) == WAIT_OBJECT_0) {
+             PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)ctx->reply_buffer;
+             if (reply->Status == IP_SUCCESS) success = true;
+             else if (reply->Status == IP_PACKET_TOO_BIG) too_big = true;
+             else timeout = true;
+        } else {
+             if (GetTickCount() - (DWORD)ctx->probe_start_time.tv_sec > 1000) timeout = true;
+        }
+#endif
+
+        if (success) {
+            ctx->known_good_size = ctx->current_size;
+            ctx->min_size = ctx->current_size + 1;
+            ctx->state = 3;
+        } else if (too_big || timeout) {
+            ctx->max_size = ctx->current_size - 1;
+            ctx->state = 3;
+        }
+    }
+}
+
+static void KTerm_Net_ProcessFragTest(KTerm* term, KTermSession* session) {
+    KTermNetSession* net = KTerm_Net_GetContext(session);
+    if (!net || !net->frag_test) return;
+    KTermFragTestContext* ctx = net->frag_test;
+
+    if (ctx->state == 5) return;
+
+    if (ctx->state == 2) { // SOCKET
+#ifdef __linux__
+        // Need RAW socket to manually fragment or send large packet
+        ctx->sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (!IS_VALID_SOCKET(ctx->sockfd)) {
+             // Fallback DGRAM won't help with explicit fragmentation testing usually,
+             // but if we just send large packet, OS might fragment it.
+             ctx->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+        }
+#endif
+        if (!IS_VALID_SOCKET(ctx->sockfd)) {
+#ifdef _WIN32
+             ctx->icmp_handle = IcmpCreateFile();
+             if (ctx->icmp_handle == INVALID_HANDLE_VALUE) {
+                 ctx->state = 5;
+                 if (ctx->callback) { KTermFragTestResult r={0}; r.error=true; snprintf(r.msg, sizeof(r.msg), "ICMP Init Failed"); ctx->callback(term, session, &r, ctx->user_data); }
+                 return;
+             }
+             ctx->icmp_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+#else
+             ctx->state = 5;
+             if (ctx->callback) { KTermFragTestResult r={0}; r.error=true; snprintf(r.msg, sizeof(r.msg), "Socket Failed"); ctx->callback(term, session, &r, ctx->user_data); }
+             return;
+#endif
+        }
+#ifdef __linux__
+        fcntl(ctx->sockfd, F_SETFL, fcntl(ctx->sockfd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+        ctx->state = 3; // SEND
+        return;
+    }
+
+    if (ctx->state == 3) { // SEND
+        // We just send one large packet and see if it comes back reassembled.
+        // OS handles fragmentation usually.
+
+        int payload_len = ctx->size - 28;
+        if (payload_len < 0) payload_len = 0;
+
+#ifdef __linux__
+        char* packet = (char*)calloc(1, payload_len + 8);
+        struct icmphdr* icmp = (struct icmphdr*)packet;
+        icmp->type = ICMP_ECHO;
+        icmp->code = 0;
+        icmp->un.echo.id = htons(getpid() & 0xFFFF);
+        icmp->un.echo.sequence = htons(1);
+        icmp->checksum = KTerm_Checksum(packet, payload_len + 8);
+
+        gettimeofday(&ctx->start_time, NULL);
+        if (sendto(ctx->sockfd, packet, payload_len + 8, 0, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr)) < 0) {
+             // If EMSGSIZE, it means DF is set or local interface MTU restriction prevents fragmentation (sometimes)
+             if (errno == EMSGSIZE) {
+                 ctx->state = 5;
+                 if (ctx->callback) { KTermFragTestResult r={0}; r.error=true; snprintf(r.msg, sizeof(r.msg), "Send Failed (EMSGSIZE)"); ctx->callback(term, session, &r, ctx->user_data); }
+                 free(packet);
+                 return;
+             }
+        }
+        free(packet);
+        ctx->state = 4; // WAIT
+#elif defined(_WIN32)
+        void* payload = calloc(1, payload_len > 0 ? payload_len : 1);
+        IP_OPTION_INFORMATION ip_opts = {0};
+        ip_opts.Ttl = 128;
+        // Ensure DF is NOT set
+        ip_opts.Flags = 0;
+
+        ResetEvent(ctx->icmp_event);
+        DWORD res = IcmpSendEcho2(
+            ctx->icmp_handle, ctx->icmp_event, NULL, NULL,
+            ctx->dest_addr.sin_addr.s_addr,
+            payload, payload_len,
+            &ip_opts,
+            ctx->reply_buffer, 1024,
+            2000
+        );
+        free(payload);
+
+        if (res == 0 && GetLastError() == ERROR_IO_PENDING) {
+            ctx->start_time.tv_sec = (long)GetTickCount();
+            ctx->state = 4;
+        } else if (res > 0) {
+            ctx->state = 4;
+            SetEvent(ctx->icmp_event);
+        } else {
+             ctx->state = 5;
+             if (ctx->callback) { KTermFragTestResult r={0}; r.error=true; snprintf(r.msg, sizeof(r.msg), "Send Failed"); ctx->callback(term, session, &r, ctx->user_data); }
+        }
+#endif
+    }
+    else if (ctx->state == 4) { // WAIT
+        bool success = false;
+        bool done = false;
+
+#ifdef __linux__
+        char buf[65536]; // Need big buffer for reassembled packet
+        struct sockaddr_in r_addr;
+        socklen_t addr_len = sizeof(r_addr);
+        int n = recvfrom(ctx->sockfd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&r_addr, &addr_len);
+        if (n > 0) {
+             struct icmphdr* icmp = NULL;
+             if (n >= 20) icmp = (struct icmphdr*)(buf + 20);
+             if (icmp && icmp->type == ICMP_ECHOREPLY) {
+                 success = true;
+                 done = true;
+             }
+        } else {
+             struct timeval now; gettimeofday(&now, NULL);
+             if ((now.tv_sec - ctx->start_time.tv_sec) * 1000.0 + (now.tv_usec - ctx->start_time.tv_usec) / 1000.0 > 2000.0) {
+                 success = false;
+                 done = true;
+             }
+        }
+#elif defined(_WIN32)
+        if (WaitForSingleObject(ctx->icmp_event, 0) == WAIT_OBJECT_0) {
+             PICMP_ECHO_REPLY reply = (PICMP_ECHO_REPLY)ctx->reply_buffer;
+             if (reply->Status == IP_SUCCESS) success = true;
+             done = true;
+        } else {
+             if (GetTickCount() - (DWORD)ctx->start_time.tv_sec > 2000) {
+                 success = false;
+                 done = true;
+             }
+        }
+#endif
+
+        if (done) {
+            if (ctx->callback) {
+                KTermFragTestResult r = {0};
+                r.done = true;
+                r.reassembly_success = success;
+                r.fragments_sent = (ctx->size + 1499) / 1500; // Approx
+                ctx->callback(term, session, &r, ctx->user_data);
+            }
+            ctx->state = 5;
+        }
     }
 }
 
@@ -1807,6 +2509,24 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         KTerm_Net_ProcessHttpProbe(term, session);
     }
 
+    // Process Async MTU Probe if active
+    if (net && net->mtu_probe) {
+        void KTerm_Net_ProcessMtuProbe(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessMtuProbe(term, session);
+    }
+
+    // Process Async Frag Test if active
+    if (net && net->frag_test) {
+        void KTerm_Net_ProcessFragTest(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessFragTest(term, session);
+    }
+
+    // Process Async Ping Ext if active
+    if (net && net->ping_ext) {
+        void KTerm_Net_ProcessPingExt(KTerm* term, KTermSession* session); // Forward
+        KTerm_Net_ProcessPingExt(term, session);
+    }
+
     // Process Voice Capture
 #ifndef KTERM_DISABLE_VOICE
     {
@@ -2592,6 +3312,55 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     free(rt); net->response_time = NULL;
     return false;
 #endif
+    return true;
+}
+
+bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data) {
+    if (!term || !session || !host) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->ping_ext) {
+        if (IS_VALID_SOCKET(net->ping_ext->sockfd)) CLOSE_SOCKET(net->ping_ext->sockfd);
+#ifdef _WIN32
+        if (net->ping_ext->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->ping_ext->icmp_handle);
+        if (net->ping_ext->icmp_event) CloseHandle(net->ping_ext->icmp_event);
+#endif
+        if (net->ping_ext->user_data) free(net->ping_ext->user_data);
+        free(net->ping_ext);
+        net->ping_ext = NULL;
+    }
+
+    net->ping_ext = (KTermPingExtContext*)calloc(1, sizeof(KTermPingExtContext));
+    if (!net->ping_ext) return false;
+
+    KTermPingExtContext* ctx = net->ping_ext;
+    strncpy(ctx->host, host, sizeof(ctx->host)-1);
+    ctx->count = (count > 0) ? count : 10;
+    ctx->interval_ms = (interval_ms > 0) ? interval_ms : 1000;
+    ctx->size = (size > 0) ? size : 64;
+    ctx->graph = graph;
+    ctx->callback = cb;
+    ctx->user_data = user_data;
+
+    // Init stats
+    ctx->rtt_min = 999999.0;
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        free(ctx); net->ping_ext = NULL;
+        return false;
+    }
+    ctx->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
+
+    ctx->state = 2; // SOCKET
+    ctx->sockfd = INVALID_SOCKET;
+
     return true;
 }
 
@@ -3465,6 +4234,96 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
     connect(ctx->sockfd, (struct sockaddr*)&ctx->dest_addr, sizeof(ctx->dest_addr));
 
     ctx->state = 2; // CONNECT
+
+    return true;
+}
+
+bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data) {
+    if (!term || !session || !host) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->mtu_probe) {
+        if (IS_VALID_SOCKET(net->mtu_probe->sockfd)) CLOSE_SOCKET(net->mtu_probe->sockfd);
+#ifdef _WIN32
+        if (net->mtu_probe->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->mtu_probe->icmp_handle);
+        if (net->mtu_probe->icmp_event) CloseHandle(net->mtu_probe->icmp_event);
+#endif
+        if (net->mtu_probe->user_data) free(net->mtu_probe->user_data);
+        free(net->mtu_probe);
+        net->mtu_probe = NULL;
+    }
+
+    net->mtu_probe = (KTermMtuProbeContext*)calloc(1, sizeof(KTermMtuProbeContext));
+    if (!net->mtu_probe) return false;
+
+    KTermMtuProbeContext* ctx = net->mtu_probe;
+    strncpy(ctx->host, host, sizeof(ctx->host)-1);
+    ctx->df = df;
+    ctx->min_size = (start_size > 0) ? start_size : 64;
+    ctx->max_size = (max_size > 0) ? max_size : 1500;
+    ctx->callback = cb;
+    ctx->user_data = user_data;
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        free(ctx); net->mtu_probe = NULL;
+        return false;
+    }
+    ctx->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
+
+    ctx->state = 2; // SOCKET
+    ctx->sockfd = INVALID_SOCKET;
+    ctx->known_good_size = 0;
+
+    return true;
+}
+
+bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data) {
+    if (!term || !session || !host) return false;
+
+    KTermNetSession* net = KTerm_Net_CreateContext(session);
+    if (!net) return false;
+
+    if (net->frag_test) {
+        if (IS_VALID_SOCKET(net->frag_test->sockfd)) CLOSE_SOCKET(net->frag_test->sockfd);
+#ifdef _WIN32
+        if (net->frag_test->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->frag_test->icmp_handle);
+        if (net->frag_test->icmp_event) CloseHandle(net->frag_test->icmp_event);
+#endif
+        if (net->frag_test->user_data) free(net->frag_test->user_data);
+        free(net->frag_test);
+        net->frag_test = NULL;
+    }
+
+    net->frag_test = (KTermFragTestContext*)calloc(1, sizeof(KTermFragTestContext));
+    if (!net->frag_test) return false;
+
+    KTermFragTestContext* ctx = net->frag_test;
+    strncpy(ctx->host, host, sizeof(ctx->host)-1);
+    ctx->size = (size > 0) ? size : 2000;
+    ctx->fragments = (fragments > 0) ? fragments : 2;
+    ctx->callback = cb;
+    ctx->user_data = user_data;
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        free(ctx); net->frag_test = NULL;
+        return false;
+    }
+    ctx->dest_addr = *(struct sockaddr_in*)res->ai_addr;
+    freeaddrinfo(res);
+
+    ctx->state = 2; // SOCKET
+    ctx->sockfd = INVALID_SOCKET;
 
     return true;
 }

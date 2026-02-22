@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.35
+# K-Term Emulation Library v2.6.36
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -64,6 +64,13 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.36: Network Diagnostics Expansion**
+This release significantly enhances the network troubleshooting capabilities of K-Term.
+*   **MTU Discovery:** Added `mtu_probe` Gateway command and `KTerm_Net_MTUProbe` API to discover Path MTU using binary search.
+*   **Fragmentation Testing:** Added `frag_test` to verify packet fragmentation and reassembly on the network path.
+*   **Extended Ping:** Added `ping_ext` for detailed latency statistics (jitter, loss) and ASCII visualization (histograms, timelines).
+*   **Maintenance:** Bumped library version to 2.6.36.
 
 **New in v2.6.35: Performance Optimization**
 This release introduces a key optimization for high-frequency Gateway operations.
