@@ -1,3 +1,7 @@
+## [v2.6.34] - Performance & Maintenance
+- **Performance**: Optimized Base64 decoding in Gateway Protocol using a lookup table (~3-5x faster).
+- **Maintenance**: Bumped library version to 2.6.34.
+
 ## [v2.6.33] - Critical Fixes
 - **Multiplexer Heap Corruption Fix**: Corrected bounds checking for VT operations in split-pane layouts.
 - **Thread-Safety**: Removed unsafe strtok usage in Gateway and Network modules.
