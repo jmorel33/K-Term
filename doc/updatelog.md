@@ -1,4 +1,5 @@
-## [v2.6.41] - LiveWire Stream Reassembly & Stats
+## [v2.6.41] - LiveWire Protocol Map & Stream Reassembly
+- **Feature**: Implemented **Protocol Map** for LiveWire, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).
 - **Feature**: Implemented **Stream Reassembly** and **Flow Tracking** for LiveWire packet analysis.
 - **LiveWire Flows**: Added `livewire_flows` command to list active network flows (5-tuple) with packet counts.
 - **LiveWire Follow**: Added `livewire_follow;flow_id=...` command to target a specific flow. Packets for the followed flow are reassembled and their payload displayed (Hex/ASCII) in real-time.

@@ -234,7 +234,102 @@ int main() {
         LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
 
         CheckBufferContains(&ctx, "TCP");
-        CheckBufferContains(&ctx, "HTTP GET /index.html HTTP/1.1");
+        CheckBufferContains(&ctx, "HTTP"); // Label
+        CheckBufferContains(&ctx, "GET /index.html HTTP/1.1");
+        ClearBuffer(&ctx);
+    }
+
+    // 5. Test SSH (TCP 22)
+    {
+        printf("Test 5: SSH (TCP 22)...\n");
+        unsigned char pkt[100];
+        memset(pkt, 0, sizeof(pkt));
+        struct pcap_pkthdr hdr = {0};
+        hdr.caplen = 60;
+        hdr.len = 60;
+
+        pkt[14] = 0x45;
+        pkt[23] = 6;   // TCP
+
+        // Dst Port 22
+        pkt[36] = 0x00; pkt[37] = 22;
+        // Data Offset
+        pkt[46] = 0x50;
+
+        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+
+        CheckBufferContains(&ctx, "SSH");
+        ClearBuffer(&ctx);
+    }
+
+    // 6. Test mDNS (UDP 5353)
+    {
+        printf("Test 6: mDNS (UDP 5353)...\n");
+        unsigned char pkt[100];
+        memset(pkt, 0, sizeof(pkt));
+        struct pcap_pkthdr hdr = {0};
+        hdr.caplen = 60;
+        hdr.len = 60;
+
+        pkt[14] = 0x45;
+        pkt[23] = 17;   // UDP
+
+        // Dst Port 5353 (0x14E9)
+        pkt[36] = 0x14; pkt[37] = 0xE9;
+        // Len
+        pkt[38] = 0; pkt[39] = 8 + 12; // Header + 12 bytes payload
+
+        // Payload (Empty DNS header)
+        pkt[42] = 0;
+
+        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+
+        CheckBufferContains(&ctx, "mDNS");
+        ClearBuffer(&ctx);
+    }
+
+    // 7. Test Dante Unicast (UDP 14336) - Range Check
+    {
+        printf("Test 7: Dante Unicast (UDP 14336)...\n");
+        unsigned char pkt[100];
+        memset(pkt, 0, sizeof(pkt));
+        struct pcap_pkthdr hdr = {0};
+        hdr.caplen = 60;
+        hdr.len = 60;
+
+        pkt[14] = 0x45;
+        pkt[23] = 17;   // UDP
+
+        // Dst Port 14336 (0x3800)
+        pkt[36] = 0x38; pkt[37] = 0x00;
+        pkt[38] = 0; pkt[39] = 20;
+
+        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+
+        CheckBufferContains(&ctx, "Dante Unicast");
+        ClearBuffer(&ctx);
+    }
+
+    // 8. Test FTP (TCP 21) - Verify Expanded Map
+    {
+        printf("Test 8: FTP (TCP 21)...\n");
+        unsigned char pkt[100];
+        memset(pkt, 0, sizeof(pkt));
+        struct pcap_pkthdr hdr = {0};
+        hdr.caplen = 60;
+        hdr.len = 60;
+
+        pkt[14] = 0x45;
+        pkt[23] = 6;   // TCP
+
+        // Dst Port 21
+        pkt[36] = 0x00; pkt[37] = 21;
+        // Data Offset
+        pkt[46] = 0x50;
+
+        LiveWire_PacketHandler((u_char*)&ctx, &hdr, pkt);
+
+        CheckBufferContains(&ctx, "FTP");
         ClearBuffer(&ctx);
     }
 
