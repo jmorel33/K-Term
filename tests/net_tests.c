@@ -365,10 +365,44 @@ void test_cancel_diag(KTerm* term, KTermSession* session) {
     KTerm_Net_DestroyContext(session);
 }
 
+void test_protocol_identification() {
+    printf("  Testing Protocol Identification...\n");
+
+    // Test exact match (HTTP)
+    const KTermProtocolDef* p = KTerm_Net_IdentifyProtocol(80, false);
+    assert(p != NULL);
+    assert(strcmp(p->short_name, "HTTP") == 0);
+    assert(strcmp(p->category, "Web") == 0);
+
+    // Test range match (Dante Unicast)
+    p = KTerm_Net_IdentifyProtocol(14336, true);
+    assert(p != NULL);
+    assert(strcmp(p->short_name, "Dante-U") == 0);
+    assert(strcmp(p->category, "Media") == 0);
+
+    // Test Steam P2P (UDP 27015)
+    p = KTerm_Net_IdentifyProtocol(27015, true);
+    assert(p != NULL);
+    assert(strcmp(p->short_name, "Steam") == 0);
+    assert(strcmp(p->category, "Gaming") == 0);
+
+    // Test Discord Voice (UDP 50000-65535) - matches Discord first
+    p = KTerm_Net_IdentifyProtocol(55000, true);
+    assert(p != NULL);
+    assert(strcmp(p->short_name, "Discord-Voice") == 0);
+    assert(strcmp(p->category, "Messaging") == 0);
+
+    // Test unknown port
+    p = KTerm_Net_IdentifyProtocol(9999, false);
+    assert(p == NULL);
+}
+
 int main() {
     printf("========================================\n");
     printf("Starting Network Diagnostics Tests\n");
     printf("========================================\n");
+
+    test_protocol_identification();
 
     KTerm* term = create_test_term(80, 24);
     if (!term) {

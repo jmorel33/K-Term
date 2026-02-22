@@ -26,6 +26,19 @@ typedef struct KTermFragTestContext KTermFragTestContext;
 typedef struct KTermPingExtContext KTermPingExtContext;
 typedef struct KTermLiveWireContext KTermLiveWireContext;
 
+// Protocol Definition (Public for introspection)
+typedef struct {
+    uint16_t port_start;
+    uint16_t port_end;          // 0 if single port, else range end (inclusive)
+    const char *short_name;     // e.g., "HTTP"
+    const char *full_name;      // e.g., "Hypertext Transfer Protocol"
+    const char *category;       // "Web", "Media", "VoIP", etc.
+    const char *ansi_color;     // ANSI escape, e.g., ANSI_MAGENTA
+    bool is_udp_preferred;      // true if typically UDP/multicast (for filtering/display priority)
+    bool is_multicast;          // true if commonly multicast (e.g., Dante/PTP/mDNS)
+    const char *notes;          // Optional: "Multicast only", "Dynamic in some cases", etc.
+} KTermProtocolDef;
+
 // --- Networking Context & State ---
 
 typedef enum {
@@ -403,6 +416,161 @@ void KTerm_Net_FreeLiveWire(KTermLiveWireContext* ctx);
 // Forward declarations
 static double KTerm_GetTime(void);
 static unsigned short KTerm_Checksum(void *b, int len);
+
+// ANSI Colors for Protocol ID and LiveWire
+#define ANSI_RESET "\x1B[0m"
+#define ANSI_GRAY  "\x1B[90m"
+#define ANSI_RED   "\x1B[31m"
+#define ANSI_GREEN "\x1B[32m"
+#define ANSI_YELLOW "\x1B[33m"
+#define ANSI_BLUE  "\x1B[34m"
+#define ANSI_MAGENTA "\x1B[35m"
+#define ANSI_PURPLE "\x1B[35m" // Mapped to Magenta for standard ANSI
+#define ANSI_CYAN  "\x1B[36m"
+
+static const KTermProtocolDef kterm_protocols[] = {
+    // ── Web / Modern ─────────────────────────────────────────────────────────────
+    { 80,    0,    "HTTP",      "Hypertext Transfer Protocol",               "Web",     ANSI_YELLOW,  false, false, NULL },
+    { 443,   0,    "HTTPS",     "HTTPS / HTTP/3 (QUIC)",                      "Web",     ANSI_YELLOW,  false, false, "TCP classic; UDP for QUIC/HTTP/3" },
+    { 8080,  0,    "HTTP-Alt",  "HTTP Alternate / Proxy",                     "Web",     ANSI_YELLOW,  false, false, "Dev/testing" },
+    { 8443,  0,    "HTTPS-Alt", "HTTPS Alternate",                            "Web",     ANSI_YELLOW,  false, false, NULL },
+    { 853,   0,    "DoT/DoQ",   "DNS over TLS / DNS over QUIC",               "Web",     ANSI_CYAN,    true,  false, "Secure/encrypted DNS" },
+
+    // ── File Transfer ────────────────────────────────────────────────────────────
+    { 20,    0,    "FTP-Data",  "FTP Data",                                   "File",    ANSI_YELLOW,  true,  false, NULL },
+    { 21,    0,    "FTP",       "FTP Control",                                "File",    ANSI_YELLOW,  false, false, NULL },
+    { 69,    0,    "TFTP",      "Trivial File Transfer Protocol",             "File",    ANSI_YELLOW,  true,  false, "UDP only" },
+    { 445,   0,    "SMB",       "Server Message Block / CIFS",                "File",    ANSI_YELLOW,  false, false, "Windows shares" },
+    { 2049,  0,    "NFS",       "Network File System",                        "File",    ANSI_YELLOW,  true,  false, "Often UDP" },
+
+    // ── Email ────────────────────────────────────────────────────────────────────
+    { 25,    0,    "SMTP",      "Simple Mail Transfer Protocol",              "Mail",    ANSI_YELLOW,  false, false, NULL },
+    { 465,   0,    "SMTPS",     "SMTP over TLS (implicit)",                   "Mail",    ANSI_YELLOW,  false, false, "Preferred secure submission" },
+    { 587,   0,    "SMTP-Sub",  "SMTP Submission (STARTTLS)",                 "Mail",    ANSI_YELLOW,  false, false, NULL },
+    { 110,   0,    "POP3",      "Post Office Protocol v3",                    "Mail",    ANSI_YELLOW,  false, false, NULL },
+    { 995,   0,    "POP3S",     "POP3 Secure",                                "Mail",    ANSI_YELLOW,  false, false, NULL },
+    { 143,   0,    "IMAP",      "Internet Message Access Protocol",           "Mail",    ANSI_YELLOW,  false, false, NULL },
+    { 993,   0,    "IMAPS",     "IMAP Secure",                                "Mail",    ANSI_YELLOW,  false, false, NULL },
+
+    // ── Remote Access ────────────────────────────────────────────────────────────
+    { 22,    0,    "SSH",       "Secure Shell / SFTP",                        "Remote",  ANSI_RED,     false, false, NULL },
+    { 23,    0,    "Telnet",    "Telnet (insecure)",                          "Remote",  ANSI_RED,     false, false, NULL },
+    { 3389,  0,    "RDP",       "Remote Desktop Protocol",                    "Remote",  ANSI_RED,     false, false, NULL },
+    { 5900,  0,    "VNC",       "Virtual Network Computing",                  "Remote",  ANSI_RED,     false, false, NULL },
+
+    // ── Infrastructure / Discovery ───────────────────────────────────────────────
+    { 53,    0,    "DNS",       "Domain Name System",                         "Infra",   ANSI_CYAN,    true,  false, "UDP primary" },
+    { 67,    0,    "DHCP-S",    "DHCP Server",                                "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 68,    0,    "DHCP-C",    "DHCP Client",                                "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 123,   0,    "NTP",       "Network Time Protocol",                      "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 161,   0,    "SNMP",      "Simple Network Management Protocol",         "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 162,   0,    "SNMP-Trap", "SNMP Trap",                                  "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 514,   0,    "Syslog",    "System Logging Protocol",                    "Infra",   ANSI_CYAN,    true,  false, NULL },
+    { 5353,  0,    "mDNS",      "Multicast DNS / Bonjour",                    "Infra",   ANSI_CYAN,    true,  true,  "224.0.0.251 multicast" },
+
+    // ── VPN / Tunneling ──────────────────────────────────────────────────────────
+    { 500,   0,    "IKE",       "Internet Key Exchange (IPsec)",              "VPN",     ANSI_RED,     true,  false, NULL },
+    { 4500,  0,    "IPsec-NAT", "IPsec NAT Traversal",                        "VPN",     ANSI_RED,     true,  false, NULL },
+    { 1194,  0,    "OpenVPN",   "OpenVPN",                                    "VPN",     ANSI_RED,     true,  false, NULL },
+    { 1701,  0,    "L2TP",      "Layer 2 Tunneling Protocol",                 "VPN",     ANSI_RED,     true,  false, NULL },
+
+    // ── Databases ────────────────────────────────────────────────────────────────
+    { 1433,  0,    "MSSQL",     "Microsoft SQL Server",                       "DB",      ANSI_GREEN,   false, false, NULL },
+    { 3306,  0,    "MySQL",     "MySQL / MariaDB",                            "DB",      ANSI_GREEN,   false, false, NULL },
+    { 5432,  0,    "PostgreSQL","PostgreSQL",                                 "DB",      ANSI_GREEN,   false, false, NULL },
+    { 27017, 0,    "MongoDB",   "MongoDB",                                    "DB",      ANSI_GREEN,   false, false, NULL },
+    { 6379,  0,    "Redis",     "Redis Key-Value Store",                      "DB",      ANSI_GREEN,   false, false, NULL },
+    { 9042,  0,    "Cassandra", "Apache Cassandra CQL",                       "DB",      ANSI_GREEN,   false, false, NULL },
+    { 9200,  0,    "Elasticsearch","Elasticsearch HTTP",                      "DB",      ANSI_GREEN,   false, false, NULL },
+
+    // ── Media / AV / Dante / AES67 / VoIP ────────────────────────────────────────
+    { 319,   0,    "PTP-Evt",   "PTP Event (IEEE 1588)",                      "Media",   ANSI_CYAN,    true,  true,  "Multicast 224.0.1.129+" },
+    { 320,   0,    "PTP-Gen",   "PTP General (IEEE 1588)",                    "Media",   ANSI_CYAN,    true,  true,  "Multicast" },
+    { 4321,  0,    "Dante-M",   "Dante Multicast Audio",                      "Media",   ANSI_MAGENTA, true,  true,  "Multicast 239.255.0.0/16, DSCP EF/46" },
+    {14336,15359,"Dante-U",    "Dante Unicast Audio",                        "Media",   ANSI_MAGENTA, true,  false, "Dynamic range" },
+    {34336,34600,"Dante-Via",  "Dante Via Unicast Audio",                    "Media",   ANSI_MAGENTA, true,  false, NULL },
+    { 5004,  0,    "RTP",       "Real-time Transport Protocol / AES67",       "Media",   ANSI_MAGENTA, true,  true,  "AES67 multicast 239.69.0.0/16" },
+    { 5005,  0,    "RTCP",      "RTP Control Protocol",                       "Media",   ANSI_MAGENTA, true,  false, "Usually RTP+1" },
+    { 9875,  0,    "SAP",       "Session Announcement Protocol (AES67)",      "Media",   ANSI_MAGENTA, true,  true,  "Discovery multicast" },
+    { 8700, 8708,"Dante-Ctrl", "Dante Control/Monitoring",                    "Media",   ANSI_MAGENTA, true,  true,  "Multicast 224.0.0.230-233" },
+    { 4440,  0,    "Dante-Rt",  "Dante Routing/Control",                      "Media",   ANSI_MAGENTA, true,  false, NULL },
+    { 6454,  0,    "Art-Net",   "Art-Net Lighting Control",                   "Media",   ANSI_MAGENTA, true,  false, "Broadcast/unicast" },
+    { 5568,  0,    "sACN",      "Streaming ACN (E1.31)",                      "Media",   ANSI_MAGENTA, true,  true,  "Multicast" },
+    { 5060,  0,    "SIP",       "Session Initiation Protocol",                "VoIP",    ANSI_MAGENTA, false, false, "UDP/TCP" },
+    { 5061,  0,    "SIPS",      "SIP Secure",                                 "VoIP",    ANSI_MAGENTA, false, false, NULL },
+    { 554,   0,    "RTSP",      "Real Time Streaming Protocol",               "Media",   ANSI_MAGENTA, false, false, NULL },
+
+    // ── IoT / Messaging ──────────────────────────────────────────────────────────
+    { 1883,  0,    "MQTT",      "MQTT",                                       "IoT",     ANSI_YELLOW,  false, false, NULL },
+    { 8883,  0,    "MQTTS",     "MQTT Secure",                                "IoT",     ANSI_YELLOW,  false, false, NULL },
+    { 5683,  0,    "CoAP",      "Constrained Application Protocol",           "IoT",     ANSI_YELLOW,  true,  false, "Lightweight IoT" },
+
+    // ── Gaming ───────────────────────────────────────────────────────────────────
+    { 27015, 27050, "Steam",     "Steam Client/Server/Game Traffic",        "Gaming", ANSI_BLUE, true,  false, "TCP/UDP: login, downloads, P2P" },
+    {27000, 27250, "Steam-Game", "Steam Game Traffic (UDP heavy)",           "Gaming", ANSI_BLUE, true,  false, "Multiplayer sessions" },
+    {27031, 27036, "Steam-Play", "Steam Remote Play",                        "Gaming", ANSI_BLUE, true,  false, "UDP local/remote" },
+    { 3074,   0,   "Xbox-Live",  "Xbox Live / Games for Windows Live",       "Gaming", ANSI_BLUE, true,  false, "TCP/UDP core for multiplayer" },
+    { 3478,   0,   "STUN/TURN",  "STUN / TURN (NAT traversal for games)",    "Gaming", ANSI_BLUE, true,  false, "Used by PlayStation, Xbox, Epic" },
+    { 3479,   0,   "STUN/TURN",  "STUN / TURN Alternate",                    "Gaming", ANSI_BLUE, true,  false, NULL },
+    { 25565,  0,   "Minecraft",  "Minecraft Java/Bedrock Server",            "Gaming", ANSI_BLUE, false, false, "TCP primary, UDP optional" },
+    { 3724,   0,   "WoW/Blizz",  "World of Warcraft / Blizzard Games",       "Gaming", ANSI_BLUE, true,  false, "TCP/UDP for many Blizzard titles" },
+    { 6112,   0,   "Battle.net", "Blizzard Battle.net Legacy",               "Gaming", ANSI_BLUE, true,  false, "Diablo, older games" },
+    {5222,  5228,  "Epic-Fort",  "Epic Games / Fortnite (XMPP-like)",        "Gaming", ANSI_BLUE, true,  false, "UDP for voice/chat in some titles" },
+
+    // ── Messaging / Chat ─────────────────────────────────────────────────────────
+    { 443,    0,   "Discord",    "Discord (HTTPS + Voice/Chat)",             "Messaging", ANSI_PURPLE, true, false, "TCP/UDP; voice often 50000–65535 UDP" },
+    {50000,65535,"Discord-Voice","Discord Voice RTP/UDP",                   "Messaging", ANSI_PURPLE, true, false, "Dynamic high ports for audio" },
+    { 443,    0,   "Slack",      "Slack (WebSocket/HTTPS)",                  "Messaging", ANSI_PURPLE, false, false, "Primary for team chat" },
+    {5222, 5228,  "WhatsApp",    "WhatsApp (XMPP-based client)",             "Messaging", ANSI_PURPLE, false, false, "TCP; encrypted messaging" },
+    { 443,    0,   "Signal",     "Signal (HTTPS fallback)",                  "Messaging", ANSI_PURPLE, true,  false, "No fixed port; often 443 TCP/UDP" },
+    { 443,    0,   "Telegram",   "Telegram (MTProto over HTTPS)",            "Messaging", ANSI_PURPLE, true,  false, "TCP/UDP; voice calls dynamic" },
+    { 5222,   0,   "XMPP/Jabber","XMPP Client Connection (Jabber)",          "Messaging", ANSI_PURPLE, false, false, "Standard for many federated chats" },
+    { 5269,   0,   "XMPP-S2S",   "XMPP Server-to-Server",                    "Messaging", ANSI_PURPLE, false, false, "Federation port" },
+    { 8448,   0,   "Matrix-Fed", "Matrix Federation (HTTPS)",                "Messaging", ANSI_PURPLE, false, false, "Server-to-server" },
+    { 5222,   0,   "Matrix-Clnt", "Matrix Client-Server (often 5222-like)", "Messaging", ANSI_PURPLE, false, false, "Synapse default or 8008/8448" },
+    { 6667,   0,   "IRC",        "Internet Relay Chat (classic)",            "Messaging", ANSI_PURPLE, false, false, "Plaintext IRC" },
+    { 6697,   0,   "IRC-TLS",    "IRC over TLS",                              "Messaging", ANSI_PURPLE, false, false, "Secure IRC" },
+
+    // ── Low Priority / Broad Ranges ──────────────────────────────────────────────
+    {49152,65535,  "Roblox-Dyn","Roblox Dynamic Ports (P2P/Voice)",          "Gaming", ANSI_BLUE, true,  false, "High ephemeral range" },
+
+    // Sentinel (must be last)
+    { 0,     0,    NULL,        NULL,                                         NULL,      NULL,         false, false, NULL }
+};
+
+static const KTermProtocolDef* KTerm_Net_IdentifyProtocol(uint16_t port, bool is_udp) {
+    const KTermProtocolDef* best_match = NULL;
+
+    for (int i = 0; kterm_protocols[i].short_name != NULL; i++) {
+        // Range check
+        bool match = false;
+        if (kterm_protocols[i].port_end > 0) {
+            if (port >= kterm_protocols[i].port_start && port <= kterm_protocols[i].port_end) match = true;
+        } else {
+            if (port == kterm_protocols[i].port_start) match = true;
+        }
+
+        if (match) {
+            // Found a match. Prioritize exact matches over ranges.
+            if (kterm_protocols[i].port_end == 0) {
+                // Exact match found. Check if transport matches strictly if needed, but for now we return first exact.
+                // Optionally, we could prefer is_udp match if multiple exacts exist (e.g. Kerberos).
+                if (!best_match || best_match->port_end > 0) {
+                    best_match = &kterm_protocols[i];
+                } else if (kterm_protocols[i].is_udp_preferred == is_udp) {
+                    // Both exact, prefer matching transport
+                    best_match = &kterm_protocols[i];
+                }
+            } else {
+                // Range match. Keep looking for exact match.
+                if (!best_match) {
+                    best_match = &kterm_protocols[i];
+                }
+            }
+        }
+    }
+    return best_match;
+}
 
 #ifndef KTERM_DISABLE_VOICE
 typedef struct {
@@ -2696,11 +2864,13 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
         KTerm_Net_ProcessPingExt(term, session);
     }
 
+#ifdef KTERM_ENABLE_LIVEWIRE
     // Process LiveWire
     if (net && net->livewire) {
         void KTerm_Net_ProcessLiveWire(KTerm* term, KTermSession* session); // Forward
         KTerm_Net_ProcessLiveWire(term, session);
     }
+#endif
 
     // Process Voice Capture
 #ifndef KTERM_DISABLE_VOICE
@@ -4099,121 +4269,36 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
 
 #ifdef KTERM_ENABLE_LIVEWIRE
 
-// ANSI Colors
-#define ANSI_RESET "\x1B[0m"
-#define ANSI_GRAY  "\x1B[90m"
-#define ANSI_RED   "\x1B[31m"
-#define ANSI_GREEN "\x1B[32m"
-#define ANSI_YELLOW "\x1B[33m"
-#define ANSI_BLUE  "\x1B[34m"
-#define ANSI_MAGENTA "\x1B[35m"
-#define ANSI_CYAN  "\x1B[36m"
-
-typedef struct {
-    uint16_t port;
-    const char* name;
-    const char* color;
-    bool is_udp;
-} ProtocolDef;
-
-static const ProtocolDef kterm_protocols[] = {
-    // Web
-    { 80, "HTTP", ANSI_YELLOW, false },
-    { 443, "HTTPS", ANSI_YELLOW, false },
-    { 8080, "HTTP-Alt", ANSI_YELLOW, false },
-    // File Transfer
-    { 20, "FTP-Data", ANSI_YELLOW, false },
-    { 21, "FTP", ANSI_YELLOW, false },
-    { 69, "TFTP", ANSI_YELLOW, true },
-    { 445, "SMB", ANSI_YELLOW, false },
-    { 2049, "NFS", ANSI_YELLOW, false },
-    { 2049, "NFS", ANSI_YELLOW, true },
-    // Email
-    { 25, "SMTP", ANSI_YELLOW, false },
-    { 587, "SMTP-Sub", ANSI_YELLOW, false },
-    { 110, "POP3", ANSI_YELLOW, false },
-    { 995, "POP3S", ANSI_YELLOW, false },
-    { 143, "IMAP", ANSI_YELLOW, false },
-    { 993, "IMAPS", ANSI_YELLOW, false },
-    // Remote Access
-    { 22, "SSH", ANSI_RED, false },
-    { 23, "Telnet", ANSI_RED, false },
-    { 3389, "RDP", ANSI_RED, false },
-    { 3389, "RDP", ANSI_RED, true },
-    { 5900, "VNC", ANSI_RED, false },
-    // Infrastructure
-    { 53, "DNS", ANSI_YELLOW, true },
-    { 53, "DNS", ANSI_YELLOW, false },
-    { 67, "DHCP-S", ANSI_CYAN, true },
-    { 68, "DHCP-C", ANSI_CYAN, true },
-    { 123, "NTP", ANSI_CYAN, true },
-    { 161, "SNMP", ANSI_CYAN, true },
-    { 162, "SNMP-Trap", ANSI_CYAN, true },
-    { 514, "Syslog", ANSI_CYAN, true },
-    // Directory / Auth
-    { 389, "LDAP", ANSI_YELLOW, false },
-    { 636, "LDAPS", ANSI_YELLOW, false },
-    { 88, "Kerberos", ANSI_RED, false },
-    { 88, "Kerberos", ANSI_RED, true },
-    // Discovery
-    { 5353, "mDNS", ANSI_YELLOW, true },
-    { 1900, "SSDP", ANSI_YELLOW, true },
-    { 5355, "LLMNR", ANSI_YELLOW, true },
-    { 3702, "WS-Disco", ANSI_YELLOW, true },
-    // VPN
-    { 500, "IKE", ANSI_RED, true },
-    { 4500, "IPsec-NAT", ANSI_RED, true },
-    { 1194, "OpenVPN", ANSI_RED, true },
-    { 1701, "L2TP", ANSI_RED, true },
-    // AV & Lighting
-    { 319, "PTP-Evt", ANSI_CYAN, true },
-    { 320, "PTP-Gen", ANSI_CYAN, true },
-    { 4321, "Dante Audio", ANSI_MAGENTA, true },
-    { 9875, "SAP", ANSI_MAGENTA, true },
-    { 5004, "RTP", ANSI_MAGENTA, true },
-    { 6454, "Art-Net", ANSI_MAGENTA, true },
-    { 5568, "sACN", ANSI_MAGENTA, true },
-    { 5060, "SIP", ANSI_MAGENTA, false },
-    { 5060, "SIP", ANSI_MAGENTA, true },
-    { 5061, "SIP-TLS", ANSI_MAGENTA, false },
-    { 554, "RTSP", ANSI_MAGENTA, false },
-    // Dante Control
-    { 8700, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 8702, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 8703, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 8708, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 4440, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 4444, "Dante Ctrl", ANSI_MAGENTA, true },
-    { 4455, "Dante Ctrl", ANSI_MAGENTA, true },
-    // Other
-    { 1883, "MQTT", ANSI_YELLOW, false },
-    { 8883, "MQTTS", ANSI_YELLOW, false },
-    { 0, NULL, NULL, false }
-};
-
 static const char* LiveWire_IdentifyProtocol(uint16_t src_port, uint16_t dst_port, bool is_udp, const char** color_out) {
-    // Check Map
-    for (int i=0; kterm_protocols[i].name; i++) {
-        if (kterm_protocols[i].is_udp == is_udp) {
-            if (kterm_protocols[i].port == src_port || kterm_protocols[i].port == dst_port) {
-                if (color_out) *color_out = kterm_protocols[i].color;
-                return kterm_protocols[i].name;
-            }
+    const KTermProtocolDef* p_src = KTerm_Net_IdentifyProtocol(src_port, is_udp);
+    const KTermProtocolDef* p_dst = KTerm_Net_IdentifyProtocol(dst_port, is_udp);
+    const KTermProtocolDef* p = NULL;
+
+    bool src_exact = p_src && (p_src->port_end == 0);
+    bool dst_exact = p_dst && (p_dst->port_end == 0);
+
+    if (src_exact && !dst_exact) {
+        p = p_src;
+    } else if (!src_exact && dst_exact) {
+        p = p_dst;
+    } else if (src_exact && dst_exact) {
+        // Both exact. Prefer lower port (server usually)
+        if (src_port <= dst_port) p = p_src;
+        else p = p_dst;
+    } else {
+        // Both ranges or neither
+        if (p_src && !p_dst) p = p_src;
+        else if (!p_src && p_dst) p = p_dst;
+        else if (p_src && p_dst) {
+             if (src_port <= dst_port) p = p_src;
+             else p = p_dst;
         }
     }
 
-    // Check Ranges
-    if (is_udp) {
-        if ((src_port >= 14336 && src_port <= 15359) || (dst_port >= 14336 && dst_port <= 15359)) {
-            if (color_out) *color_out = ANSI_MAGENTA;
-            return "Dante Unicast";
-        }
-        if ((src_port >= 34336 && src_port <= 34600) || (dst_port >= 34336 && dst_port <= 34600)) {
-            if (color_out) *color_out = ANSI_MAGENTA;
-            return "Dante Via";
-        }
+    if (p) {
+        if (color_out) *color_out = p->ansi_color;
+        return p->short_name;
     }
-
     return NULL;
 }
 
@@ -5182,7 +5267,7 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
     }
     else if (ctx->state == 3) { // SEND
         char req[2048];
-        snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KTerm/2.6.41\r\nConnection: close\r\n\r\n", ctx->path, ctx->host);
+        snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KTerm/%s\r\nConnection: close\r\n\r\n", ctx->path, ctx->host, KTERM_VERSION_STRING);
 
         ctx->request_start_time = KTerm_GetTime();
         ssize_t sent = send(ctx->sockfd, req, strlen(req), 0);

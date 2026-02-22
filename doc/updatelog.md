@@ -1,3 +1,25 @@
+## [v2.6.42] - Enhanced Protocol Identification & Range Support
+**Release Date:** 2026-05-22
+
+This release significantly expands the protocol definitions used by **LiveWire** and the **Gateway**, adding support for port ranges and detailed metadata to better identify modern services, especially in AV, Gaming, and Messaging contexts.
+
+### New Features
+*   **Enhanced Protocol Definitions**:
+    *   Updated `KTermProtocolDef` to support port ranges (`port_start`, `port_end`), enabling identification of dynamic range protocols like Dante Unicast (14336-15359) and Dante Via.
+    *   Added comprehensive definitions for **Gaming** (Steam, Xbox Live, Minecraft, Roblox) and **Messaging** (Discord, Slack, Matrix, Signal).
+    *   Expanded AV/Control definitions (Dante, AES67, NDI, Art-Net).
+*   **Gateway Port Scan**:
+    *   The `PORTSCAN` command now returns service names (e.g., `;SERVICE=HTTP`) in its callback response based on the identified protocol.
+*   **API Exposure**:
+    *   Exposed `KTerm_Net_IdentifyProtocol` for internal use by both LiveWire and Gateway modules.
+
+### Improvements
+*   **Identification Logic**: Protocol identification now prioritizes exact port matches over range matches to accurately identify standard services running within broader reserved ranges.
+*   **Metadata**: Added `category` and `description` fields to protocol definitions for richer introspection.
+
+### Fixes
+*   **Maintenance**: Bumped library version to 2.6.42.
+
 ## [v2.6.41] - LiveWire Protocol Map & Stream Reassembly
 - **Feature**: Implemented **Protocol Map** for LiveWire, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).
 - **Feature**: Implemented **Stream Reassembly** and **Flow Tracking** for LiveWire packet analysis.
@@ -1039,7 +1061,7 @@ This completes the multi-version refactor arc (started v2.3.40) — grid is now 
 - **Soft Fonts**: Fully implemented **DECDLD** (Down-Line Loadable) Soft Fonts (DCS ... { ... ST). This includes parsing the header parameters, extracting the Designation String (`Dscs`), and decoding the Sixel bitmap payload into a dedicated `SoftFont` structure.
 - **Rendering**: Implemented `KTerm_UpdateAtlasWithSoftFont`, enabling the dynamic injection of soft font glyphs into the main font atlas texture for immediate rendering.
 - **Charsets**: Enhanced `KTerm_ProcessCharsetCommand` to support multi-byte designation strings (e.g., `ESC ( <space> @`), allowing specific soft fonts to be mapped to G0-G3 via `CHARSET_DRCS`.
-- **Parsing**: Fixed DECDLD parsing logic to correctly handle intermediate characters in designation strings and properly terminate data loading.
+- **Parsing**: Fixed DECDLD parsing logic to correctly handle intermediate characters for designation strings and properly terminate data loading.
 
 ## v2.3.13
 

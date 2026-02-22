@@ -1855,6 +1855,15 @@ static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const ch
 
     snprintf(payload, sizeof(payload), "HOST=%s;PORT=%d;STATUS=%s", host ? host : "*", port, status_str);
 
+    if (status == 1) {
+        const KTermProtocolDef* p = KTerm_Net_IdentifyProtocol((uint16_t)port, false);
+        if (p) {
+            char svc[64];
+            snprintf(svc, sizeof(svc), ";SERVICE=%s", p->short_name);
+            strncat(payload, svc, sizeof(payload) - strlen(payload) - 1);
+        }
+    }
+
     // Format full Gateway response: ESC P GATE ; KTERM ; ID ; PORTSCAN ; payload ST
     char response[512];
     snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;%s\x1B\\", id, payload);
