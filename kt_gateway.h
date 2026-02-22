@@ -511,20 +511,23 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
     }
     if (padding < 0) padding = 0;
 
-    // Allocate Line Buffer on Heap (Hardening)
-    size_t line_buffer_size = 32768; // 32KB
-    char* line_buffer = (char*)malloc(line_buffer_size);
-    if (!line_buffer) return;
+    // Use Stack Buffer (Optimized)
+    char line_buffer[4096];
+    int line_pos = 0;
 
     for (int y = 0; y < height; y++) {
-        int line_pos = 0;
+        line_pos = 0;
         line_buffer[0] = '\0';
 
         // Padding
-        for(int p=0; p<padding; p++) {
-             if (line_pos < (int)line_buffer_size - 1) line_buffer[line_pos++] = ' ';
+        for (int p = 0; p < padding; p++) {
+            if (line_pos >= (int)sizeof(line_buffer) - 2) {
+                line_buffer[line_pos] = '\0';
+                KTerm_WriteString(term, line_buffer);
+                line_pos = 0;
+            }
+            line_buffer[line_pos++] = ' ';
         }
-        line_buffer[line_pos] = '\0';
 
         for (int i = 0; i < len; i++) {
             unsigned char c = (unsigned char)text[i];
@@ -542,11 +545,14 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
                 snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
                 int seq_len = strlen(color_seq);
 
-                if (line_pos + seq_len < (int)line_buffer_size) {
-                    memcpy(line_buffer + line_pos, color_seq, seq_len);
-                    line_pos += seq_len;
+                if (line_pos + seq_len >= (int)sizeof(line_buffer) - 1) {
                     line_buffer[line_pos] = '\0';
+                    KTerm_WriteString(term, line_buffer);
+                    line_pos = 0;
                 }
+
+                memcpy(line_buffer + line_pos, color_seq, seq_len);
+                line_pos += seq_len;
             }
 
             // Get Glyph Row Data
@@ -554,9 +560,9 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
             if (is_16bit) {
                 if (session->soft_font.active && font_data == (const uint8_t*)session->soft_font.font_data) {
-                     uint8_t b1 = session->soft_font.font_data[c][y * 2];
-                     uint8_t b2 = session->soft_font.font_data[c][y * 2 + 1];
-                     row_data = (b1 << 8) | b2;
+                    uint8_t b1 = session->soft_font.font_data[c][y * 2];
+                    uint8_t b2 = session->soft_font.font_data[c][y * 2 + 1];
+                    row_data = (b1 << 8) | b2;
                 } else {
                     const uint16_t* font_data16 = (const uint16_t*)font_data;
                     row_data = font_data16[c * height + y];
@@ -587,18 +593,23 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
                         start_x = 0;
                         end_x = width / 2;
                     } else {
-                         start_x = 0; end_x = -1; // Skip
+                        start_x = 0; end_x = -1; // Skip
                     }
                 }
             }
 
             // Append bits
             for (int x = start_x; x <= end_x; x++) {
-                if (line_pos >= (int)line_buffer_size - 5) break;
+                // Ensure space for 3 bytes (UTF8 block) + null
+                if (line_pos >= (int)sizeof(line_buffer) - 4) {
+                    line_buffer[line_pos] = '\0';
+                    KTerm_WriteString(term, line_buffer);
+                    line_pos = 0;
+                }
 
                 bool bit_set = false;
                 if ((row_data >> (width - 1 - x)) & 1) {
-                     bit_set = true;
+                    bit_set = true;
                 }
 
                 if (bit_set) {
@@ -612,26 +623,32 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
             // Spacing
             if (options->kerned) {
-                if (line_pos < (int)line_buffer_size - 1) line_buffer[line_pos++] = ' ';
+                if (line_pos >= (int)sizeof(line_buffer) - 2) {
+                    line_buffer[line_pos] = '\0';
+                    KTerm_WriteString(term, line_buffer);
+                    line_pos = 0;
+                }
+                line_buffer[line_pos++] = ' ';
             }
         }
 
         // Reset Color at end of line if gradient
         if (options->gradient_enabled) {
-             const char* reset = "\x1B[0m";
-             int r_len = strlen(reset);
-             if (line_pos + r_len < (int)line_buffer_size) {
-                 memcpy(line_buffer + line_pos, reset, r_len);
-                 line_pos += r_len;
-             }
+            const char* reset = "\x1B[0m";
+            int r_len = strlen(reset);
+            if (line_pos + r_len >= (int)sizeof(line_buffer) - 1) {
+                line_buffer[line_pos] = '\0';
+                KTerm_WriteString(term, line_buffer);
+                line_pos = 0;
+            }
+            memcpy(line_buffer + line_pos, reset, r_len);
+            line_pos += r_len;
         }
 
         line_buffer[line_pos] = '\0';
         KTerm_WriteString(term, line_buffer);
         KTerm_WriteString(term, "\r\n");
     }
-
-    free(line_buffer);
 }
 
 // =============================================================================
