@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.6.39
+# kterm.h - Technical Reference Manual v2.6.40
 
 **(c) 2026 Jacques Morel**
 
@@ -1536,15 +1536,19 @@ Networking can be inspected and controlled via `DCS GATE` commands (Extension `E
 *   `ext;net;cancel_diag`: Stops any active asynchronous network diagnostics (Traceroute, Speedtest, LiveWire, etc.).
 *   `ext;automate;trigger;...`: Manages automation triggers.
 
-**Top-Level Network Diagnostics (v2.6.12):**
+**Top-Level Network Diagnostics (v2.6.12+):**
 In addition to `ext;net;...`, these diagnostics are available as top-level Gateway commands for easier access:
 *   `ping;host;[count;interval;timeout]`: Measures response time (same as `ext;net;responsetime`).
 *   `dns;host`: Resolves hostname.
 *   `portscan;host;ports;[timeout]`: Scans TCP ports.
 *   `whois;host;[query]`: Performs WHOIS lookup.
 *   `livewire;[interface=x;filter=y...]`: Starts packet capture.
+*   `livewire_pause`: Pauses packet capture (no data loss in ring buffer, drops new packets).
+*   `livewire_resume`: Resumes packet capture.
+*   `livewire_filter;expr`: Updates the BPF filter string on the fly.
+*   `livewire_detail;packet=N`: Returns a detailed Hex/ASCII dump of the Nth packet (relative to capture session).
 *   `livewire_stop`: Stops packet capture.
-*   `livewire_status`: Returns capture statistics.
+*   `livewire_status`: Returns capture statistics (Captured Count, Paused State).
 *   `ext;ssh;...`: Alias for `ext;net`.
 
 **Speedtest Client (v2.6.18):**

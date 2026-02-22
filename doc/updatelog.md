@@ -1,3 +1,11 @@
+## [v2.6.40] - LiveWire Polish & Edge Case Handling
+- **LiveWire Control**: Added `pause` and `resume` commands to the `livewire` Gateway extension, allowing users to freeze the packet capture for inspection.
+- **LiveWire Inspection**: Implemented `detail` command (`livewire;detail;packet=N`) to retrieve hex/ASCII dumps of specific packets from the ring buffer.
+- **LiveWire Filtering**: Added `filter` command (`livewire;filter;bpf=...`) to update the BPF filter at runtime without restarting the capture.
+- **Network Diagnostics**: Added automatic `mtu_probe` triggering when `frag_test` detects fragmentation during a LiveWire capture.
+- **Platform Portability**: Added warnings to `livewire;status` for Windows limitations (ICMP/Raw Sockets requiring Admin).
+- **Maintenance**: Bumped library version to 2.6.40.
+
 ## [v2.6.39] - Advanced LiveWire Dissectors
 - **Feature**: Added advanced protocol dissectors to `LiveWire` packet handler.
 - **Feature**: Dante Audio detection (UDP port 4321) with RTP header parsing.
@@ -846,7 +854,7 @@ This completes the multi-version refactor arc (started v2.3.40) — grid is now 
 - **Hardened Protected Cells:** Updated `ICH`, `DCH`, `IL`, `DL`, and scroll operations to strictly respect `DECSCA` (Select Character Protection Attribute). Operations are now blocked or modified if they would displace or overwrite protected characters, ensuring compliance with DEC VT520 standards.
 - **Smart Protection:** Refined insertion/deletion logic to allow edits if the cursor is past the protected field (non-destructive shifts), improving usability for forms.
 
-## [v2.3.32] (Pre-Release)
+## v2.3.32] (Pre-Release)
 
 ### Parser Unification & Robustness
 - **Parser Dispatcher:** Introduced `KTerm_DispatchSequence` to centralize execution of all buffered sequences (OSC, DCS, APC, PM, SOS), ensuring uniform termination and error handling.
