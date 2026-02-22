@@ -1,3 +1,9 @@
+## [v2.6.37] - Gateway Protocol Hardening
+- **Case Insensitivity**: Implemented full case insensitivity for all Gateway Protocol commands and parameters (e.g., `PING`, `ping`, `PiNg` are equivalent).
+- **Standardization**: Normalized all documentation and examples to use lowercase syntax for consistency.
+- **Help**: Added `help` command to the Gateway Protocol to list available commands and syntax.
+- **Maintenance**: Bumped library version to 2.6.37.
+
 ## [v2.6.36] - Network Diagnostics Expansion
 - **MTU Discovery**: Introduced `mtu_probe` Gateway command and `KTerm_Net_MTUProbe` API. Uses binary search with ICMP/DF packets to discover Path MTU.
 - **Fragmentation Testing**: Added `frag_test` to verify packet fragmentation and reassembly capabilities of the network path.

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.36
+# K-Term Emulation Library v2.6.37
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -64,6 +64,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.6.37: Gateway Protocol Hardening**
+This release focuses on robustness and standardization of the Gateway Protocol.
+*   **Case Insensitivity:** All Gateway commands and parameters are now case-insensitive (e.g., `PING`, `ping`, `PiNg` are equivalent).
+*   **Standardization:** Documentation and examples have been normalized to lowercase syntax.
+*   **Maintenance:** Bumped library version to 2.6.37.
 
 **New in v2.6.36: Network Diagnostics Expansion**
 This release significantly enhances the network troubleshooting capabilities of K-Term.
