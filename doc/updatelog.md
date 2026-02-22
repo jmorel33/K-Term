@@ -1,3 +1,12 @@
+## [v2.6.38] - LiveWire Packet Sniffer
+- **Network Diagnostics**: Integrated **LiveWire**, a built-in packet sniffer and analyzer, into the network diagnostics suite.
+- **Gateway**: Added `EXT;net;livewire` command to start real-time packet capture with customizable filters (BPF), interface selection, and promiscuous mode settings.
+- **Rendering**: Implemented real-time packet dissection and rendering using ANSI colors directly within the terminal stream.
+- **Architecture**: Introduced thread-safe output handling for async network extensions using a ring buffer and mutex mechanism.
+- **Compatibility**: Added comprehensive Windows compatibility support for threading and string handling within the network module.
+- **Testing**: Included a mock `libpcap` implementation to facilitate unit testing of the packet capture logic without external dependencies.
+- **Maintenance**: Bumped library version to 2.6.38.
+
 ## [v2.6.37] - Gateway Protocol Hardening
 - **Case Insensitivity**: Implemented full case insensitivity for all Gateway Protocol commands and parameters (e.g., `PING`, `ping`, `PiNg` are equivalent).
 - **Standardization**: Normalized all documentation and examples to use lowercase syntax for consistency.
