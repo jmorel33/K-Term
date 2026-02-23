@@ -1,3 +1,15 @@
+## [v2.7.0] - Stability, Security & Network Diagnostics
+*   **Capstone Release**: Consolidates all v2.6.x features (PacketDiag, Voice Reactor, Network Hardening) into a stable milestone.
+*   **Networking**: Finalized `FD_SETSIZE` guards for POSIX stability.
+*   **Security**: Hardened SSH client reference implementation against stack overflows and thread-safety issues.
+*   **Maintenance**: Bumped library version to 2.7.0.
+
+## [v2.6.44] - Stability & Security Hardening
+*   **Networking**: Added `FD_SETSIZE` guards to prevent crashes when file descriptors exceed system limits (e.g., on macOS/Linux).
+*   **Security**: Switched SSH client exec buffer to heap allocation to prevent stack overflows.
+*   **Safety**: Replaced thread-unsafe `strtok` with `SafeStrtok` (wrapping `strtok_r`/`strtok_s`) in SSH client config parsing.
+*   **Maintenance**: Bumped library version to 2.6.44.
+
 ## [v2.6.43] - Advanced Protocol Identification & Security Analysis
 **Release Date:** 2026-05-23
 

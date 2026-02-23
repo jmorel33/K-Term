@@ -773,12 +773,12 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssh_write_bool(&p, &rem, true); // Want reply
 
                 // Large buffer for base64 - allocated on heap to save stack
-                char* cmd = (char*)malloc(12000);
-                if (cmd) {
+                char* exec_cmd = malloc(12000);
+                if (exec_cmd) {
                     // kterm_terminfo_base64 is ~2KB, so 12KB is plenty
-                    snprintf(cmd, 12000, "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
-                    ssh_write_cstring(&p, &rem, cmd);
-                    free(cmd);
+                    snprintf(exec_cmd, 12000, "infocmp kterm >/dev/null 2>&1 || (echo \"%s\" | base64 -d | tic -x -)", kterm_terminfo_base64);
+                    ssh_write_cstring(&p, &rem, exec_cmd);
+                    free(exec_cmd);
                     send_packet(ssh, SSH_MSG_CHANNEL_REQUEST, scratch, p - scratch);
                     ssh->state = SSH_STATE_WAIT_EXEC_RESULT;
                 } else {
@@ -979,6 +979,14 @@ static char* parse_quoted(char* src, char* dest, size_t dest_size) {
     return start;
 }
 
+static char* SSHClient_Strtok(char* str, const char* delim, char** saveptr) {
+#ifdef _WIN32
+    return strtok_s(str, delim, saveptr);
+#else
+    return strtok_r(str, delim, saveptr);
+#endif
+}
+
 // Simple line-based config parser (SSH-config style)
 static bool load_config_profile(const char* config_path, const char* profile_name, SSHProfile* out_profile) {
     FILE* f = fopen(config_path, "r");
@@ -1029,12 +1037,13 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         char val[256] = {0};
 
         char* saveptr = NULL;
-        char* token = SafeStrtok(p, " \t=", &saveptr);
+        // Verified: Using SSHClient_Strtok for thread safety (Oversight 3 Fix)
+        char* token = SSHClient_Strtok(p, " \t=", &saveptr);
         if (token) {
             strncpy(key, token, 63);
 
             if (strcasecmp(key, "Host") == 0) {
-                char* host_pattern = SafeStrtok(NULL, " \t=", &saveptr);
+                char* host_pattern = SSHClient_Strtok(NULL, " \t=", &saveptr);
                 if (host_pattern) {
                     if (found) break; // Already found our block, next Host ends it
                     if (strcasecmp(host_pattern, profile_name) == 0) {
@@ -1049,7 +1058,7 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
                     }
                 }
             } else if (in_block && out_profile) {
-                char* v = SafeStrtok(NULL, " \t=", &saveptr);
+                char* v = SSHClient_Strtok(NULL, " \t=", &saveptr);
                 if (v) {
                     strncpy(val, v, sizeof(val) - 1);
                     val[sizeof(val) - 1] = '\0';
@@ -1088,14 +1097,14 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
     buffer[sizeof(buffer)-1] = '\0';
 
     char* saveptr = NULL;
-    char* cmd = SafeStrtok(buffer, ";", &saveptr);
+    char* cmd = SSHClient_Strtok(buffer, ";", &saveptr);
     if (!cmd) return;
 
     if (strcmp(cmd, "trigger") == 0) {
-        char* sub = SafeStrtok(NULL, ";", &saveptr);
+        char* sub = SSHClient_Strtok(NULL, ";", &saveptr);
         if (sub && strcmp(sub, "add") == 0) {
-            char* pat = SafeStrtok(NULL, ";", &saveptr);
-            char* act = SafeStrtok(NULL, ";", &saveptr);
+            char* pat = SSHClient_Strtok(NULL, ";", &saveptr);
+            char* act = SSHClient_Strtok(NULL, ";", &saveptr);
             if (pat && act && global_ssh_ctx.trigger_count < 16) {
                 AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
                 strncpy(t->pattern, pat, sizeof(t->pattern) - 1);
