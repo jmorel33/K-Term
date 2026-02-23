@@ -2960,7 +2960,16 @@ static void KTerm_Net_ProcessSession(KTerm* term, int session_idx) {
              return;
         }
 
-        fd_set wfds; struct timeval tv = {0, 0}; FD_ZERO(&wfds); FD_SET(net->socket_fd, &wfds);
+        fd_set wfds; struct timeval tv = {0, 0}; FD_ZERO(&wfds);
+#ifndef _WIN32
+        if (net->socket_fd >= FD_SETSIZE) {
+            KTerm_Net_TriggerError(term, session, net, "FD exceeds FD_SETSIZE");
+            CLOSE_SOCKET(net->socket_fd);
+            net->socket_fd = INVALID_SOCKET;
+            return;
+        }
+#endif
+        FD_SET(net->socket_fd, &wfds);
         if (select(net->socket_fd + 1, NULL, &wfds, NULL, &tv) > 0) {
             int opt = 0; socklen_t len = sizeof(opt);
             if (getsockopt(net->socket_fd, SOL_SOCKET, SO_ERROR, (char*)&opt, &len) == 0 && opt == 0) {
@@ -3942,6 +3951,13 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
         int max_fd = -1;
         for(int i=0; i<st->num_streams; i++) {
             if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+#ifndef _WIN32
+                if (st->streams[i].fd >= FD_SETSIZE) {
+                    CLOSE_SOCKET(st->streams[i].fd);
+                    st->streams[i].fd = INVALID_SOCKET;
+                    continue;
+                }
+#endif
                 FD_SET(st->streams[i].fd, &wfds);
                 if (st->streams[i].fd > max_fd) max_fd = st->streams[i].fd;
             }
@@ -4065,6 +4081,13 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
         int max_fd = -1;
         for(int i=0; i<st->num_streams; i++) {
             if (IS_VALID_SOCKET(st->streams[i].fd) && !st->streams[i].connected) {
+#ifndef _WIN32
+                if (st->streams[i].fd >= FD_SETSIZE) {
+                    CLOSE_SOCKET(st->streams[i].fd);
+                    st->streams[i].fd = INVALID_SOCKET;
+                    continue;
+                }
+#endif
                 FD_SET(st->streams[i].fd, &wfds);
                 if (st->streams[i].fd > max_fd) max_fd = st->streams[i].fd;
             }

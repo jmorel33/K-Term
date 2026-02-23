@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.6.43
+# K-Term Emulation Library v2.7.0
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -65,100 +65,32 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.6.43: Advanced Protocol Identification & Security Analysis**
-This release transforms K-Term's network inspector into a security-aware tool.
-*   **Security Context:** Protocols now expose `[Auth]`, `[PLAIN]`, `[BRUTE]`, and `[RELAY]` risk flags in PacketDiag output.
-*   **Deep Inspection:** Added heuristic payload scanning (`KTerm_Net_ScanPayloadForAuth`) to detect SSH versions, NTLM SSP, and Basic Auth in active flows.
-*   **Gateway API:** New commands `PROTO_QUERY` and `SCAN_AUTH` allow external tools to query the protocol database and retrieve authenticated flow details.
-*   **Maintenance:** Bumped library version to 2.6.43.
+**New in v2.7.0: Stability, Security & Diagnostics (Capstone)**
+This major release consolidates the entire v2.6.x development cycle, delivering a hardened, security-aware, and diagnostically powerful terminal engine.
 
-**New in v2.6.42: Enhanced Protocol Identification & Range Support**
-This release significantly expands the protocol definitions for PacketDiag and Gateway Port Scanning.
-*   **Enhanced Protocols:** Added support for port ranges (Dante Unicast/Via), Gaming (Steam, Xbox, Minecraft), and Messaging (Discord, Slack, Matrix).
-*   **Gateway:** The `PORTSCAN` command now returns service names based on the identified protocol.
-*   **Maintenance:** Bumped library version to 2.6.42.
+*   **Advanced Network Diagnostics (PacketDiag):**
+    *   **Packet Sniffer:** Integrated **PacketDiag**, a real-time packet sniffer and protocol analyzer with BPF filtering, stream reassembly, and flow tracking.
+    *   **Protocol Map:** Automatic identification of 40+ protocols including IT standards (SSH, HTTP, FTP, RDP) and AV/Control (Dante, PTP, Art-Net, sACN).
+    *   **Security Insight:** Real-time heuristic scanning detects plaintext authentication (Basic Auth, FTP, Telnet) and flags security risks (`[PLAIN]`, `[BRUTE]`, `[RELAY]`) in active flows.
+    *   **Gateway API:** New commands `PROTO_QUERY` and `SCAN_AUTH` expose deep inspection data to external tools.
 
-**New in v2.6.41: PacketDiag Protocol Map**
-This release enhances the PacketDiag packet sniffer with automatic protocol identification and visualization.
-*   **Protocol Map:** Expanded identification logic covers 40+ protocols including standard IT (FTP, SSH, RDP) and AV/Control (Dante, PTP, Art-Net, sACN).
-*   **Visuals:** Output now includes color-coded protocol labels (e.g., `[Dante Audio]`) for instant traffic recognition.
-*   **Maintenance:** Bumped library version to 2.6.41.
+*   **Voice Reactor (VoIP):**
+    *   **Real-Time Audio:** Full VoIP integration via `kt_voice.h`, enabling low-latency audio capture and playback within the terminal.
+    *   **Network Packetization:** Automatic chunking and transmission of audio frames (`KTERM_PKT_AUDIO_VOICE`) over the active session connection.
+    *   **Intelligence:** Integrated Voice Activity Detection (VAD) and Voice Command Injection (`KTERM_PKT_AUDIO_COMMAND`).
 
-**New in v2.6.37: Gateway Protocol Hardening**
-This release focuses on robustness and standardization of the Gateway Protocol.
-*   **Case Insensitivity:** All Gateway commands and parameters are now case-insensitive (e.g., `PING`, `ping`, `PiNg` are equivalent).
-*   **Standardization:** Documentation and examples have been normalized to lowercase syntax.
-*   **Maintenance:** Bumped library version to 2.6.37.
+*   **Network Tools Suite:**
+    *   **MTU Discovery:** `mtu_probe` uses binary search to determine Path MTU.
+    *   **Frag Test:** `frag_test` verifies network fragmentation and reassembly capabilities.
+    *   **Extended Ping:** `ping_ext` provides advanced latency metrics (Jitter, StdDev, Loss %) and ASCII histograms.
+    *   **Speedtest:** Multi-stream throughput testing with auto-server selection and jitter graphing.
+    *   **HTTP Probe:** Detailed timing metrics (DNS, TCP, TTFB, Download) for web services.
 
-**New in v2.6.36: Network Diagnostics Expansion**
-This release significantly enhances the network troubleshooting capabilities of K-Term.
-*   **MTU Discovery:** Added `mtu_probe` Gateway command and `KTerm_Net_MTUProbe` API to discover Path MTU using binary search.
-*   **Fragmentation Testing:** Added `frag_test` to verify packet fragmentation and reassembly on the network path.
-*   **Extended Ping:** Added `ping_ext` for detailed latency statistics (jitter, loss) and ASCII visualization (histograms, timelines).
-*   **Maintenance:** Bumped library version to 2.6.36.
-
-**New in v2.6.35: Performance Optimization**
-This release introduces a key optimization for high-frequency Gateway operations.
-*   **Performance:** Optimized Gateway Protocol banner generation (`PIPE;BANNER`) to use stack allocation instead of heap, significantly reducing allocation overhead and memory fragmentation during frequent updates.
-*   **Maintenance:** Bumped library version to 2.6.35.
-
-**New in v2.6.34: Performance & Maintenance**
-This release delivers significant performance optimizations for the Gateway Protocol and general maintenance updates.
-*   **Performance:** Base64 decoding in Gateway Protocol (used for `icat` image transfers and `PIPE` commands) is now ~3-5x faster due to lookup table optimization.
-*   **Maintenance:** Bumped library version to 2.6.34.
-
-**New in v2.6.33: Critical Fixes**
-This release addresses critical stability and security issues identified in v2.7 candidate testing.
-*   **Multiplexer Heap Corruption Fix:** Corrected bounds checking for VT operations in split-pane layouts to prevent heap corruption.
-*   **Thread-Safety:** Removed unsafe `strtok` usage in Gateway and Network modules, replacing it with a thread-safe implementation.
-*   **ReGIS Stability:** Fixed memory corruption in macro recording logic.
-*   **Robustness:** Added bounds checking for direct cell access to prevent buffer wrap-around.
-*   **Maintenance:** Bumped library version to 2.6.33 across all components.
-
-**New in v2.6.32: Robustness & Networking**
-This release introduces critical robustness fixes and enhanced networking capabilities.
-*   **Robustness:** Fixed a potential memory leak in Kitty graphics protocol during image replacement and implemented OpQueue backpressure to prevent state desync under load.
-*   **Networking:** Added FD_SET safety checks for POSIX, fixed a regression in Speedtest socket handling, implemented HTTP Keep-Alive support for probes, and added fallback logic for air-gapped IP resolution.
-*   **Diagnostics:** Added `cancel_diag` Gateway command to stop long-running network tests.
-*   **Maintenance:** Bumped library version to 2.6.32 across all components.
-
-**New in v2.6.31: Performance & Maintenance**
-This release delivers significant performance optimizations for the SSH client reference implementation and general maintenance updates.
-*   **SSH Performance:** Implemented a buffered, non-blocking packet transmission strategy using `writev` in `ssh_client.c`. This reduces system call overhead by ~3.75x and eliminates blocking stalls during high-throughput operations.
-*   **Correctness:** Added a robust software write buffer to correctly handle `EWOULDBLOCK` and partial writes in non-blocking socket modes.
-
-**New in v2.6.30: Security Hardening & Automation Fixes**
-This release focuses on hardening the `ssh_client` and the Gateway Protocol against potential security vulnerabilities.
-*   **Buffer Overflow Fix:** Resolved a critical overflow in automation trigger listing.
-*   **Safe String Operations:** Transitioned to bounded string manipulation for configuration and profile loading.
-*   **Null Termination:** Enforced strict null termination for all dynamically managed trigger patterns and actions.
-
-**New in v2.6.28: Voice Reactor Visuals & Final Polish**
-This release adds intelligence to the Voice Reactor with Voice Activity Detection and Command Injection.
-*   **Voice Commands:**
-    *   **Injection API:** Added `SituationVoiceCommand` to programmatically inject command strings into active voice contexts.
-    *   **Remote Control:** Added `KTERM_PKT_AUDIO_COMMAND` handling in `kt_net.h` to support remote command injection packets.
-*   **Voice Activity Detection (VAD):**
-    *   **Energy Analysis:** Implemented RMS energy calculation in the audio capture loop to detect speech activity.
-    *   **State Tracking:** Added `vad_active` and `energy_level` to `KTermVoiceContext` for real-time monitoring.
-
-**New in v2.6.26: Voice Reactor Phase 2 (Network Integration)**
-This release enables full network transmission for the Voice Reactor, moving beyond local loopback to real-time VoIP capabilities.
-*   **Network Integration (`kt_net.h`):**
-    *   **Voice Packetization:** Implemented `KTERM_PKT_AUDIO_VOICE` transmission logic within the network loop. Captured audio frames are now automatically chunked, wrapped in binary packets, and sent over the active connection.
-    *   **Playback Routing:** Incoming voice packets are depacketized and routed directly to the target session's playback buffer via `KTerm_Voice_ProcessPlayback`.
-*   **Voice Core Refactor (`kt_voice.h`):**
-    *   **Split Buffers:** Refactored `KTermVoiceContext` to support separate, concurrent `capture_buffer` (Mic -> Network) and `playback_buffer` (Network -> Speaker) rings.
-    *   **Integration Hooks:** Added `KTerm_Voice_ProcessCapture` and `KTerm_Voice_ProcessPlayback` to bridge the gap between the lock-free audio thread and the network thread.
-*   **Verification:** Validated the full Network Loopback path (Capture -> Packet -> Network Sim -> Depacket -> Playback) via `tests/verify_voice.c`.
-
-**New in v2.6.24: Voice Reactor Phase 1**
-This release introduced the foundational architecture for **Voice Reactor**, transforming K-Term into a real-time voice command and streaming environment.
-*   **Voice Core (`kt_voice.h`):** A new single-header library for managing audio contexts and streams.
-    *   **Lock-Free Ring Buffer:** Implements a high-performance Single-Producer Single-Consumer (SPSC) ring buffer to bridge the high-priority audio thread and the main terminal loop without locking.
-    *   **Audio Capture:** Integration with `SituationStartAudioCaptureEx` for low-latency microphone input.
-    *   **Loopback Verification:** Includes `tests/test_voice_loopback.c` verifying the full capture-to-playback data path.
-*   **Protocol Support:** Added `KTERM_PKT_AUDIO_VOICE`, `COMMAND`, and `STREAM` packet definitions to `kt_net.h`, laying the groundwork for network voice transmission.
+*   **Hardening & Stability:**
+    *   **Crash Prevention:** Implemented `FD_SETSIZE` guards in all network loops to prevent POSIX crashes.
+    *   **SSH Hardening:** The reference SSH client now uses heap allocation for large buffers (preventing stack overflow) and thread-safe string parsing.
+    *   **Gateway Hardening:** All Gateway commands are now case-insensitive. Banner generation and Base64 decoding have been optimized for high-frequency usage.
+    *   **Safety:** Removed unsafe `strtok` usage across the entire library.
 
 **New in v2.6.0: Networking & Production Readiness**
 This release consolidates the massive networking improvements introduced throughout the v2.5.x cycle, delivering a full-featured, non-blocking networking stack for building robust remote clients and servers. It finalizes the SSH/Telnet integration and introduces configuration controls for embedded use.
