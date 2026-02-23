@@ -139,7 +139,7 @@ When `KTERM_IMPLEMENTATION` is defined, `kterm.h` includes implementations in th
 6. Networking module (kt_net.h) - unless KTERM_DISABLE_NET is defined
 7. Compositor module (kt_composite_sit.h)
 
-The library is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. It uses [Situation]([(https://github.com/jmorel33/situation)]) for rendering, windowing, and input handling, providing a complete solution out of the box.
+The library is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. It uses [Situation]([https://github.com/jmorel33/situation]) for rendering, windowing, and input handling, providing a complete solution out of the box.
 
 The library emulates a wide range of historical and modern terminal standards, from the DEC VT52 to contemporary xterm extensions. It processes a stream of bytes, interprets control codes and escape sequences, and maintains an internal model of the terminal screen, which is then rendered to the display.
 
