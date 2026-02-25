@@ -670,11 +670,11 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
             return KTERM_SEC_AGAIN;
 
         case SSH_STATE_CHECK_HOSTKEY:
-            update_status("Mocking KEX (Host Key Verification)...");
+            update_status("Mocking KEX (Host Key Verification) - INSECURE MODE...");
             if (ssh->hostkey_fingerprint[0] == '\0') {
                  // First time
                  ssh->show_hostkey_alert = true;
-                 snprintf(ssh->hostkey_fingerprint, sizeof(ssh->hostkey_fingerprint), "SHA256:MOCK_FINGERPRINT_1234");
+                 snprintf(ssh->hostkey_fingerprint, sizeof(ssh->hostkey_fingerprint), "SHA256:MOCK_FINGERPRINT_1234 (INSECURE)");
                  return KTERM_SEC_AGAIN;
             } else {
                  // Fingerprint set, means we prompted.
@@ -1137,6 +1137,16 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
     }
 }
 
+// --- Security Helper ---
+#ifndef KTERM_USE_LIBSSH
+static bool is_safe_mock_host(const char* host) {
+    if (strcasecmp(host, "localhost") == 0) return true;
+    if (strcmp(host, "127.0.0.1") == 0) return true;
+    if (strcmp(host, "::1") == 0) return true;
+    return false;
+}
+#endif
+
 // --- Main ---
 
 int main(int argc, char** argv) {
@@ -1333,9 +1343,27 @@ int main(int argc, char** argv) {
 
     // Connect
     char msg[256];
+#ifndef KTERM_USE_LIBSSH
+    // Security check for Mock Mode
+    if (!is_safe_mock_host(host)) {
+        fprintf(stderr, "\n[SECURITY ERROR] Mock Crypto Mode allows connections to LOCALHOST ONLY.\n");
+        fprintf(stderr, "You are attempting to connect to: '%s'\n", host);
+        fprintf(stderr, "This client is built in INSECURE MOCK MODE for internal testing.\n");
+        fprintf(stderr, "Please rebuild with KTERM_USE_LIBSSH or connect to 127.0.0.1.\n\n");
+
+        KTerm_WriteString(term, "\r\n\x1B[31;1m[SECURITY ERROR] Mock Crypto Mode allows connections to LOCALHOST ONLY.\x1B[0m\r\n");
+        KTerm_WriteString(term, "Refusing connection to non-local host in insecure mode.\r\n");
+        // We continue to run to show the message, but we do NOT connect.
+    } else {
+        snprintf(msg, sizeof(msg), "SSH Connecting to %s@%s:%d...\r\n", user, host, port);
+        KTerm_WriteString(term, msg);
+        KTerm_Net_Connect(term, session, host, port, user, pass);
+    }
+#else
     snprintf(msg, sizeof(msg), "SSH Connecting to %s@%s:%d...\r\n", user, host, port);
     KTerm_WriteString(term, msg);
     KTerm_Net_Connect(term, session, host, port, user, pass);
+#endif
 
     // 4. Main Loop
     int frame_count = 0;
