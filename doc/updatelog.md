@@ -1,3 +1,14 @@
+## [v2.7.1] - Critical Security Fix for Mock SSH Client
+**Release Date:** 2026-05-24
+
+This patch release addresses a security vulnerability in the `ssh_client` reference implementation's "Mock Crypto" mode.
+
+### Security Fixes
+*   **Mock Mode Restriction**: The "Mock Crypto" mode (default build without `libssh`) now strictly prohibits connections to non-local hosts. It only allows connections to `localhost`, `127.0.0.1`, or `::1`.
+    *   **Impact**: Prevents users from inadvertently using the insecure, hardcoded handshake reference implementation to connect to real external servers, which would expose credentials and data in cleartext (or with a trivial mock cipher).
+    *   **UI**: Added prominent warnings (`[SECURITY ERROR]`) when attempting unsafe connections in Mock Mode.
+*   **Maintenance**: Bumped library version to 2.7.1.
+
 ## [v2.7.0] - Stability, Security & Network Diagnostics
 *   **Capstone Release**: Consolidates all v2.6.x features (PacketDiag, Voice Reactor, Network Hardening) into a stable milestone.
 *   **Networking**: Finalized `FD_SETSIZE` guards for POSIX stability.

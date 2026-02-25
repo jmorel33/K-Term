@@ -4,7 +4,7 @@
 #include "kterm.h"
 
 #ifdef KTERM_TESTING
-#include "mock_situation.h"
+#include "tests/mock_situation.h"
 #else
 #include "situation.h"
 #endif
