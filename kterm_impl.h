@@ -661,7 +661,7 @@ void KTerm_Free(void* ptr) {
 // Color mappings - Fixed initialization
 // RGB_KTermColor color_palette[256]; // Moved to struct
 
-KTermColor cga_colors[16] = { // Standard CGA/VGA Palette (for ANSI.SYS)
+const KTermColor cga_colors[16] = { // Standard CGA/VGA Palette (for ANSI.SYS)
     {0x00, 0x00, 0x00, 0xFF}, // 0: Black
     {0xAA, 0x00, 0x00, 0xFF}, // 1: Red
     {0x00, 0xAA, 0x00, 0xFF}, // 2: Green
@@ -680,7 +680,7 @@ KTermColor cga_colors[16] = { // Standard CGA/VGA Palette (for ANSI.SYS)
     {0xFF, 0xFF, 0xFF, 0xFF}  // 15: Bright White
 };
 
-KTermColor ansi_colors[16] = { // XTerm Palette (Standard ANSI)
+const KTermColor ansi_colors[16] = { // XTerm Palette (Standard ANSI)
     {0x00, 0x00, 0x00, 0xFF}, // 0
     {0xCD, 0x00, 0x00, 0xFF}, // 1
     {0x00, 0xCD, 0x00, 0xFF}, // 2
