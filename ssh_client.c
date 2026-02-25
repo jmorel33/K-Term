@@ -126,12 +126,33 @@ typedef enum {
 } MySSHState;
 
 // Automation Trigger
+#define MAX_TRIGGERS 128
+
 typedef struct {
     char pattern[128];
     char action[128];
     bool oneshot;
     bool active;
 } AutomationTrigger;
+
+// Aho-Corasick Structures
+typedef struct ACLocalMatch {
+    int index;
+    struct ACLocalMatch *next;
+} ACLocalMatch;
+
+typedef struct ACChild {
+    uint8_t key;
+    struct ACNode *node;
+} ACChild;
+
+typedef struct ACNode {
+    ACChild *children;
+    int child_count;
+    struct ACNode *fail;
+    ACLocalMatch *local_matches; // Patterns ending exactly here
+    struct ACNode *match_next; // Shortcut to next fail node with matches
+} ACNode;
 
 typedef struct {
     MySSHState state;
@@ -177,10 +198,15 @@ typedef struct {
     char hostkey_fingerprint[64];
 
     // Automation
-    AutomationTrigger triggers[16];
+    AutomationTrigger triggers[MAX_TRIGGERS];
     int trigger_count;
     char trigger_buffer[1024]; // Sliding window for pattern matching
     int trigger_buf_len;
+
+    // Aho-Corasick State
+    ACNode *ac_root;
+    bool ac_dirty;
+    bool matches_found[MAX_TRIGGERS];
 } MySSHContext;
 
 static MySSHContext global_ssh_ctx = {0}; // Simplified for single-session example
@@ -218,6 +244,138 @@ static int send_packet(MySSHContext* ctx, uint8_t type, const void* payload, siz
 static bool ssh_write_u32(uint8_t** ptr, size_t* rem, uint32_t val);
 static bool ssh_write_string(uint8_t** ptr, size_t* rem, const char* str, size_t len);
 
+// --- Aho-Corasick Implementation ---
+
+static ACNode* ac_new_node() {
+    return (ACNode*)calloc(1, sizeof(ACNode));
+}
+
+static void ac_free_node(ACNode* node) {
+    if (!node) return;
+    for (int i=0; i<node->child_count; i++) {
+        ac_free_node(node->children[i].node);
+    }
+    if (node->children) free(node->children);
+
+    ACLocalMatch* m = node->local_matches;
+    while (m) {
+        ACLocalMatch* next = m->next;
+        free(m);
+        m = next;
+    }
+    free(node);
+}
+
+static ACNode* ac_get_child(ACNode* node, uint8_t key) {
+    for (int i=0; i<node->child_count; i++) {
+        if (node->children[i].key == key) return node->children[i].node;
+    }
+    return NULL;
+}
+
+static void ac_add_child(ACNode* node, uint8_t key, ACNode* child) {
+    void* new_ptr = realloc(node->children, (node->child_count + 1) * sizeof(ACChild));
+    if (new_ptr) {
+        node->children = (ACChild*)new_ptr;
+        node->children[node->child_count].key = key;
+        node->children[node->child_count].node = child;
+        node->child_count++;
+    } else {
+        // On failure, we can't add the child.
+        // We should free the child to prevent leak since it won't be reachable.
+        ac_free_node(child);
+    }
+}
+
+static void ac_add_match(ACNode* node, int index) {
+    ACLocalMatch* m = malloc(sizeof(ACLocalMatch));
+    if (m) {
+        m->index = index;
+        m->next = node->local_matches;
+        node->local_matches = m;
+    }
+}
+
+static void ac_build(MySSHContext* ctx) {
+    if (ctx->ac_root) ac_free_node(ctx->ac_root);
+    ctx->ac_root = ac_new_node();
+    ctx->ac_dirty = false;
+
+    // 1. Build Trie (Include ALL triggers)
+    for (int i=0; i<ctx->trigger_count; i++) {
+        if (!ctx->triggers[i].pattern[0]) continue;
+
+        ACNode* curr = ctx->ac_root;
+        char* p = ctx->triggers[i].pattern;
+        while (*p) {
+            uint8_t key = (uint8_t)*p;
+            ACNode* next = ac_get_child(curr, key);
+            if (!next) {
+                next = ac_new_node();
+                ac_add_child(curr, key, next);
+            }
+            curr = next;
+            p++;
+        }
+        ac_add_match(curr, i);
+    }
+
+    // 2. Build Failure Links (BFS)
+    int q_cap = MAX_TRIGGERS * 128 + 256;
+    ACNode** q = malloc(sizeof(ACNode*) * q_cap);
+    if (!q) return;
+    int head = 0, tail = 0;
+
+    for (int i=0; i<ctx->ac_root->child_count; i++) {
+        ACNode* child = ctx->ac_root->children[i].node;
+        child->fail = ctx->ac_root;
+        q[tail++] = child;
+    }
+
+    while (head < tail) {
+        ACNode* curr = q[head++];
+        for (int i=0; i<curr->child_count; i++) {
+            uint8_t key = curr->children[i].key;
+            ACNode* child = curr->children[i].node;
+
+            ACNode* f = curr->fail;
+            while (f && !ac_get_child(f, key)) f = f->fail;
+            child->fail = f ? ac_get_child(f, key) : ctx->ac_root;
+
+            if (child->fail->local_matches) child->match_next = child->fail;
+            else child->match_next = child->fail->match_next;
+
+            if (tail < q_cap) q[tail++] = child;
+        }
+    }
+    free(q);
+}
+
+static void ac_search(MySSHContext* ctx, const char* text, size_t len) {
+    if (ctx->ac_dirty || !ctx->ac_root) ac_build(ctx);
+    if (!ctx->ac_root) return;
+
+    memset(ctx->matches_found, 0, sizeof(ctx->matches_found));
+
+    ACNode* curr = ctx->ac_root;
+    for (size_t i=0; i<len; i++) {
+        uint8_t key = (uint8_t)text[i];
+        while (curr && !ac_get_child(curr, key)) curr = curr->fail;
+        if (!curr) curr = ctx->ac_root;
+        else curr = ac_get_child(curr, key);
+
+        ACNode* temp = curr;
+        while (temp) {
+            ACLocalMatch* m = temp->local_matches;
+            while (m) {
+                if (m->index < MAX_TRIGGERS) ctx->matches_found[m->index] = true;
+                m = m->next;
+            }
+            temp = temp->match_next;
+        }
+    }
+}
+
 static void check_triggers(MySSHContext* ctx, const char* data, size_t len) {
     if (ctx->trigger_count == 0) return;
 
@@ -235,52 +393,49 @@ static void check_triggers(MySSHContext* ctx, const char* data, size_t len) {
     int copy_len = (len < sizeof(ctx->trigger_buffer) - ctx->trigger_buf_len - 1) ? len : (sizeof(ctx->trigger_buffer) - ctx->trigger_buf_len - 1);
     memcpy(ctx->trigger_buffer + ctx->trigger_buf_len, data, copy_len);
     ctx->trigger_buf_len += copy_len;
-    ctx->trigger_buffer[ctx->trigger_buf_len] = '\0'; // Null terminate for strstr
+    ctx->trigger_buffer[ctx->trigger_buf_len] = '\0';
 
-    // Check triggers
+    // Scan with Aho-Corasick
+    ac_search(ctx, ctx->trigger_buffer, ctx->trigger_buf_len);
+
+    // Check triggers by priority
     for (int i = 0; i < ctx->trigger_count; i++) {
-        if (ctx->triggers[i].active && ctx->triggers[i].pattern[0]) {
-            if (strstr(ctx->trigger_buffer, ctx->triggers[i].pattern)) {
-                // Match!
-                printf("[Automate] Trigger matched: '%s' -> Sending Action\n", ctx->triggers[i].pattern);
+        if (ctx->triggers[i].active && ctx->matches_found[i]) {
+            // Match!
+            printf("[Automate] Trigger matched: '%s' -> Sending Action\n", ctx->triggers[i].pattern);
 
-                // Execute Action (Send to Host)
-                // We need to wrap it in SSH channel data packet
-                if (ctx->socket_fd > 0 && ctx->state == SSH_STATE_READY) {
-                    uint8_t payload[1024];
-                    uint8_t* p = payload;
-                    size_t rem = sizeof(payload);
+            // Execute Action (Send to Host)
+            if (ctx->socket_fd > 0 && ctx->state == SSH_STATE_READY) {
+                uint8_t payload[1024];
+                uint8_t* p = payload;
+                size_t rem = sizeof(payload);
 
-                    // Interpret escape sequences in action (\n, \r)
-                    char active_action[128];
-                    int k=0;
-                    for(int j=0; ctx->triggers[i].action[j] && k<127; j++) {
-                        if(ctx->triggers[i].action[j] == '\\') {
-                            j++;
-                            if(ctx->triggers[i].action[j] == 'n') active_action[k++] = '\n';
-                            else if(ctx->triggers[i].action[j] == 'r') active_action[k++] = '\r';
-                            else if(ctx->triggers[i].action[j] == 't') active_action[k++] = '\t';
-                            else active_action[k++] = ctx->triggers[i].action[j];
-                        } else {
-                            active_action[k++] = ctx->triggers[i].action[j];
-                        }
+                char active_action[128];
+                int k=0;
+                for(int j=0; ctx->triggers[i].action[j] && k<127; j++) {
+                    if(ctx->triggers[i].action[j] == '\\') {
+                        j++;
+                        if(ctx->triggers[i].action[j] == 'n') active_action[k++] = '\n';
+                        else if(ctx->triggers[i].action[j] == 'r') active_action[k++] = '\r';
+                        else if(ctx->triggers[i].action[j] == 't') active_action[k++] = '\t';
+                        else active_action[k++] = ctx->triggers[i].action[j];
+                    } else {
+                        active_action[k++] = ctx->triggers[i].action[j];
                     }
-                    active_action[k] = '\0';
-
-                    ssh_write_u32(&p, &rem, ctx->remote_channel_id);
-                    ssh_write_string(&p, &rem, active_action, k);
-                    send_packet(ctx, SSH_MSG_CHANNEL_DATA, payload, p - payload);
                 }
+                active_action[k] = '\0';
 
-                if (ctx->triggers[i].oneshot) {
-                    ctx->triggers[i].active = false;
-                }
-
-                // Clear buffer to prevent double match? Or shift?
-                // For now, clear to keep it simple and avoid loops
-                ctx->trigger_buf_len = 0;
-                break;
+                ssh_write_u32(&p, &rem, ctx->remote_channel_id);
+                ssh_write_string(&p, &rem, active_action, k);
+                send_packet(ctx, SSH_MSG_CHANNEL_DATA, payload, p - payload);
             }
+
+            if (ctx->triggers[i].oneshot) {
+                ctx->triggers[i].active = false;
+            }
+
+            ctx->trigger_buf_len = 0;
+            break;
         }
     }
 }
@@ -947,7 +1102,7 @@ typedef struct {
     int port;
     bool durable;
     char term_type[64];
-    AutomationTrigger triggers[16];
+    AutomationTrigger triggers[MAX_TRIGGERS];
     int trigger_count;
 } SSHProfile;
 
@@ -1017,7 +1172,7 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         // Handle Trigger manually to support quotes
         if (strncasecmp(p, "Trigger", 7) == 0 && (p[7] == ' ' || p[7] == '\t' || p[7] == '"')) {
             if (in_block && out_profile) {
-                if (out_profile->trigger_count < 16) {
+                if (out_profile->trigger_count < MAX_TRIGGERS) {
                     char* ptr = p + 7; // Skip "Trigger"
 
                     // Parse pattern
@@ -1105,7 +1260,7 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
         if (sub && strcmp(sub, "add") == 0) {
             char* pat = SSHClient_Strtok(NULL, ";", &saveptr);
             char* act = SSHClient_Strtok(NULL, ";", &saveptr);
-            if (pat && act && global_ssh_ctx.trigger_count < 16) {
+            if (pat && act && global_ssh_ctx.trigger_count < MAX_TRIGGERS) {
                 AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
                 strncpy(t->pattern, pat, sizeof(t->pattern) - 1);
                 t->pattern[sizeof(t->pattern) - 1] = '\0';
@@ -1113,6 +1268,7 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
                 t->action[sizeof(t->action) - 1] = '\0';
                 t->active = true;
                 t->oneshot = true;
+                global_ssh_ctx.ac_dirty = true;
                 if (respond) respond(term, session, "OK;TRIGGER_ADDED");
             } else {
                 if (respond) respond(term, session, "ERR;FULL_OR_INVALID");
@@ -1221,10 +1377,11 @@ int main(int argc, char** argv) {
 
                     // Copy triggers
                     for(int i=0; i<profile.trigger_count; i++) {
-                        if (global_ssh_ctx.trigger_count < 16) {
+                        if (global_ssh_ctx.trigger_count < MAX_TRIGGERS) {
                             global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++] = profile.triggers[i];
                         }
                     }
+                    global_ssh_ctx.ac_dirty = true;
                 } else {
                     // Not a profile, parse as user@host
                     char* at = strchr(target, '@');
@@ -1467,6 +1624,8 @@ int main(int argc, char** argv) {
 
     // Persist session state on exit
     save_session_state(&global_ssh_ctx);
+
+    ac_free_node(global_ssh_ctx.ac_root);
 
     KTerm_Destroy(term);
     KTerm_Platform_Shutdown();
