@@ -16,7 +16,7 @@ void test_mtu_probe_api(KTerm* term, KTermSession* session) {
     printf("  Testing MTU Probe API...\n");
 
     // Test API Call
-    bool res = KTerm_Net_MTUProbe(term, session, "127.0.0.1", true, 1000, 1500, NULL, NULL);
+    bool res = KTerm_Net_MTUProbe(term, session, "127.0.0.1", true, 1000, 1500, NULL, NULL, "test_tag");
     if (!res) {
         fprintf(stderr, "    Failed to start MTU Probe\n");
         exit(1);
@@ -61,7 +61,7 @@ void test_mtu_probe_api(KTerm* term, KTermSession* session) {
 void test_frag_test_api(KTerm* term, KTermSession* session) {
     printf("  Testing Frag Test API...\n");
 
-    bool res = KTerm_Net_FragTest(term, session, "localhost", 2000, 3, NULL, NULL);
+    bool res = KTerm_Net_FragTest(term, session, "localhost", 2000, 3, NULL, NULL, "test_tag");
     if (!res) {
         fprintf(stderr, "    Failed to start Frag Test\n");
         exit(1);
@@ -156,7 +156,7 @@ void test_packetdiag_detail(KTerm* term, KTermSession* session) {
 void test_ping_ext_api(KTerm* term, KTermSession* session) {
     printf("  Testing Extended Ping API...\n");
 
-    bool res = KTerm_Net_PingExt(term, session, "8.8.8.8", 5, 200, 64, true, NULL, NULL);
+    bool res = KTerm_Net_PingExt(term, session, "8.8.8.8", 5, 200, 64, true, NULL, NULL, "test_tag");
     if (!res) {
         fprintf(stderr, "    Failed to start Ping Ext\n");
         exit(1);
@@ -339,7 +339,7 @@ void test_cancel_diag(KTerm* term, KTermSession* session) {
     printf("  Testing Cancel Diag...\n");
 
     // Start something
-    KTerm_Net_MTUProbe(term, session, "1.1.1.1", false, 0, 0, NULL, NULL);
+    KTerm_Net_MTUProbe(term, session, "1.1.1.1", false, 0, 0, NULL, NULL, "test_tag");
     KTermNetSession* net = KTerm_Net_GetContext(session);
     if (!net || !net->mtu_probe) { fprintf(stderr, "Setup failed\n"); exit(1); }
 
