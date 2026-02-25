@@ -864,19 +864,15 @@ static void KTerm_Gateway_HandlePing(KTerm* term, KTermSession* session, const c
         }
 
         if (host[0]) {
-            char* id_copy = (char*)malloc(strlen(id) + 1);
-            if (id_copy) {
-                strcpy(id_copy, id);
-                if (KTerm_Net_ResponseTime(term, session, host, count, interval, timeout, KTerm_ResponseTime_Callback, id_copy)) {
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;OK;STARTED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                } else {
-                    free(id_copy);
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;ERR;START_FAILED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                }
+            // Optimized: Use inline tag storage
+            if (KTerm_Net_ResponseTime(term, session, host, count, interval, timeout, KTerm_ResponseTime_Callback, NULL, id, false)) {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;OK;STARTED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
+            } else {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PING;ERR;START_FAILED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
             }
         } else {
             char response[64];
@@ -926,19 +922,15 @@ static void KTerm_Gateway_HandlePortScan(KTerm* term, KTermSession* session, con
         }
 
         if (host[0] && ports[0]) {
-            char* id_copy = (char*)malloc(strlen(id) + 1);
-            if (id_copy) {
-                strcpy(id_copy, id);
-                if (KTerm_Net_PortScan(term, session, host, ports, timeout, KTerm_PortScan_Callback, id_copy)) {
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;OK;STARTED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                } else {
-                    free(id_copy);
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;ERR;START_FAILED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                }
+            // Optimized: Use inline tag
+            if (KTerm_Net_PortScan(term, session, host, ports, timeout, KTerm_PortScan_Callback, NULL, id)) {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;OK;STARTED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
+            } else {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;PORTSCAN;ERR;START_FAILED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
             }
         } else {
             char response[64];
@@ -982,19 +974,15 @@ static void KTerm_Gateway_HandleWhois(KTerm* term, KTermSession* session, const 
         }
 
         if (host[0]) {
-            char* id_copy = (char*)malloc(strlen(id) + 1);
-            if (id_copy) {
-                strcpy(id_copy, id);
-                if (KTerm_Net_Whois(term, session, host, query, KTerm_Whois_Callback, id_copy)) {
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;OK;STARTED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                } else {
-                    free(id_copy);
-                    char response[64];
-                    snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;ERR;START_FAILED\x1B\\", id);
-                    KTerm_QueueResponse(term, response);
-                }
+            // Optimized: Use inline tag
+            if (KTerm_Net_Whois(term, session, host, query, KTerm_Whois_Callback, NULL, id)) {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;OK;STARTED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
+            } else {
+                char response[64];
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;ERR;START_FAILED\x1B\\", id);
+                KTerm_QueueResponse(term, response);
             }
         } else {
             char response[64];
@@ -2169,19 +2157,12 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host) {
-             // Pass ID as user_data (must duplicate it as it needs to persist)
-             // KTerm_Net_ResponseTime will free it in DestroyContext
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 // Convert interval seconds to ms
-                 if (KTerm_Net_ResponseTime(term, session, host, count, interval_sec * 1000, timeout_ms, KTerm_ResponseTime_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     // Initialization failed synchronously; ownership of id_copy was not transferred.
-                     if (respond) respond(term, session, "ERR;INIT_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             // Convert interval seconds to ms
+             if (KTerm_Net_ResponseTime(term, session, host, count, interval_sec * 1000, timeout_ms, KTerm_ResponseTime_Callback, NULL, id, false)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;INIT_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
@@ -2207,14 +2188,9 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host) {
-             // Pass ID as user_data (must duplicate it as it needs to persist)
-             // KTerm_Net_Traceroute will free it in DestroyContext
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, continuous, KTerm_Traceroute_Callback, id_copy);
-                 if (respond) respond(term, session, "OK;STARTED");
-             }
+             // Optimized: Use inline tag
+             KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, continuous, KTerm_Traceroute_Callback, NULL, id);
+             if (respond) respond(term, session, "OK;STARTED");
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
         }
@@ -2248,15 +2224,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host && ports) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 if (KTerm_Net_PortScan(term, session, host, ports, timeout_ms, KTerm_PortScan_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             if (KTerm_Net_PortScan(term, session, host, ports, timeout_ms, KTerm_PortScan_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_ARGS");
@@ -2264,16 +2236,12 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
     } else if (KTerm_Strcasecmp(cmd, "whois") == 0) {
         char* host = KTerm_Strtok(NULL, ";", &saveptr);
         if (host) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 // Default query is same as host
-                 if (KTerm_Net_Whois(term, session, host, host, KTerm_Whois_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             // Default query is same as host
+             if (KTerm_Net_Whois(term, session, host, host, KTerm_Whois_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_HOST");
@@ -2302,15 +2270,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         char id_buf[64];
         snprintf(id_buf, sizeof(id_buf), "%s:%d", id, graph);
 
-        char* id_copy = (char*)malloc(strlen(id_buf) + 1);
-        if (id_copy) {
-            strcpy(id_copy, id_buf);
-            if (KTerm_Net_Speedtest(term, session, host, port, streams, path, KTerm_Speedtest_Callback, id_copy)) {
-                if (respond) respond(term, session, "OK;STARTED");
-            } else {
-                if (respond) respond(term, session, "ERR;START_FAILED");
-                free(id_copy);
-            }
+        // Optimized: Use inline tag
+        if (KTerm_Net_Speedtest(term, session, host, port, streams, path, KTerm_Speedtest_Callback, NULL, id_buf)) {
+            if (respond) respond(term, session, "OK;STARTED");
+        } else {
+            if (respond) respond(term, session, "ERR;START_FAILED");
         }
     } else if (KTerm_Strcasecmp(cmd, "connections") == 0) {
         char list[4096];
@@ -2323,15 +2287,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
     } else if (KTerm_Strcasecmp(cmd, "httpprobe") == 0) {
         char* url = KTerm_Strtok(NULL, ";", &saveptr);
         if (url) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 if (KTerm_Net_HttpProbe(term, session, url, KTerm_HttpProbe_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             if (KTerm_Net_HttpProbe(term, session, url, KTerm_HttpProbe_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_URL");
@@ -2352,15 +2312,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 if (KTerm_Net_MTUProbe(term, session, host, df, start_size, max_size, KTerm_MtuProbe_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             if (KTerm_Net_MTUProbe(term, session, host, df, start_size, max_size, KTerm_MtuProbe_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
@@ -2379,15 +2335,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 if (KTerm_Net_FragTest(term, session, host, size, fragments, KTerm_FragTest_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             if (KTerm_Net_FragTest(term, session, host, size, fragments, KTerm_FragTest_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");
@@ -2410,15 +2362,11 @@ static void KTerm_Ext_SSH(KTerm* term, KTermSession* session, const char* id, co
         }
 
         if (host) {
-             char* id_copy = (char*)malloc(strlen(id) + 1);
-             if (id_copy) {
-                 strcpy(id_copy, id);
-                 if (KTerm_Net_PingExt(term, session, host, count, interval, size, graph, KTerm_PingExt_Callback, id_copy)) {
-                     if (respond) respond(term, session, "OK;STARTED");
-                 } else {
-                     if (respond) respond(term, session, "ERR;START_FAILED");
-                     free(id_copy);
-                 }
+             // Optimized: Use inline tag
+             if (KTerm_Net_PingExt(term, session, host, count, interval, size, graph, KTerm_PingExt_Callback, NULL, id)) {
+                 if (respond) respond(term, session, "OK;STARTED");
+             } else {
+                 if (respond) respond(term, session, "ERR;START_FAILED");
              }
         } else {
              if (respond) respond(term, session, "ERR;MISSING_TARGET");

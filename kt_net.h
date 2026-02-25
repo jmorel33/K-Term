@@ -188,8 +188,8 @@ void KTerm_Net_DumpConnections(KTerm* term, char* buffer, size_t max_len); // De
 typedef void (*KTermTracerouteCallback)(KTerm* term, KTermSession* session, int hop, const char* ip, double rtt_ms, bool reached, void* user_data);
 
 // Starts an async traceroute. Use NULL callback for default Gateway output if integrated.
-void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data);
-void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data);
+void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data, const char* tag);
+void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data, const char* tag);
 
 // Response Time / Latency Test Result
 typedef struct {
@@ -205,7 +205,7 @@ typedef struct {
 typedef void (*KTermResponseTimeCallback)(KTerm* term, KTermSession* session, const ResponseTimeResult* result, void* user_data);
 
 // Starts an async response time test (Ping-like).
-bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int timeout_ms, KTermResponseTimeCallback cb, void* user_data);
+bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int timeout_ms, KTermResponseTimeCallback cb, void* user_data, const char* tag, bool free_user_data);
 
 // Port Scan Callback
 // Status: 0=CLOSED/TIMEOUT, 1=OPEN
@@ -213,13 +213,13 @@ typedef void (*KTermPortScanCallback)(KTerm* term, KTermSession* session, const 
 
 // Starts an async port scan. Ports string can be comma separated (e.g., "80,443,22,8080").
 // Timeout is per port.
-bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data);
+bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data, const char* tag);
 
 // Whois Callback
 typedef void (*KTermWhoisCallback)(KTerm* term, KTermSession* session, const char* data, size_t len, bool done, void* user_data);
 
 // Starts an async whois query.
-bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data);
+bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data, const char* tag);
 
 // Speedtest Result
 typedef struct {
@@ -238,7 +238,7 @@ typedef void (*KTermSpeedtestCallback)(KTerm* term, KTermSession* session, const
 // Starts an async speedtest (Download/Upload).
 // Streams: number of parallel connections (default 4).
 // Path: URL path for download test (default "/100MB.zip").
-bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data);
+bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data, const char* tag);
 
 // HTTP Probe Result
 typedef struct {
@@ -257,7 +257,7 @@ typedef struct {
 typedef void (*KTermHttpProbeCallback)(KTerm* term, KTermSession* session, const KTermHttpProbeResult* result, void* user_data);
 
 // Starts an async HTTP probe.
-bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data);
+bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data, const char* tag);
 
 // MTU Probe Result
 typedef struct {
@@ -273,7 +273,7 @@ typedef void (*KTermMtuProbeCallback)(KTerm* term, KTermSession* session, const 
 // Starts an async MTU/PMTU probe.
 // df: Don't Fragment flag (PMTUD)
 // start_size/max_size: Probing range
-bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data);
+bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data, const char* tag);
 
 // Fragmentation Test Result
 typedef struct {
@@ -289,7 +289,7 @@ typedef void (*KTermFragTestCallback)(KTerm* term, KTermSession* session, const 
 // Starts an async Fragmentation test.
 // size: Total payload size (will be fragmented)
 // fragments: Expected number of fragments (informational/target)
-bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data);
+bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data, const char* tag);
 
 // Extended Ping Stats
 typedef struct {
@@ -319,7 +319,7 @@ typedef void (*KTermPingExtCallback)(KTerm* term, KTermSession* session, const K
 // interval_ms: Interval between packets
 // size: Packet size
 // graph: Enable ASCII graph generation
-bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data);
+bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data, const char* tag);
 
 // Starts the PacketDiag packet sniffer.
 // params: Key-value pairs (interface, filter, snaplen, count, promisc, timeout)
@@ -350,6 +350,8 @@ void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx);
 void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx);
 void KTerm_Net_FreePingExt(KTermPingExtContext* ctx);
 void KTerm_Net_FreePacketDiag(KTermPacketDiagContext* ctx);
+
+// Advanced Tagging & Ownership (Deprecated by direct params)
 
 #ifdef __cplusplus
 }
@@ -658,6 +660,8 @@ typedef struct KTermTracerouteContext {
 
     KTermTracerouteCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
     bool continuous;
 
 #ifdef _WIN32
@@ -691,6 +695,8 @@ typedef struct KTermResponseTimeContext {
 
     KTermResponseTimeCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 
 #ifdef _WIN32
     HANDLE icmp_handle;
@@ -716,6 +722,8 @@ typedef struct KTermPortScanContext {
 
     KTermPortScanCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 } KTermPortScanContext;
 
 typedef struct KTermWhoisContext {
@@ -731,6 +739,8 @@ typedef struct KTermWhoisContext {
 
     KTermWhoisCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 } KTermWhoisContext;
 
 typedef struct {
@@ -771,6 +781,8 @@ typedef struct KTermSpeedtestContext {
 
     KTermSpeedtestCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 } KTermSpeedtestContext;
 
 typedef struct KTermHttpProbeContext {
@@ -801,6 +813,8 @@ typedef struct KTermHttpProbeContext {
 
     KTermHttpProbeCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 } KTermHttpProbeContext;
 
 typedef struct KTermMtuProbeContext {
@@ -822,6 +836,8 @@ typedef struct KTermMtuProbeContext {
 
     KTermMtuProbeCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 
 #ifdef _WIN32
     HANDLE icmp_handle;
@@ -845,6 +861,8 @@ typedef struct KTermFragTestContext {
 
     KTermFragTestCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 
 #ifdef _WIN32
     HANDLE icmp_handle;
@@ -890,6 +908,8 @@ typedef struct KTermPingExtContext {
 
     KTermPingExtCallback callback;
     void* user_data;
+    char req_tag[64];
+    bool free_user_data;
 
 #ifdef _WIN32
     HANDLE icmp_handle;
@@ -1046,7 +1066,7 @@ void KTerm_Net_FreeTraceroute(KTermTracerouteContext* ctx) {
     if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
     if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
 #endif
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -1057,21 +1077,21 @@ void KTerm_Net_FreeResponseTime(KTermResponseTimeContext* ctx) {
     if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
     if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
 #endif
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
 void KTerm_Net_FreePortScan(KTermPortScanContext* ctx) {
     if (!ctx) return;
     if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
 void KTerm_Net_FreeWhois(KTermWhoisContext* ctx) {
     if (!ctx) return;
     if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -1081,14 +1101,14 @@ void KTerm_Net_FreeSpeedtest(KTermSpeedtestContext* ctx) {
         if (IS_VALID_SOCKET(ctx->streams[i].fd)) CLOSE_SOCKET(ctx->streams[i].fd);
     }
     if (IS_VALID_SOCKET(ctx->config_fd)) CLOSE_SOCKET(ctx->config_fd);
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
 void KTerm_Net_FreeHttpProbe(KTermHttpProbeContext* ctx) {
     if (!ctx) return;
     if (IS_VALID_SOCKET(ctx->sockfd)) CLOSE_SOCKET(ctx->sockfd);
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -1099,7 +1119,7 @@ void KTerm_Net_FreeMtuProbe(KTermMtuProbeContext* ctx) {
     if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
     if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
 #endif
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -1110,7 +1130,7 @@ void KTerm_Net_FreeFragTest(KTermFragTestContext* ctx) {
     if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
     if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
 #endif
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -1121,7 +1141,7 @@ void KTerm_Net_FreePingExt(KTermPingExtContext* ctx) {
     if (ctx->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(ctx->icmp_handle);
     if (ctx->icmp_event) CloseHandle(ctx->icmp_event);
 #endif
-    if (ctx->user_data) free(ctx->user_data);
+    if (ctx->user_data && ctx->free_user_data) free(ctx->user_data);
     free(ctx);
 }
 
@@ -3444,11 +3464,11 @@ void KTerm_Net_Ping(const char* host, char* output, size_t max_len) {
 #undef KT_PCLOSE
 }
 
-void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data) {
-    KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, false, cb, user_data);
+void KTerm_Net_Traceroute(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, KTermTracerouteCallback cb, void* user_data, const char* tag) {
+    KTerm_Net_TracerouteContinuous(term, session, host, max_hops, timeout_ms, false, cb, user_data, tag);
 }
 
-void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data) {
+void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const char* host, int max_hops, int timeout_ms, bool continuous, KTermTracerouteCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host) return;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
@@ -3456,8 +3476,8 @@ void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const ch
 
     // Cleanup existing
     if (net->traceroute) {
-        if (IS_VALID_SOCKET(net->traceroute->sockfd)) CLOSE_SOCKET(net->traceroute->sockfd);
-        free(net->traceroute);
+        // Must use proper free logic to handle user_data
+        KTerm_Net_FreeTraceroute(net->traceroute);
         net->traceroute = NULL;
     }
 
@@ -3470,7 +3490,23 @@ void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const ch
     tr->timeout_ms = (timeout_ms > 0) ? timeout_ms : 2000;
     tr->continuous = continuous;
     tr->callback = cb;
-    tr->user_data = user_data;
+
+    // Tagging
+    if (tag) {
+        strncpy(tr->req_tag, tag, sizeof(tr->req_tag)-1);
+        tr->user_data = tr->req_tag;
+        tr->free_user_data = false;
+    } else {
+        tr->user_data = user_data;
+        tr->free_user_data = (user_data != NULL); // Assume malloc if provided for backward compat? No, safer to default false.
+        // But kt_gateway used malloc.
+        // New strategy: kt_gateway uses tag.
+        // Legacy code: if user_data provided, we assume ownership if we want backward compatibility?
+        // Or we rely on the fact that existing internal users were only Gateway.
+        // Let's set false. Caller must manage if not using tag.
+        tr->free_user_data = false;
+    }
+
     tr->current_ttl = 1;
 
 #ifdef __linux__
@@ -3542,7 +3578,7 @@ void KTerm_Net_TracerouteContinuous(KTerm* term, KTermSession* session, const ch
 #endif
 }
 
-bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int timeout_ms, KTermResponseTimeCallback cb, void* user_data) {
+bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int timeout_ms, KTermResponseTimeCallback cb, void* user_data, const char* tag, bool free_user_data) {
     if (!term || !session || !host) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
@@ -3550,13 +3586,7 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
 
     // Cleanup existing
     if (net->response_time) {
-        if (IS_VALID_SOCKET(net->response_time->sockfd)) CLOSE_SOCKET(net->response_time->sockfd);
-#ifdef _WIN32
-        if (net->response_time->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->response_time->icmp_handle);
-        if (net->response_time->icmp_event) CloseHandle(net->response_time->icmp_event);
-#endif
-        if (net->response_time->user_data) free(net->response_time->user_data);
-        free(net->response_time);
+        KTerm_Net_FreeResponseTime(net->response_time);
         net->response_time = NULL;
     }
 
@@ -3570,6 +3600,7 @@ bool KTerm_Net_ResponseTime(KTerm* term, KTermSession* session, const char* host
     rt->timeout_ms = (timeout_ms > 0) ? timeout_ms : 2000;
     rt->callback = cb;
     rt->user_data = user_data;
+    rt->free_user_data = true; // Default
 
 #ifdef __linux__
     // Setup Socket (Try DGRAM ICMP first, requires ping_group_range)
@@ -3707,20 +3738,14 @@ bool KTerm_Net_PacketDiag_GetFlows(KTerm* term, KTermSession* session, char* out
     return true;
 }
 
-bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data) {
+bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int count, int interval_ms, int size, bool graph, KTermPingExtCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->ping_ext) {
-        if (IS_VALID_SOCKET(net->ping_ext->sockfd)) CLOSE_SOCKET(net->ping_ext->sockfd);
-#ifdef _WIN32
-        if (net->ping_ext->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->ping_ext->icmp_handle);
-        if (net->ping_ext->icmp_event) CloseHandle(net->ping_ext->icmp_event);
-#endif
-        if (net->ping_ext->user_data) free(net->ping_ext->user_data);
-        free(net->ping_ext);
+        KTerm_Net_FreePingExt(net->ping_ext);
         net->ping_ext = NULL;
     }
 
@@ -3734,7 +3759,15 @@ bool KTerm_Net_PingExt(KTerm* term, KTermSession* session, const char* host, int
     ctx->size = (size > 0) ? size : 64;
     ctx->graph = graph;
     ctx->callback = cb;
-    ctx->user_data = user_data;
+
+    if (tag) {
+        strncpy(ctx->req_tag, tag, sizeof(ctx->req_tag)-1);
+        ctx->user_data = ctx->req_tag;
+        ctx->free_user_data = false;
+    } else {
+        ctx->user_data = user_data;
+        ctx->free_user_data = false;
+    }
 
     // Init stats
     ctx->rtt_min = 999999.0;
@@ -3917,7 +3950,8 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
         if (!st->latency_started) {
             st->latency_started = true;
             // 4 probes, 200ms interval, 1000ms timeout
-            if (!KTerm_Net_ResponseTime(term, session, st->host, 4, 200, 1000, KTerm_Speedtest_LatencyCB, st)) {
+            // Pass false to free_user_data so ResponseTime doesn't free 'st' on completion or failure
+            if (!KTerm_Net_ResponseTime(term, session, st->host, 4, 200, 1000, KTerm_Speedtest_LatencyCB, st, NULL, false)) {
                 // If failed to start, skip latency
                 st->latency_done = true;
             }
@@ -4190,20 +4224,15 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
     }
 }
 
-bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data) {
+bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, int port, int streams, const char* path, KTermSpeedtestCallback cb, void* user_data, const char* tag) {
     if (!term || !session) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->speedtest) {
-        // Cleanup existing
-        if (IS_VALID_SOCKET(net->speedtest->config_fd)) CLOSE_SOCKET(net->speedtest->config_fd);
-        for(int i=0; i<net->speedtest->num_streams; i++) {
-            if (IS_VALID_SOCKET(net->speedtest->streams[i].fd)) CLOSE_SOCKET(net->speedtest->streams[i].fd);
-        }
-        if (net->speedtest->user_data) free(net->speedtest->user_data);
-        free(net->speedtest);
+        KTerm_Net_FreeSpeedtest(net->speedtest);
+        net->speedtest = NULL;
     }
 
     net->speedtest = (KTermSpeedtestContext*)calloc(1, sizeof(KTermSpeedtestContext));
@@ -4214,7 +4243,15 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
 
     st->num_streams = (streams > 0 && streams <= MAX_ST_STREAMS) ? streams : 4;
     st->callback = cb;
-    st->user_data = user_data;
+
+    if (tag) {
+        strncpy(st->req_tag, tag, sizeof(st->req_tag)-1);
+        st->user_data = st->req_tag;
+        st->free_user_data = false;
+    } else {
+        st->user_data = user_data;
+        st->free_user_data = false;
+    }
     st->duration_sec = 5.0; // Fixed duration for now
 
     if (path && path[0]) strncpy(st->dl_path, path, sizeof(st->dl_path)-1);
@@ -4865,7 +4902,7 @@ void KTerm_Net_ProcessPacketDiag(KTerm* term, KTermSession* session) {
              char msg[128];
              snprintf(msg, sizeof(msg), "Auto-Triggering MTU Probe for %s (Frag Detected)", target_ip);
              KTerm_Net_Log(term, ctx->session_index, msg);
-             KTerm_Net_MTUProbe(term, session, target_ip, true, 0, 0, NULL, NULL);
+             KTerm_Net_MTUProbe(term, session, target_ip, true, 0, 0, NULL, NULL, "auto");
         }
     }
 }
@@ -5176,16 +5213,14 @@ bool KTerm_Net_PacketDiag_GetDetail(KTerm* term, KTermSession* session, int pack
     return true;
 }
 
-bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data) {
+bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const char* query, KTermWhoisCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host || !query) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->whois) {
-        if (IS_VALID_SOCKET(net->whois->sockfd)) CLOSE_SOCKET(net->whois->sockfd);
-        if (net->whois->user_data) free(net->whois->user_data);
-        free(net->whois);
+        KTerm_Net_FreeWhois(net->whois);
         net->whois = NULL;
     }
 
@@ -5196,7 +5231,15 @@ bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const
     strncpy(ctx->host, host, sizeof(ctx->host)-1);
     strncpy(ctx->query, query, sizeof(ctx->query)-1);
     ctx->callback = cb;
-    ctx->user_data = user_data;
+
+    if (tag) {
+        strncpy(ctx->req_tag, tag, sizeof(ctx->req_tag)-1);
+        ctx->user_data = ctx->req_tag;
+        ctx->free_user_data = false;
+    } else {
+        ctx->user_data = user_data;
+        ctx->free_user_data = false;
+    }
     ctx->timeout_ms = 5000;
     gettimeofday(&ctx->start_time, NULL);
     
@@ -5239,7 +5282,7 @@ bool KTerm_Net_Whois(KTerm* term, KTermSession* session, const char* host, const
     return true;
 }
 
-bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data) {
+bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, const char* ports, int timeout_ms, KTermPortScanCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host || !ports) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
@@ -5247,9 +5290,7 @@ bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, co
 
     // Cleanup existing
     if (net->port_scan) {
-        if (IS_VALID_SOCKET(net->port_scan->sockfd)) CLOSE_SOCKET(net->port_scan->sockfd);
-        if (net->port_scan->user_data) free(net->port_scan->user_data);
-        free(net->port_scan);
+        KTerm_Net_FreePortScan(net->port_scan);
         net->port_scan = NULL;
     }
 
@@ -5262,7 +5303,15 @@ bool KTerm_Net_PortScan(KTerm* term, KTermSession* session, const char* host, co
     ps->ports_ptr = ps->ports_str; // Start
     ps->timeout_ms = (timeout_ms > 0) ? timeout_ms : 1000;
     ps->callback = cb;
-    ps->user_data = user_data;
+
+    if (tag) {
+        strncpy(ps->req_tag, tag, sizeof(ps->req_tag)-1);
+        ps->user_data = ps->req_tag;
+        ps->free_user_data = false;
+    } else {
+        ps->user_data = user_data;
+        ps->free_user_data = false;
+    }
 
     // Pre-resolve host (blocking, but just once)
     struct addrinfo hints, *res;
@@ -5470,16 +5519,15 @@ void KTerm_Net_ProcessHttpProbe(KTerm* term, KTermSession* session) {
     }
 }
 
-bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data) {
+bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KTermHttpProbeCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !url) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->http_probe) {
-        if (IS_VALID_SOCKET(net->http_probe->sockfd)) CLOSE_SOCKET(net->http_probe->sockfd);
-        if (net->http_probe->user_data) free(net->http_probe->user_data);
-        free(net->http_probe);
+        KTerm_Net_FreeHttpProbe(net->http_probe);
+        net->http_probe = NULL;
     }
 
     net->http_probe = (KTermHttpProbeContext*)calloc(1, sizeof(KTermHttpProbeContext));
@@ -5487,7 +5535,15 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
 
     KTermHttpProbeContext* ctx = net->http_probe;
     ctx->callback = cb;
-    ctx->user_data = user_data;
+
+    if (tag) {
+        strncpy(ctx->req_tag, tag, sizeof(ctx->req_tag)-1);
+        ctx->user_data = ctx->req_tag;
+        ctx->free_user_data = false;
+    } else {
+        ctx->user_data = user_data;
+        ctx->free_user_data = false;
+    }
     ctx->sockfd = INVALID_SOCKET;
 
     // Parse URL
@@ -5566,20 +5622,14 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
     return true;
 }
 
-bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data) {
+bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bool df, int start_size, int max_size, KTermMtuProbeCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->mtu_probe) {
-        if (IS_VALID_SOCKET(net->mtu_probe->sockfd)) CLOSE_SOCKET(net->mtu_probe->sockfd);
-#ifdef _WIN32
-        if (net->mtu_probe->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->mtu_probe->icmp_handle);
-        if (net->mtu_probe->icmp_event) CloseHandle(net->mtu_probe->icmp_event);
-#endif
-        if (net->mtu_probe->user_data) free(net->mtu_probe->user_data);
-        free(net->mtu_probe);
+        KTerm_Net_FreeMtuProbe(net->mtu_probe);
         net->mtu_probe = NULL;
     }
 
@@ -5592,7 +5642,15 @@ bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bo
     ctx->min_size = (start_size > 0) ? start_size : 64;
     ctx->max_size = (max_size > 0) ? max_size : 1500;
     ctx->callback = cb;
-    ctx->user_data = user_data;
+
+    if (tag) {
+        strncpy(ctx->req_tag, tag, sizeof(ctx->req_tag)-1);
+        ctx->user_data = ctx->req_tag;
+        ctx->free_user_data = false;
+    } else {
+        ctx->user_data = user_data;
+        ctx->free_user_data = false;
+    }
 
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
@@ -5612,20 +5670,14 @@ bool KTerm_Net_MTUProbe(KTerm* term, KTermSession* session, const char* host, bo
     return true;
 }
 
-bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data) {
+bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, int size, int fragments, KTermFragTestCallback cb, void* user_data, const char* tag) {
     if (!term || !session || !host) return false;
 
     KTermNetSession* net = KTerm_Net_CreateContext(session);
     if (!net) return false;
 
     if (net->frag_test) {
-        if (IS_VALID_SOCKET(net->frag_test->sockfd)) CLOSE_SOCKET(net->frag_test->sockfd);
-#ifdef _WIN32
-        if (net->frag_test->icmp_handle != INVALID_HANDLE_VALUE) IcmpCloseHandle(net->frag_test->icmp_handle);
-        if (net->frag_test->icmp_event) CloseHandle(net->frag_test->icmp_event);
-#endif
-        if (net->frag_test->user_data) free(net->frag_test->user_data);
-        free(net->frag_test);
+        KTerm_Net_FreeFragTest(net->frag_test);
         net->frag_test = NULL;
     }
 
@@ -5637,7 +5689,15 @@ bool KTerm_Net_FragTest(KTerm* term, KTermSession* session, const char* host, in
     ctx->size = (size > 0) ? size : 2000;
     ctx->fragments = (fragments > 0) ? fragments : 2;
     ctx->callback = cb;
-    ctx->user_data = user_data;
+
+    if (tag) {
+        strncpy(ctx->req_tag, tag, sizeof(ctx->req_tag)-1);
+        ctx->user_data = ctx->req_tag;
+        ctx->free_user_data = false;
+    } else {
+        ctx->user_data = user_data;
+        ctx->free_user_data = false;
+    }
 
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
@@ -5715,6 +5775,8 @@ bool KTerm_Net_ScanAuthFlows(KTerm* term, KTermSession* session, char* out, size
     return false;
 #endif
 }
+
+// Advanced Tagging & Ownership Implementation - Removed (Deprecated)
 
 #endif // KTERM_DISABLE_NET
 

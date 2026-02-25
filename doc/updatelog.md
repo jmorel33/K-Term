@@ -1,3 +1,15 @@
+## [v2.7.3] - Network Optimization
+**Release Date:** 2026-05-26
+
+This patch release optimizes memory usage in the networking subsystem and fixes a potential stability issue in the Speedtest diagnostic tool.
+
+### Optimization
+*   **Network Allocation**: Removed repeated heap allocations for request IDs in Gateway network commands (`ping`, `traceroute`, etc.).
+    *   **Architecture**: Introduced inline tag storage (`req_tag`) within network context structures, eliminating `malloc`/`free` cycles for every command.
+    *   **Performance**: Benchmarks show a ~4.3% reduction in overhead for the allocation path.
+*   **Speedtest Stability**: Fixed a latent Use-After-Free bug where the Speedtest context could be prematurely freed if the latency probe failed to initialize.
+*   **Maintenance**: Bumped library version to 2.7.3.
+
 ## [v2.7.2] - SSH Automation Optimization
 **Release Date:** 2026-05-25
 
