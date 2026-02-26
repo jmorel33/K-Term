@@ -81,7 +81,8 @@ typedef struct {
     #define KTerm_Strcasecmp strcasecmp
 #endif
 
-// Safe strtok replacement
+// Safe strtok replacement (Reentrant/Thread-Safe)
+// Replaces standard strtok() which uses global state and is unsafe for threaded usage.
 static char* KTerm_Strtok(char* str, const char* delim, char** saveptr) {
     char* token;
     if (str) *saveptr = str;
