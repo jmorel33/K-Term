@@ -1,3 +1,13 @@
+## [v2.7.4] - Gateway Thread Safety Verification
+**Release Date:** 2026-05-27
+
+This patch release validates and documents the thread-safety of the Gateway Protocol's string parsing logic.
+
+### Safety & Stability
+*   **Thread Safety**: Validated that `kt_gateway.h` uses a custom reentrant tokenizer (`KTerm_Strtok`) instead of the unsafe standard `strtok`, preventing data corruption during concurrent Gateway command processing.
+*   **Verification**: Added regression tests (`tests/verify_gateway_threading.c`) to explicitly verify the thread safety of attribute parsing (`KTerm_ParseAttributeString`) under high concurrency.
+*   **Maintenance**: Bumped library version to 2.7.4.
+
 ## [v2.7.3] - Network Optimization
 **Release Date:** 2026-05-26
 
