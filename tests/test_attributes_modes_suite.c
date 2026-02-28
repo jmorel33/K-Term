@@ -31,6 +31,7 @@ void test_sgr_basic_attributes(KTerm* term, KTermSession* session) {
 
     // Output Character and verify cell attributes
     write_sequence(term, "A");
+    KTerm_FlushOps(term, session);
     int x = session->cursor.x - 1;
     if (x < 0) x = 0;
 
@@ -48,7 +49,7 @@ void test_sgr_extended_attributes(KTerm* term, KTermSession* session) {
 
     // Test blink
     write_sequence(term, "\x1B[5m");
-    assert(session->current_attributes & KTERM_ATTR_BLINK);
+    assert(session->current_attributes & KTERM_ATTR_BLINK_SLOW);
 
     // Test reverse
     write_sequence(term, "\x1B[7m");
@@ -60,7 +61,7 @@ void test_sgr_extended_attributes(KTerm* term, KTermSession* session) {
 
     // Test strikethrough
     write_sequence(term, "\x1B[9m");
-    assert(session->current_attributes & KTERM_ATTR_STRIKETHROUGH);
+    assert(session->current_attributes & KTERM_ATTR_STRIKE);
 }
 
 // ============================================================================
@@ -70,17 +71,17 @@ void test_sgr_extended_attributes(KTerm* term, KTermSession* session) {
 void test_dec_mode_coverage(KTerm* term, KTermSession* session) {
     // Test cursor visibility mode
     write_sequence(term, "\x1B[?25h");  // Show cursor
-    assert(session->dec_modes & KTERM_MODE_CURSOR_VISIBLE);
+    assert(session->dec_modes & KTERM_MODE_DECTCEM);
 
     write_sequence(term, "\x1B[?25l");  // Hide cursor
-    assert(!(session->dec_modes & KTERM_MODE_CURSOR_VISIBLE));
+    assert(!(session->dec_modes & KTERM_MODE_DECTCEM));
 
     // Test application keypad mode
     write_sequence(term, "\x1B[?66h");  // Enable
-    assert(session->dec_modes & KTERM_MODE_KEYPAD_APPLICATION);
+    assert(session->input.keypad_application_mode);
 
     write_sequence(term, "\x1B[?66l");  // Disable
-    assert(!(session->dec_modes & KTERM_MODE_KEYPAD_APPLICATION));
+    assert(!session->input.keypad_application_mode);
 }
 
 // ============================================================================
@@ -92,15 +93,15 @@ void test_blink_attribute_flavors(KTerm* term, KTermSession* session) {
 
     // Slow blink (SGR 5)
     write_sequence(term, "\x1B[5m");
-    assert(session->current_attributes & KTERM_ATTR_BLINK);
+    assert(session->current_attributes & KTERM_ATTR_BLINK_SLOW);
 
     // Fast blink (SGR 6) - if supported
     write_sequence(term, "\x1B[6m");
-    // Fast blink handling is implementation-specific
+    assert(session->current_attributes & KTERM_ATTR_BLINK);
 
     // Reset blink
     write_sequence(term, "\x1B[25m");
-    assert(!(session->current_attributes & KTERM_ATTR_BLINK));
+    assert(!(session->current_attributes & (KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_SLOW)));
 }
 
 void test_ansi_sys_blink_behavior(KTerm* term, KTermSession* session) {
@@ -108,12 +109,13 @@ void test_ansi_sys_blink_behavior(KTerm* term, KTermSession* session) {
 
     // ANSI.SYS blink behavior
     write_sequence(term, "\x1B[5m");
-    assert(session->current_attributes & KTERM_ATTR_BLINK);
+    assert(session->current_attributes & KTERM_ATTR_BLINK_SLOW);
 
     // Write character with blink
     write_sequence(term, "B");
+    KTerm_FlushOps(term, session);
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, session->cursor.x - 1);
-    assert(cell->flags & KTERM_ATTR_BLINK);
+    assert(cell->flags & KTERM_ATTR_BLINK_SLOW);
 }
 
 // ============================================================================
@@ -129,7 +131,8 @@ void test_conceal_character(KTerm* term, KTermSession* session) {
 
     // Write character
     write_sequence(term, "Secret");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify characters have conceal flag
     for (int i = 0; i < 6; i++) {
         EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, i);
@@ -154,6 +157,7 @@ void test_protected_character_skipping(KTerm* term, KTermSession* session) {
 
     // Write protected character
     write_sequence(term, "P");
+    KTerm_FlushOps(term, session);
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, session->cursor.x - 1);
     assert(cell->flags & KTERM_ATTR_PROTECTED);
 }
@@ -168,11 +172,12 @@ void test_protected_area_operations(KTerm* term, KTermSession* session) {
     // Disable protected
     write_sequence(term, "\x1B[0\"q");
     write_sequence(term, "Unprotected");
+    KTerm_FlushOps(term, session);
 
     // Verify both areas exist
     EnhancedTermChar* cell1 = GetScreenCell(session, session->cursor.y, 0);
     EnhancedTermChar* cell2 = GetScreenCell(session, session->cursor.y, 9);
-    
+
     assert(cell1->flags & KTERM_ATTR_PROTECTED);
     assert(!(cell2->flags & KTERM_ATTR_PROTECTED));
 }
@@ -267,7 +272,7 @@ int main() {
     }
 
     TestResults results = {0};
-    
+
     print_test_header("Attributes and Modes Tests");
 
     // Define test array for cleaner execution
@@ -292,22 +297,16 @@ int main() {
     int num_tests = sizeof(tests) / sizeof(tests[0]);
 
     for (int i = 0; i < num_tests; i++) {
-        if (1) { reset_terminal(term);
-            tests[i].func(term, session);
-            results.passed++;
-        } else {
-            results.failed++;
-        }
+        reset_terminal(term);
+        tests[i].func(term, session);
+        results.passed++;
         results.total++;
-        print_test_result(tests[i].name, results.passed == results.total);
+        print_test_result(tests[i].name, 1);
     }
 
     destroy_test_term(term);
-    
+
     print_test_summary(results.total, results.passed, results.failed);
-    
+
     return results.failed > 0 ? 1 : 0;
 }
-
-
-

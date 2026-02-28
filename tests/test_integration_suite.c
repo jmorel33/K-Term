@@ -13,7 +13,8 @@
 void test_public_api_usage(KTerm* term, KTermSession* session) {
     // Test public API usage
     write_sequence(term, "API Test");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify API is functional
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -27,7 +28,7 @@ void test_public_api_usage(KTerm* term, KTermSession* session) {
 void test_full_decoupling(KTerm* term, KTermSession* session) {
     // Test full decoupling of components
     write_sequence(term, "Decoupling Test");
-    
+
     // Verify components are decoupled
     assert(session != NULL);
 }
@@ -39,7 +40,8 @@ void test_full_decoupling(KTerm* term, KTermSession* session) {
 void test_tab_stop_management(KTerm* term, KTermSession* session) {
     // Test tab stop management
     write_sequence(term, "Tab\tStop\tTest");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify tab stops are managed
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -52,7 +54,8 @@ void test_tab_stop_management(KTerm* term, KTermSession* session) {
 void test_thread_safety(KTerm* term, KTermSession* session) {
     // Test thread safety
     write_sequence(term, "Thread Test");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify thread safety
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -65,7 +68,7 @@ void test_thread_safety(KTerm* term, KTermSession* session) {
 void test_safety_checks(KTerm* term, KTermSession* session) {
     // Test safety checks
     write_sequence(term, "Safety Test");
-    
+
     // Verify safety checks are in place
     assert(session != NULL);
 }
@@ -77,7 +80,7 @@ void test_safety_checks(KTerm* term, KTermSession* session) {
 void test_active_session_isolation(KTerm* term, KTermSession* session) {
     // Test active session isolation
     write_sequence(term, "Session Test");
-    
+
     // Verify session isolation
     assert(session != NULL);
 }
@@ -101,7 +104,7 @@ int main() {
     }
 
     TestResults results = {0};
-    
+
     print_test_header("Integration Tests");
 
     // Define test array for cleaner execution
@@ -131,11 +134,8 @@ int main() {
     }
 
     destroy_test_term(term);
-    
+
     print_test_summary(results.total, results.passed, results.failed);
-    
+
     return results.failed > 0 ? 1 : 0;
 }
-
-
-

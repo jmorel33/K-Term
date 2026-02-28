@@ -38,10 +38,10 @@ void test_sixel_processing(KTerm* term, KTermSession* session) {
 void test_sixel_via_gateway(KTerm* term, KTermSession* session) {
     // Test Sixel through gateway protocol
     KTerm_SetLevel(term, session, VT_LEVEL_340);
-    
+
     // Gateway Sixel command
     write_sequence(term, "\x1B_G");  // Gateway introducer
-    
+
     // Gateway protocol handling is internal to K-Term
 }
 
@@ -52,14 +52,14 @@ void test_sixel_via_gateway(KTerm* term, KTermSession* session) {
 void test_kitty_image_protocol(KTerm* term, KTermSession* session) {
     // Test Kitty image protocol
     write_sequence(term, "\x1B_Gf=24,s=100,v=100,a=T,t=d,c=1,r=1\x1B\\");
-    
+
     // Kitty protocol handling is internal to K-Term
 }
 
 void test_kitty_defaults(KTerm* term, KTermSession* session) {
     // Test Kitty protocol with default parameters
     write_sequence(term, "\x1B_Ga=T\x1B\\");
-    
+
     // Verify protocol is recognized
 }
 
@@ -70,10 +70,10 @@ void test_kitty_defaults(KTerm* term, KTermSession* session) {
 void test_compositor_operations(KTerm* term, KTermSession* session) {
     // Test compositor preparation
     KTermCompositor_Prepare(&term->compositor, term);
-    
+
     // Write some text
     write_sequence(term, "Hello");
-    
+
     // Verify compositor can process the text
     KTerm_Draw(term);
 }
@@ -85,7 +85,8 @@ void test_compositor_operations(KTerm* term, KTermSession* session) {
 void test_font_rendering_metrics(KTerm* term, KTermSession* session) {
     // Test font metrics
     write_sequence(term, "Test");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify characters are rendered
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -99,7 +100,7 @@ void test_font_rendering_metrics(KTerm* term, KTermSession* session) {
 void test_pane_tiling_performance(KTerm* term, KTermSession* session) {
     // Test pane tiling performance
     write_sequence(term, "Pane 1");
-    
+
     // Verify pane is created
     assert(session != NULL);
 }
@@ -112,7 +113,7 @@ void test_rectangle_fill_operations(KTerm* term, KTermSession* session) {
     // Test rectangle fill operations
     write_sequence(term, "\x1B[H");      // Home
     write_sequence(term, "\x1B[2J");     // Clear display
-    
+
     // Fill rectangle with character
     for (int y = 0; y < 5; y++) {
         for (int x = 0; x < 10; x++) {
@@ -126,7 +127,8 @@ void test_rectangle_attribute_operations(KTerm* term, KTermSession* session) {
     // Test rectangle attribute operations
     write_sequence(term, "\x1B[1m");     // Bold
     write_sequence(term, "Bold Text");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify attributes are applied
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell->flags & KTERM_ATTR_BOLD);
@@ -139,7 +141,7 @@ void test_rectangle_attribute_operations(KTerm* term, KTermSession* session) {
 void test_vertical_line_operations(KTerm* term, KTermSession* session) {
     // Test vertical line operations
     write_sequence(term, "\x1B[H");      // Home
-    
+
     // Draw vertical line
     for (int i = 0; i < 5; i++) {
         write_sequence(term, "|");
@@ -155,7 +157,7 @@ void test_vertical_line_operations(KTerm* term, KTermSession* session) {
 void test_grid_out_of_bounds(KTerm* term, KTermSession* session) {
     // Test out of bounds grid access
     write_sequence(term, "\x1B[999;999H");  // Move to out of bounds
-    
+
     // Terminal should handle gracefully
     write_sequence(term, "Test");
 }
@@ -167,7 +169,8 @@ void test_grid_out_of_bounds(KTerm* term, KTermSession* session) {
 void test_raw_buffer_dump(KTerm* term, KTermSession* session) {
     // Test raw buffer dump
     write_sequence(term, "Raw Data");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify data is in buffer
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -180,7 +183,7 @@ void test_raw_buffer_dump(KTerm* term, KTermSession* session) {
 void test_nerd_font_hashing(KTerm* term, KTermSession* session) {
     // Test Nerd Font character hashing
     write_sequence(term, "\xEF\x81\x80");  // Nerd Font character
-    
+
     // Verify character is processed
 }
 
@@ -191,7 +194,7 @@ void test_nerd_font_hashing(KTerm* term, KTermSession* session) {
 void verify_shader_configuration(KTerm* term, KTermSession* session) {
     // Test shader configuration
     KTermCompositor_Prepare(&term->compositor, term);
-    
+
     // Verify shaders are configured
 }
 
@@ -203,7 +206,7 @@ void verify_regis_graphics_isolation(KTerm* term, KTermSession* session) {
     // Test ReGIS graphics isolation
     write_sequence(term, "\x1BP");  // DCS
     write_sequence(term, "p");      // ReGIS introducer
-    
+
     // ReGIS protocol handling is internal to K-Term
 }
 
@@ -212,7 +215,7 @@ void verify_regis_memory_leaks(KTerm* term, KTermSession* session) {
     write_sequence(term, "\x1BP");
     write_sequence(term, "p");
     write_sequence(term, "\x1B\\");
-    
+
     // Verify no memory leaks
 }
 
@@ -223,7 +226,7 @@ void verify_regis_memory_leaks(KTerm* term, KTermSession* session) {
 void verify_tektronix_isolation(KTerm* term, KTermSession* session) {
     // Test Tektronix graphics isolation
     write_sequence(term, "\x1B[?38h");  // Enter Tektronix mode
-    
+
     // Tektronix protocol handling is internal to K-Term
 }
 
@@ -246,7 +249,7 @@ int main() {
     }
 
     TestResults results = {0};
-    
+
     print_test_header("Graphics Tests");
 
     // Define test array for cleaner execution
@@ -287,11 +290,8 @@ int main() {
     }
 
     destroy_test_term(term);
-    
+
     print_test_summary(results.total, results.passed, results.failed);
-    
+
     return results.failed > 0 ? 1 : 0;
 }
-
-
-

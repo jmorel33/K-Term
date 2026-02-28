@@ -21,7 +21,7 @@ void test_csi_basic_parsing(KTerm* term, KTermSession* session) {
 
 void test_csi_defaults(KTerm* term, KTermSession* session) {
     int params[MAX_ESCAPE_PARAMS];
-    
+
     // Leading empty
     int count = KTerm_ParseCSIParams(term, ";20", params, MAX_ESCAPE_PARAMS);
     assert(count == 2);
@@ -142,9 +142,9 @@ void test_stream_peek_identifier(KTerm* term, KTermSession* session) {
 void test_direct_input_mode(KTerm* term, KTermSession* session) {
     // Enable direct input mode
     write_sequence(term, "\x1B[?2004h");
-    
+
     // Verify mode is set
-    assert(session->dec_modes & KTERM_MODE_BRACKETED_PASTE);
+    assert(session->bracketed_paste.enabled);
 }
 
 // ============================================================================
@@ -153,8 +153,8 @@ void test_direct_input_mode(KTerm* term, KTermSession* session) {
 
 void test_forms_skip_mode(KTerm* term, KTermSession* session) {
     // Enable forms skip mode
-    write_sequence(term, "\x1B[?4h");
-    
+    write_sequence(term, "\x1B[4h");
+
     // Verify mode is set
     assert(session->dec_modes & KTERM_MODE_INSERT);
 }
@@ -166,7 +166,7 @@ void test_forms_skip_mode(KTerm* term, KTermSession* session) {
 void test_vt52_mode_switching(KTerm* term, KTermSession* session) {
     // Switch to VT52 mode
     write_sequence(term, "\x1B[?2l");
-    
+
     // Verify we're in VT52 mode (or at least the mode was processed)
     // VT52 mode handling is internal to K-Term
 }
@@ -178,7 +178,7 @@ void test_vt52_mode_switching(KTerm* term, KTermSession* session) {
 void test_kitty_keyboard_protocol(KTerm* term, KTermSession* session) {
     // Enable kitty keyboard protocol
     write_sequence(term, "\x1B[?1u");
-    
+
     // Verify protocol is enabled
     // Kitty protocol handling is internal to K-Term
 }
@@ -190,7 +190,7 @@ void test_kitty_keyboard_protocol(KTerm* term, KTermSession* session) {
 void test_osc_parsing(KTerm* term, KTermSession* session) {
     // Test OSC sequence parsing
     write_sequence(term, "\x1B]0;Test Title\x07");
-    
+
     // OSC parsing is handled internally
 }
 
@@ -201,7 +201,8 @@ void test_osc_parsing(KTerm* term, KTermSession* session) {
 void test_input_pipeline(KTerm* term, KTermSession* session) {
     // Test basic input pipeline
     write_sequence(term, "Hello");
-    
+    KTerm_FlushOps(term, session);
+
     // Verify characters were processed
     EnhancedTermChar* cell = GetScreenCell(session, session->cursor.y, 0);
     assert(cell != NULL);
@@ -214,7 +215,7 @@ void test_input_pipeline(KTerm* term, KTermSession* session) {
 void test_decrqss_parsing(KTerm* term, KTermSession* session) {
     // Test DECRQSS (Request Status String) parsing
     write_sequence(term, "\x1B[?25$p");
-    
+
     // DECRQSS handling is internal to K-Term
 }
 
@@ -226,7 +227,7 @@ void test_signed_params(KTerm* term, KTermSession* session) {
     // Test parsing of signed parameters
     int params[MAX_ESCAPE_PARAMS];
     int count = KTerm_ParseCSIParams(term, "-10;20;-30", params, MAX_ESCAPE_PARAMS);
-    
+
     // Verify parsing handles negative numbers appropriately
     assert(count >= 2);
 }
@@ -238,7 +239,7 @@ void test_signed_params(KTerm* term, KTermSession* session) {
 void test_phase4_protocol(KTerm* term, KTermSession* session) {
     // Test phase 4 protocol features
     write_sequence(term, "\x1B[c");
-    
+
     // Phase 4 protocol handling is internal to K-Term
 }
 
@@ -261,7 +262,7 @@ int main() {
     }
 
     TestResults results = {0};
-    
+
     print_test_header("Parser Tests");
 
     // CSI Parsing Tests
@@ -403,10 +404,8 @@ int main() {
     print_test_result("test_input_pipeline", results.passed == 15);
 
     destroy_test_term(term);
-    
+
     print_test_summary(results.total, results.passed, results.failed);
-    
+
     return results.failed > 0 ? 1 : 0;
 }
-
-
