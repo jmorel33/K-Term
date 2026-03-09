@@ -35,6 +35,7 @@ That multi-venue vision is spot on for K-Term—it's already got the bones for i
 
 - **How it Fits**: Use `KTerm_Net_Connect(term, session, host, port, user, password)` to dial into an IRC server (e.g., `irc.libera.chat`, `6667`). Then, set a custom protocol via `KTerm_Net_SetProtocol` (e.g., by extending the `KTermNetProtocol` enum with `KTERM_NET_PROTO_IRC`), pointing to an IRC state machine that handles parsing (e.g., split lines by `\r\n`, process commands like `JOIN`, `PRIVMSG`, `PING/PONG`).
 - **Display/Interaction**: Route incoming messages to a `KTermSession` using the built-in routing or Gateway commands (e.g., `EXT;net;attach;SESSION=irc-chat`). Output goes to the grid for rendering (like shell output), and user input (e.g., `/join #channel`) can be queued via `KTerm_QueueInputEvent` or a custom handler.
+- **Color Translation & UI Layout**: The raw IRC text stream contains legacy mIRC control codes (e.g., `\x0304,05` for red text on brown background, `\x02` for bold). A dedicated translation layer inside `kt_irc.c` must convert these into standard ANSI VT sequences (`\x1b[31;43m`) before writing them to the `KTermSession`. Additionally, `KTerm_SplitPane` (from `kt_layout.h`) should be utilized to construct a classic, 3-pane UI disposition (Main Chat, Right-Side User List, Bottom Input Line) with dynamic reflow.
 - **VoIP Tie-In**: If you want voice channels (e.g., IRC with audio), hook VoIP (RTP-based?) to IRC's DCC CHAT or a custom extension—trigger via the `KTermNetCallbacks.on_data` callback.
 - **Extensibility**: Add Gateway commands for IRC-specific stuff, e.g., `SET;IRC;NICK=yournick` or `EXT;irc;join;#channel`.
 - **Edge Cases**: Handle reconnects with `kt_net`'s keep-alive/retries. For multi-server, use multiple net connections multiplexed across sessions.
@@ -97,11 +98,12 @@ This "injection" would extend `kt_net` with server-specific callbacks and a stat
 - [ ] Fork `telnet_client.c` to create `irc_client.c`.
 - [ ] Implement a basic TCP connection to a public IRC server using `KTerm_Net_Connect(term, session, host, port, user, password)`.
 - [ ] Create a barebones message parser to handle `PING`/`PONG` for keep-alive.
-- [ ] Support joining a channel (`JOIN`) and reading messages (`PRIVMSG`).
-- [ ] Test routing of parsed IRC output directly into a `KTermSession`.
+- [ ] Support joining a channel (`JOIN`) and reading raw messages (`PRIVMSG`).
+- [ ] Test routing of parsed IRC output directly into a basic `KTermSession`.
 
 ### Phase 2: Core IRC Protocol Module
 - [ ] Create `kt_irc.h` and `kt_irc.c` to house the IRC parser and state definitions.
+- [ ] Implement an IRC-to-ANSI translation layer inside the parser to intercept mIRC control codes (`\x02`, `\x03`, `\x1D`, `\x1F`) and emit VT sequences (`\x1b[...m`).
 - [ ] Define shared client/server IRC structures (e.g., user profiles, channel states).
 - [ ] Add `KTERM_NET_PROTO_IRC` to `KTermNetProtocol` in `kt_net.h`.
 - [ ] Integrate K-Term’s non-blocking I/O callbacks (`KTermNetCallbacks`) to feed into `IRC_parse_message`.
@@ -124,10 +126,11 @@ This "injection" would extend `kt_net` with server-specific callbacks and a stat
 - [ ] Hook the audio stream into the existing K-Term `kt_voice` architecture.
 - [ ] Implement proxying of VoIP streams between users in server mode.
 
-### Phase 6: Multi-Venue Layouts & Demos
+### Phase 6: UI, Formatting, & Multi-Venue Layouts
 - [ ] Build a comprehensive example showcasing a multi-venue environment (e.g., split panes with IRC in one, SSH in another).
-- [ ] Implement focus management so users can easily switch context between the IRC pane and others.
-- [ ] Add visual polish (e.g., specific colors for different users, IRC status bars).
+- [ ] Configure `KTerm_SplitPane` (from `kt_layout.h`) to create a standard IRC client disposition: A large scrolling pane for the active channel, a right-aligned narrow pane for `NAMES` (the user list), and a single-line bottom pane for local command input.
+- [ ] Implement focus management so users can easily switch context between the IRC panes and others.
+- [ ] Add visual polish: colorize different users dynamically based on their nickname hash, and implement IRC status bars using the `EXT;grid` commands.
 
 ### Phase 7: Hardening, Security, and Optimization
 - [ ] Introduce timeouts, keep-alives, and robust error handling for both client and server modes.
