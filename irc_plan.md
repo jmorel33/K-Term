@@ -45,10 +45,11 @@ This could be "injected" as a drop-in module, similar to how SSH plugs in its fr
 
 ## 3. Server-Side IRC Feasibility
 
-**Also feasible, but more involved**—mirrors the `net_server.c` Telnet server example, but with IRC daemon logic (like a mini ircd).
+**Also feasible, but more involved**—mirrors the `net_server.c` Telnet server example, but requires full IRC daemon logic (like a compliant mini `ircd`) to support standard clients (e.g., mIRC, WeeChat, irssi).
 
 - **How it Fits**: Use `KTerm_Net_Listen(term, session, port)` to bind a port (e.g., 6667), accept connections, and spawn per-client state machines. Each client gets its own buffer/parser for IRC commands. Server state (users, channels, modes) can live in a new `KTermIrcServer` struct, managed globally or per-KTerm instance.
-- **Handling Multiple Clients**: `kt_net`'s async callbacks (`KTermNetCallbacks` like `on_connect`, `on_data`) make this non-blocking. Route client messages to broadcast handlers (e.g., `PRIVMSG` to channel members via session targeting). Use the multiplexer for "venues": One pane for logs, another for admin, etc.
+- **RFC Compliance (mIRC Compatibility)**: The server must generate standard numeric replies (e.g., `001 RPL_WELCOME`, `353 RPL_NAMREPLY`, `376 RPL_ENDOFMOTD`) during the handshake and handle stateful commands (`NICK`, `USER`, `JOIN`, `PART`, `PING`/`PONG`) to prevent standard clients from hanging or disconnecting.
+- **Handling Multiple Clients**: `kt_net`'s async callbacks (`KTermNetCallbacks` like `on_connect`, `on_data`) make this non-blocking. The server acts as a message relay: parsing `PRIVMSG`, looking up the target (channel or specific nickname for private chat), and broadcasting to the appropriate sockets.
 - **Client-Server Duality**: A single handler can switch modes—e.g., based on a config flag, init as client (connect) or server (listen). Share the parser code between them.
 - **VoIP Integration**: For server-side, proxy VoIP streams between clients (e.g., via IRC's CTCP for negotiation), using `kt_net`'s stream routing.
 - **Security/Auth**: Basic IRC has none, but add hooks like SSH's `KTermNetSecurity` for optional SASL or SSL. Gateway could expose server commands (e.g., `EXT;irc;op;user`).
@@ -105,11 +106,13 @@ This "injection" would extend `kt_net` with server-specific callbacks and a stat
 - [ ] Add `KTERM_NET_PROTO_IRC` to `KTermNetProtocol` in `kt_net.h`.
 - [ ] Integrate K-Term’s non-blocking I/O callbacks (`KTermNetCallbacks`) to feed into `IRC_parse_message`.
 
-### Phase 3: Server-Side Foundation
+### Phase 3: Server-Side Foundation (RFC Compliant)
 - [ ] Extend `kt_irc.h` to support a listen mode (`KTerm_Net_Listen(term, session, port)`).
-- [ ] Create `KTermIrcServer` struct to track global state (connected users, active channels).
-- [ ] Implement basic daemon logic: connection acceptance, basic user registration (`USER`/`NICK`), and channel joins.
-- [ ] Build a broadcast handler to distribute messages (e.g., `PRIVMSG`) to all users in a channel.
+- [ ] Create `KTermIrcServer`, `IrcUser`, and `IrcChannel` structs to track global state (connected users, active channels, and routing).
+- [ ] Implement a numeric reply generator (e.g., `SendNumeric(client, 001, "Welcome...")`) to satisfy standard clients (like mIRC) during the `NICK`/`USER` handshake.
+- [ ] Implement channel management (`JOIN`, `PART`, `NAMES`) and broadcast handlers to distribute `PRIVMSG` to all users in a channel.
+- [ ] Implement direct user-to-user routing for private chats (`PRIVMSG <nickname>`).
+- [ ] Add `PING`/`PONG` keep-alive logic to weed out dead connections gracefully.
 
 ### Phase 4: Gateway & Extensibility Integration
 - [ ] Register a new Gateway extension class (`EXT;irc`).
