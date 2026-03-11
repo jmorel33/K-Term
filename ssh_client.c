@@ -1277,14 +1277,17 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
             // Very simple list
             char msg[4096];
             snprintf(msg, sizeof(msg), "OK;TRIGGERS=");
+            size_t cur_len = strlen(msg);
             for(int i=0; i<global_ssh_ctx.trigger_count; i++) {
                 if(global_ssh_ctx.triggers[i].active) {
-                    size_t cur_len = strlen(msg);
                     size_t pat_len = strlen(global_ssh_ctx.triggers[i].pattern);
                     // Ensure we have space for pattern + comma + null
                     if (cur_len + pat_len + 2 < sizeof(msg)) {
-                        strcat(msg, global_ssh_ctx.triggers[i].pattern);
-                        strcat(msg, ",");
+                        strcpy(msg + cur_len, global_ssh_ctx.triggers[i].pattern);
+                        cur_len += pat_len;
+                        msg[cur_len] = ',';
+                        cur_len++;
+                        msg[cur_len] = '\0';
                     }
                 }
             }

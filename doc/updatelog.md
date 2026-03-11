@@ -1,10 +1,11 @@
-## [v2.7.5] - Performance Optimization for Gateway Fonts Report
+## [v2.7.5] - Performance Optimization for String Concatenations
 **Release Date:** 2026-05-27
 
-This patch release improves the performance of the Gateway Protocol's FONTS report by removing an O(N^2) string concatenation operation.
+This patch release improves the performance of multiple components by removing O(N^2) string concatenation operations.
 
 ### Optimization
-*   **Performance**: Replaced repeated `strcat` calls with O(N) `strcpy` and explicit character assignments in the `FONTS` generation block in `kt_gateway.h`. This significantly speeds up the report generation when the number of available fonts is large.
+*   **Performance (Gateway)**: Replaced repeated `strcat` calls with O(N) `strcpy` and explicit character assignments in the `FONTS` generation block in `kt_gateway.h`. This significantly speeds up the report generation when the number of available fonts is large.
+*   **Performance (SSH)**: Applied the same O(N) string concatenation optimization to the `ext;ssh;trigger;list` command in `ssh_client.c`, preventing quadratic scaling when listing many triggers.
 *   **Maintenance**: Bumped library version to 2.7.5.
 
 ## [v2.7.4] - Gateway Thread Safety Verification
