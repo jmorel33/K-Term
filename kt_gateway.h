@@ -1593,18 +1593,19 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
              size_t name_len = strlen(available_fonts[i].name);
              size_t remaining = sizeof(response) - current_len - 5;
              if (remaining > name_len) {
-                 strcat(response, available_fonts[i].name);
+                 strcpy(response + current_len, available_fonts[i].name);
                  current_len += name_len;
                  if (available_fonts[i+1].name != NULL) {
-                     strcat(response, ",");
+                     response[current_len] = ',';
                      current_len++;
+                     response[current_len] = '\0';
                  }
              } else {
                  break;
              }
          }
          if (current_len < sizeof(response) - 3) {
-             strcat(response, "\x1B\\");
+             strcpy(response + current_len, "\x1B\\");
          }
          KTerm_QueueResponse(term, response);
     } else if (KTerm_Strcasecmp(subcmd, "UNDERLINE_COLOR") == 0) {
