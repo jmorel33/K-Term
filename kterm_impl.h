@@ -13152,15 +13152,23 @@ static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
         if (top == 0 && bottom == session->rows - 1 &&
             x_start == 0 && x_end == session->cols - 1) {
 
+            int screen_head = session->screen_head;
+            int buffer_height = session->buffer_height;
+            int rows = session->rows;
             for (int i = 0; i < lines; i++) {
-                int new_row_idx = (session->screen_head + session->rows) % session->buffer_height;
+                int new_row_idx = screen_head + rows;
+                if (new_row_idx >= buffer_height) new_row_idx -= buffer_height;
+
                 EnhancedTermChar* row_ptr = &session->screen_buffer[new_row_idx * session->cols];
                 for (int c = 0; c < session->cols; c++) {
                     KTerm_ClearCell_Internal(session, &row_ptr[c]);
                 }
-                session->screen_head = (session->screen_head + 1) % session->buffer_height;
+
+                screen_head++;
+                if (screen_head >= buffer_height) screen_head = 0;
                 if (session->view_offset > 0) session->view_offset++;
             }
+            session->screen_head = screen_head;
         } else {
             for (int i = 0; i < lines; i++) {
                 for (int y = top; y < bottom; y++) {
