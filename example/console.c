@@ -265,14 +265,16 @@ static void AddToHistory(const char* command) {
     if (strlen(command) == 0) return;
     if (console.history_count > 0 && strcmp(command, console.command_history[console.history_count - 1]) == 0) return;
     
-    if (console.history_count >= 32) {
-        for (int i = 0; i < 31; i++) {
-            strcpy(console.command_history[i], console.command_history[i + 1]);
+    if (console.history_count >= MAX_HISTORY) {
+        for (int i = 0; i < MAX_HISTORY - 1; i++) {
+            strncpy(console.command_history[i], console.command_history[i + 1], MAX_COMMAND_BUFFER - 1);
+            console.command_history[i][MAX_COMMAND_BUFFER - 1] = '\0';
         }
-        console.history_count = 31;
+        console.history_count = MAX_HISTORY - 1;
     }
     
-    strcpy(console.command_history[console.history_count], command);
+    strncpy(console.command_history[console.history_count], command, MAX_COMMAND_BUFFER - 1);
+    console.command_history[console.history_count][MAX_COMMAND_BUFFER - 1] = '\0';
     console.history_count++;
     console.history_pos = console.history_count;
 }
@@ -294,7 +296,8 @@ static void NavigateHistory(int direction) {
         }
     }
     
-    strcpy(console.edit_buffer, console.command_history[console.history_pos]);
+    strncpy(console.edit_buffer, console.command_history[console.history_pos], MAX_COMMAND_BUFFER - 1);
+    console.edit_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
     console.edit_length = strlen(console.edit_buffer);
     console.edit_pos = console.edit_length;
     RedrawEditLine();
@@ -911,7 +914,8 @@ static void HandleEnterKey(void) {
     KTerm_WriteChar(term, '\n');
     if (console.edit_length > 0) {
         AddToHistory(console.edit_buffer);
-        strcpy(console.command_buffer, console.edit_buffer);
+        strncpy(console.command_buffer, console.edit_buffer, MAX_COMMAND_BUFFER - 1);
+        console.command_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
         ClearEditBuffer();
         console.input_enabled = false;
         console.in_command = true;
