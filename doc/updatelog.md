@@ -1,3 +1,12 @@
+## [v2.7.7] - Grid FillSpan Wrap Bug Fix
+**Release Date:** 2026-06-03
+
+This patch release fixes a logic bug related to wrapped row coordinate calculations in the Gateway Grid.
+
+### Bug Fixes
+*   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where enabling `wrap` with an initial `x` coordinate exceeding the screen width caused a negative width calculation. Replaced a previous masking hack (`w < 0`) with correct modulo and division arithmetic to properly compute the initial wrapping position.
+*   **Maintenance**: Bumped library version to 2.7.7.
+
 ## [v2.7.6] - Infinite Socket Creation Loop Guard
 **Release Date:** 2026-05-27
 
