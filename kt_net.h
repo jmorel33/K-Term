@@ -778,6 +778,7 @@ typedef struct KTermSpeedtestContext {
 
     bool latency_started;
     bool latency_done;
+    bool streams_initiated;
 
     KTermSpeedtestCallback callback;
     void* user_data;
@@ -3965,7 +3966,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
 
     if (st->state == 2) { // CONNECT_DL
         // Init Sockets if needed
-        if (st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
+        if (!st->streams_initiated && st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
              for(int i=0; i<st->num_streams; i++) {
                   st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
                   if (IS_VALID_SOCKET(st->streams[i].fd)) {
@@ -3977,6 +3978,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
                       connect(st->streams[i].fd, (struct sockaddr*)&st->dest_addr, sizeof(st->dest_addr));
                   }
              }
+             st->streams_initiated = true;
         }
 
         // Check connection status
@@ -4087,6 +4089,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
                  st->streams[i].bytes = 0;
              }
              st->connected_count = 0;
+             st->streams_initiated = false;
              st->state = 4; // CONNECT_UL
              st->start_time = KTerm_GetTime();
         }
@@ -4094,7 +4097,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
     else if (st->state == 4) { // CONNECT_UL
          // Initiate Upload connections
          // Fix: Guard against infinite socket creation loop if connection is pending
-         if (st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
+         if (!st->streams_initiated && st->connected_count == 0 && st->streams[0].fd == INVALID_SOCKET) {
               // Start connections if not already started
               // (Wait, we need to re-open sockets)
               for(int i=0; i<st->num_streams; i++) {
@@ -4108,6 +4111,7 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
                        connect(st->streams[i].fd, (struct sockaddr*)&st->dest_addr, sizeof(st->dest_addr));
                    }
               }
+              st->streams_initiated = true;
          }
 
         fd_set wfds; struct timeval tv = {0, 0};
