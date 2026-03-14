@@ -3906,9 +3906,11 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
                         if (colon) {
                             *colon = '\0';
                             strncpy(st->host, url, sizeof(st->host)-1);
+                            st->host[sizeof(st->host)-1] = '\0';
                             st->port = atoi(colon + 1);
                         } else {
                             strncpy(st->host, url, sizeof(st->host)-1);
+                            st->host[sizeof(st->host)-1] = '\0';
                             st->port = 80;
                         }
                         found = true;
@@ -4254,7 +4256,10 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
     }
     st->duration_sec = 5.0; // Fixed duration for now
 
-    if (path && path[0]) strncpy(st->dl_path, path, sizeof(st->dl_path)-1);
+    if (path && path[0]) {
+        strncpy(st->dl_path, path, sizeof(st->dl_path)-1);
+        st->dl_path[sizeof(st->dl_path)-1] = '\0';
+    }
     else strcpy(st->dl_path, "/100MB.zip");
 
     // Check for Auto-Select
@@ -4264,6 +4269,7 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
         st->start_time = KTerm_GetTime(); // Use for timeout
     } else {
         strncpy(st->host, host, sizeof(st->host)-1);
+        st->host[sizeof(st->host)-1] = '\0';
         st->port = (port > 0) ? port : 80;
 
         // Resolve
@@ -4878,7 +4884,8 @@ void KTerm_Net_ProcessPacketDiag(KTerm* term, KTermSession* session) {
     bool trigger = ctx->trigger_mtu_probe;
     char target_ip[64];
     if (trigger) {
-        strncpy(target_ip, ctx->last_frag_ip, sizeof(target_ip));
+        strncpy(target_ip, ctx->last_frag_ip, sizeof(target_ip)-1);
+        target_ip[sizeof(target_ip)-1] = '\0';
         ctx->trigger_mtu_probe = false;
     }
 
@@ -4946,6 +4953,7 @@ bool KTerm_Net_PacketDiag_Start(KTerm* term, KTermSession* session, const char* 
     if (params) {
         char buf[1024];
         strncpy(buf, params, sizeof(buf)-1);
+        buf[sizeof(buf)-1] = '\0';
         char* saveptr;
 #ifndef _WIN32
         char* token = strtok_r(buf, ";", &saveptr);
