@@ -1,3 +1,8 @@
+## [v2.7.8] - Fix Buffer Overflow in Command History
+
+*   **Security**: Replaced `strcpy` with `strncpy` when handling the command history and editing buffers in `example/console.c` to enforce strict array bounds and prevent potential buffer overflow vulnerabilities.
+*   **Maintenance**: Bumped library version to 2.7.8.
+
 ## [v2.7.7] - Grid FillSpan Wrap Bug Fix
 **Release Date:** 2026-06-03
 
