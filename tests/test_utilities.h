@@ -55,7 +55,7 @@ static inline void write_sequence_to_session(KTerm* term, KTermSession* session,
 }
 
 // Cell Verification
-static inline void verify_cell(KTermSession* session, int y, int x, 
+static inline void verify_cell(KTermSession* session, int y, int x,
                                char expected_ch, uint32_t expected_flags) {
     if (!session) return;
     EnhancedTermChar* cell = GetScreenCell(session, y, x);
@@ -144,24 +144,21 @@ static inline int verify_cursor_position(KTermSession* session, int expected_y, 
 }
 
 // Test execution wrapper
-static inline void run_test(const char* test_name, void (*test_func)(KTerm*, KTermSession*), 
+static inline void run_test(const char* test_name, int (*test_func)(KTerm*, KTermSession*),
                            KTerm* term, KTermSession* session, TestResults* results) {
     if (!test_func || !term || !session || !results) return;
-    
+
     reset_terminal(term);
-    
-    int passed = 1;
-    if (test_func) {
-        test_func(term, session);
-    }
-    
+
+    int passed = test_func(term, session);
+
     if (passed) {
         results->passed++;
     } else {
         results->failed++;
     }
     results->total++;
-    
+
     print_test_result(test_name, passed);
 }
 

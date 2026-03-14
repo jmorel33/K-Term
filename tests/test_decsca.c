@@ -5,66 +5,70 @@
 #include <stdio.h>
 #include <assert.h>
 
-void test_decsca_protected(KTerm* term, KTermSession* session) {
+int test_decsca_protected(KTerm* term, KTermSession* session) {
     reset_terminal(term);
     write_sequence(term, "\x1B[2J"); // Clear screen
 
     // DECSCA 1: Set Protected attribute
     write_sequence(term, "\x1B[1\"q");
-    assert(session->current_attributes & KTERM_ATTR_PROTECTED);
+    if (!(session->current_attributes & KTERM_ATTR_PROTECTED)) return 0;
 
     // Write a character and verify it has the protected flag
     write_sequence(term, "P");
     KTerm_FlushOps(term, session);
     EnhancedTermChar* cell = GetScreenCell(session, 0, 0);
-    assert(cell->ch == 'P');
-    assert(cell->flags & KTERM_ATTR_PROTECTED);
+    if (cell->ch != 'P') return 0;
+    if (!(cell->flags & KTERM_ATTR_PROTECTED)) return 0;
+    return 1;
 }
 
-void test_decsca_unprotected(KTerm* term, KTermSession* session) {
+int test_decsca_unprotected(KTerm* term, KTermSession* session) {
     reset_terminal(term);
     write_sequence(term, "\x1B[2J"); // Clear screen
 
     // First set it
     write_sequence(term, "\x1B[1\"q");
-    assert(session->current_attributes & KTERM_ATTR_PROTECTED);
+    if (!(session->current_attributes & KTERM_ATTR_PROTECTED)) return 0;
 
     // DECSCA 0: Clear Protected attribute
     write_sequence(term, "\x1B[0\"q");
-    assert(!(session->current_attributes & KTERM_ATTR_PROTECTED));
+    if (session->current_attributes & KTERM_ATTR_PROTECTED) return 0;
 
     // Write a character and verify it does NOT have the flag
     write_sequence(term, "U");
     KTerm_FlushOps(term, session);
     EnhancedTermChar* cell = GetScreenCell(session, 0, 0);
-    assert(cell->ch == 'U');
-    assert(!(cell->flags & KTERM_ATTR_PROTECTED));
+    if (cell->ch != 'U') return 0;
+    if (cell->flags & KTERM_ATTR_PROTECTED) return 0;
+    return 1;
 }
 
-void test_decsca_ps2_unprotected(KTerm* term, KTermSession* session) {
+int test_decsca_ps2_unprotected(KTerm* term, KTermSession* session) {
     reset_terminal(term);
     write_sequence(term, "\x1B[2J"); // Clear screen
 
     // First set it
     write_sequence(term, "\x1B[1\"q");
-    assert(session->current_attributes & KTERM_ATTR_PROTECTED);
+    if (!(session->current_attributes & KTERM_ATTR_PROTECTED)) return 0;
 
     // DECSCA 2: Clear Protected attribute
     write_sequence(term, "\x1B[2\"q");
-    assert(!(session->current_attributes & KTERM_ATTR_PROTECTED));
+    if (session->current_attributes & KTERM_ATTR_PROTECTED) return 0;
+    return 1;
 }
 
-void test_decsca_default(KTerm* term, KTermSession* session) {
+int test_decsca_default(KTerm* term, KTermSession* session) {
     reset_terminal(term);
     write_sequence(term, "\x1B[2J"); // Clear screen
 
     // First set it
     write_sequence(term, "\x1B[1\"q");
-    assert(session->current_attributes & KTERM_ATTR_PROTECTED);
+    if (!(session->current_attributes & KTERM_ATTR_PROTECTED)) return 0;
 
     // DECSCA default (0): Clear Protected attribute
     write_sequence(term, "\x1B[\"q");
-    assert(!(session->current_attributes & KTERM_ATTR_PROTECTED));
+    if (session->current_attributes & KTERM_ATTR_PROTECTED) return 0;
+    return 1;
 }
 
 int main() {
