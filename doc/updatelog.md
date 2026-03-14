@@ -5,6 +5,7 @@ This patch release adds a guard to the Speedtest module to prevent infinite sock
 
 ### Reliability
 *   **Stability (Network)**: Implemented a `streams_initiated` flag in the `KTermSpeedtestContext` to ensure socket creation occurs only once per speedtest phase (Download/Upload). This prevents the processing loop from repeatedly attempting to open sockets if they are immediately closed (e.g., due to platform `FD_SETSIZE` limits) or if connections are pending.
+*   **Maintenance**: Bumped library version to 2.7.7.
 *   **Maintenance**: Bumped library version to 2.7.6.
 
 ## [v2.7.5] - Performance Optimization for String Concatenations
