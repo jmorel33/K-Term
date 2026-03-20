@@ -555,8 +555,7 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
                 unsigned char b = (unsigned char)(options->gradient_start.b + (options->gradient_end.b - options->gradient_start.b) * t);
 
                 char color_seq[32];
-                snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
-                int seq_len = strlen(color_seq);
+                int seq_len = snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
 
                 if (line_pos + seq_len >= (int)sizeof(line_buffer) - 1) {
                     line_buffer[line_pos] = '\0';
@@ -1590,10 +1589,10 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
          size_t current_len = strlen(response);
 
          for (int i=0; available_fonts[i].name != NULL; i++) {
-             size_t name_len = strlen(available_fonts[i].name);
+             size_t name_len = available_fonts[i].name_len;
              size_t remaining = sizeof(response) - current_len - 5;
              if (remaining > name_len) {
-                 strcpy(response + current_len, available_fonts[i].name);
+                 memcpy(response + current_len, available_fonts[i].name, name_len);
                  current_len += name_len;
                  if (available_fonts[i+1].name != NULL) {
                      response[current_len] = ',';
@@ -1880,7 +1879,7 @@ static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char*
             buf[j] = '\0';
 
             // Limit chunk size
-            if (strlen(buf) > 1000) buf[1000] = '\0';
+            if (j > 1000) buf[1000] = '\0';
 
             char response[1500];
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;DATA;%s\x1B\\", id, buf);
