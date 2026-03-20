@@ -62,3 +62,22 @@ endif()
 # Speedtest Client
 add_executable(speedtest_client example/speedtest_client.c)
 target_link_libraries(speedtest_client ${SITUATION_LIB} ${M_LIB})
+
+# --- Tests ---
+enable_testing()
+
+add_executable(test_performance tests/test_performance_suite.c)
+target_link_libraries(test_performance PRIVATE ${M_LIB})
+add_test(NAME performance_suite COMMAND test_performance)
+
+add_executable(test_integration tests/test_integration_suite.c)
+target_link_libraries(test_integration PRIVATE ${M_LIB})
+add_test(NAME integration_suite COMMAND test_integration)
+
+add_executable(test_parser tests/test_parser_suite.c)
+target_link_libraries(test_parser PRIVATE ${M_LIB})
+add_test(NAME parser_suite COMMAND test_parser)
+
+add_executable(test_attributes tests/test_attributes_modes_suite.c)
+target_link_libraries(test_attributes PRIVATE ${M_LIB})
+add_test(NAME attributes_suite COMMAND test_attributes)
