@@ -3339,7 +3339,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(terminal_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, terminal_compute_preamble);
+                memcpy(src, terminal_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Shader source: preamble=%zu bytes, body=%u bytes, total=%zu bytes\n", l1, bytes_read, strlen(src)); fflush(stderr);
@@ -3404,7 +3404,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(vector_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, vector_compute_preamble);
+                memcpy(src, vector_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Compiling vector shader...\n"); fflush(stderr);
@@ -3429,7 +3429,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(sixel_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, sixel_compute_preamble);
+                memcpy(src, sixel_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Compiling sixel shader...\n"); fflush(stderr);
@@ -3451,7 +3451,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(blit_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, blit_compute_preamble);
+                memcpy(src, blit_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 // Using TERMINAL layout since it roughly matches (Image at Binding 1 + Bindless)
