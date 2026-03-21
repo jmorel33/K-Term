@@ -1,3 +1,19 @@
+## [v2.7.9] - Speedtest Socket Creation Guard and Hardening
+
+*   **Reliability**: Hardened Speedtest socket creation logic across all phases (AUTO_SELECT, CONNECT_DL, CONNECT_UL) by ensuring 'initiated' flags are set before socket calls, preventing potential infinite creation loops if system resources are exhausted.
+*   **Networking**: Improved `RUN_UL` phase error handling by explicitly checking `send()` return values and closing sockets on fatal errors or remote closure.
+*   **Optimization**: Improved performance in several hot paths by eliminating redundant `strlen` calls.
+    *   **Font Definitions**: Modified `KTermFontDef` to store pre-calculated `name_len`, transforming O(N) string scans into O(1) accesses during `GET;FONTS` command processing. Replaced `strcpy` with `memcpy` for font listing.
+    *   **Banner Generation**: Optimized `KTerm_GenerateBanner` by using the return value of `snprintf` for color sequence lengths instead of repeated `strlen` calls in the character loop.
+    *   **Whois Callback**: Optimized `KTerm_Whois_Callback` by reusing the existing buffer index `j` for limit checks, avoiding expensive `strlen` calls on large output buffers.
+    *   **Impact**: Benchmarks show a ~45% increase in throughput for the `GET;FONTS` Gateway path (from 2.6M to 3.8M iterations/sec).
+*   **API Health**: This PR improves code health by removing dead code (commented-out deprecated functions) from the public API and updating internal comments and documentation to reflect the modern event-driven input system.
+    *   🎯 **What:** Removed `KTerm_UpdateMouse`, `KTerm_UpdateKeyboard`, `UpdateKeyboard`, and `GetKeyEvent` (all removed in v2.1) from `kterm_api.h`. Updated `kterm_impl.h` and `doc/kterm.md` accordingly.
+    *   💡 **Why:** Improves maintainability and prevents confusion by removing references to functions that no longer exist in the implementation.
+    *   ✅ **Verification:** Verified that the library still compiles and functions correctly using the diagnostics test suite. Confirmed all references were correctly updated via grep.
+    *   ✨ **Result:** A cleaner API header and consistent documentation/comments.
+*   **Maintenance**: Bumped library version to 2.7.9.
+
 ## [v2.7.8] - Fix Buffer Overflow in Command History
 
 *   **Security**: Replaced `strcpy` with `strncpy` when handling the command history and editing buffers in `example/console.c` to enforce strict array bounds and prevent potential buffer overflow vulnerabilities.

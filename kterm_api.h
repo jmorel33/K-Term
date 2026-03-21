@@ -57,8 +57,8 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 7
-#define KTERM_VERSION_PATCH 8
-#define KTERM_VERSION_STRING "2.7.8"
+#define KTERM_VERSION_PATCH 9
+#define KTERM_VERSION_STRING "2.7.9"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)
@@ -1229,10 +1229,6 @@ KTERM_API void KTerm_SetPipelineTimeBudget(KTerm* term, double pct); // Percenta
 // Mouse support (enhanced)
 KTERM_API void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode); // Explicitly set a mouse mode
 KTERM_API void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); // e.g., "focus", "sgr"
-// void KTerm_UpdateMouse(KTerm* term); // Removed in v2.1
-// void KTerm_UpdateKeyboard(KTerm* term); // Removed in v2.1
-// void UpdateKeyboard(KTerm* term);  // Removed in v2.1
-// bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Removed in v2.1
 KTERM_API void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
 KTERM_API void KTerm_SetFocus(KTerm* term, bool focused); // Report focus state (CSI I/O)
 KTERM_API void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24

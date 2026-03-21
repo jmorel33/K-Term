@@ -11663,26 +11663,26 @@ VTLevel KTerm_GetLevel(KTerm* term) {
 
 /**
  * @brief Retrieves a fully processed keyboard event from the terminal's internal buffer.
- * The application hosting the terminal should call this function repeatedly (e.g., in its
- * main loop after `KTerm_UpdateKeyboard(term)`) to obtain keyboard input.
+ * The application hosting the terminal should call this function repeatedly to obtain keyboard input.
  *
- * The `VTKeyboard` system, updated by `KTerm_UpdateKeyboard(term)`, translates raw Platform key
- * presses into appropriate VT sequences or characters. This processing considers:
+ * Input events are pushed into the buffer via `KTerm_ProcessEvent(term)` or `KTerm_QueueInputEvent(term)`.
+ * The system translates raw key presses into appropriate VT sequences or characters.
+ * This processing considers:
  *  - Modifier keys (Shift, Ctrl, Alt/Meta).
  *  - KTerm modes such as:
  *    - Application Cursor Keys (DECCKM): e.g., Up Arrow sends `ESC O A` instead of `ESC [ A`.
  *    - Application Keypad Mode (DECKPAM/DECKPNM): Numeric keypad keys send special sequences.
  *  - User-Defined Keys (DECUDK), if programmed.
  *
- * The `event->sequence` field of the returned `VTKeyEvent` struct contains the byte
+ * The `event->sequence` field of the returned `KTermKeyEvent` struct contains the byte
  * sequence that should be transmitted to the connected PTY, host application, or
  * further processed locally.
  *
- * @param event Pointer to a `VTKeyEvent` structure that will be filled with the event data.
+ * @param event Pointer to a `KTermKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
- * @see KTerm_UpdateKeyboard(term) which captures Platform input and populates the event buffer.
- * @see VTKeyEvent struct for details on the event data fields.
- * @note The terminal platform provides robust keyboard translation, ensuring that applications
+ * @see KTerm_ProcessEvent(term) for pushing input events from the host application.
+ * @see KTermKeyEvent struct for details on the event data fields.
+ * @note The terminal provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
  */
 

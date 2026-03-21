@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.7.6
+# kterm.h - Technical Reference Manual v2.7.9
 
 **(c) 2026 Jacques Morel**
 
@@ -644,7 +644,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 
 | Introduction | Name | Description |
 | :--- | :--- | :--- |
-| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`KTerm_UpdateKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
+| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler will prioritize this sequence, sending it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** (Partially Implemented). Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** Queries the status of a specific setting. The payload `...` is the setting to query:<br>- `m`: SGR (Select Graphic Rendition).<br>- `r`: DECSTBM (Scrolling Region).<br>- `s`: DECSLRM (Left/Right Margins).<br>- `t`: DECSLPP (Lines Per Page).<br>- `|`: DECSCPP (Columns Per Page).<br>- `q` or `state`: Gateway State Snapshot.<br>Response: `DCS 1 $ r <Response> ST`. |
@@ -2552,7 +2552,6 @@ KTerm_DefineFunctionKey(term, 12, "\x1b[24~");
 
 **See Also:**
 - `KTerm_GetKey()` - Retrieve keyboard events
-- `KTerm_UpdateKeyboard()` - Poll keyboard
 
 **Notes:**
 - Function key definitions are part of the DECUDK (User-Defined Keys) feature.
