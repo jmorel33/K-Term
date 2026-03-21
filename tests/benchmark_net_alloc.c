@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 // Defines for kt_net.h dependencies
-#define KTERM_VERSION_STRING "2.7.3"
+#define KTERM_VERSION_STRING "2.7.9"
 #define KTERM_DISABLE_VOICE
 
 // Mock KTerm structure
