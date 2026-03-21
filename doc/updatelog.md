@@ -2,8 +2,6 @@
 
 *   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where an initial x-coordinate exceeding the terminal width when text wrapping was disabled resulted in negative width calculations. Removed the flawed clamping hack and replaced it with an early `break` on `w <= 0` to properly handle out-of-bounds rendering operations without causing an infinite loop.
 *   **Maintenance**: Cleaned up speculative and brainstorming developer comments in `kterm_impl.h`.
-## [v2.7.9] - Speedtest Socket Creation Guard and Hardening
-
 *   **Reliability**: Hardened Speedtest socket creation logic across all phases (AUTO_SELECT, CONNECT_DL, CONNECT_UL) by ensuring 'initiated' flags are set before socket calls, preventing potential infinite creation loops if system resources are exhausted.
 *   **Networking**: Improved `RUN_UL` phase error handling by explicitly checking `send()` return values and closing sockets on fatal errors or remote closure.
 *   **Optimization**: Improved performance in several hot paths by eliminating redundant `strlen` calls.
@@ -16,12 +14,10 @@
     *   💡 **Why:** Improves maintainability and prevents confusion by removing references to functions that no longer exist in the implementation.
     *   ✅ **Verification:** Verified that the library still compiles and functions correctly using the diagnostics test suite. Confirmed all references were correctly updated via grep.
     *   ✨ **Result:** A cleaner API header and consistent documentation/comments.
-*   **Maintenance**: Bumped library version to 2.7.9.
 
 ## [v2.7.8] - Fix Buffer Overflow in Command History
 
 *   **Security**: Replaced `strcpy` with `strncpy` when handling the command history and editing buffers in `example/console.c` to enforce strict array bounds and prevent potential buffer overflow vulnerabilities.
-*   **Maintenance**: Bumped library version to 2.7.8.
 
 ## [v2.7.7] - Grid FillSpan Wrap Bug Fix
 **Release Date:** 2026-06-03
@@ -30,7 +26,6 @@ This patch release fixes a logic bug related to wrapped row coordinate calculati
 
 ### Bug Fixes
 *   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where enabling `wrap` with an initial `x` coordinate exceeding the screen width caused a negative width calculation. Replaced a previous masking hack (`w < 0`) with correct modulo and division arithmetic to properly compute the initial wrapping position.
-*   **Maintenance**: Bumped library version to 2.7.7.
 
 ## [v2.7.6] - Infinite Socket Creation Loop Guard
 **Release Date:** 2026-05-27
@@ -39,7 +34,6 @@ This patch release adds a guard to the Speedtest module to prevent infinite sock
 
 ### Reliability
 *   **Stability (Network)**: Implemented a `streams_initiated` flag in the `KTermSpeedtestContext` to ensure socket creation occurs only once per speedtest phase (Download/Upload). This prevents the processing loop from repeatedly attempting to open sockets if they are immediately closed (e.g., due to platform `FD_SETSIZE` limits) or if connections are pending.
-*   **Maintenance**: Bumped library version to 2.7.6.
 
 ## [v2.7.5] - Performance Optimization for String Concatenations
 **Release Date:** 2026-05-27
@@ -49,7 +43,6 @@ This patch release improves the performance of multiple components by removing O
 ### Optimization
 *   **Performance (Gateway)**: Replaced repeated `strcat` calls with O(N) `strcpy` and explicit character assignments in the `FONTS` generation block in `kt_gateway.h`. This significantly speeds up the report generation when the number of available fonts is large.
 *   **Performance (SSH)**: Applied the same O(N) string concatenation optimization to the `ext;ssh;trigger;list` command in `ssh_client.c`, preventing quadratic scaling when listing many triggers.
-*   **Maintenance**: Bumped library version to 2.7.5.
 
 ## [v2.7.4] - Gateway Thread Safety Verification
 **Release Date:** 2026-05-27
@@ -59,7 +52,6 @@ This patch release validates and documents the thread-safety of the Gateway Prot
 ### Safety & Stability
 *   **Thread Safety**: Validated that `kt_gateway.h` uses a custom reentrant tokenizer (`KTerm_Strtok`) instead of the unsafe standard `strtok`, preventing data corruption during concurrent Gateway command processing.
 *   **Verification**: Added regression tests (`tests/verify_gateway_threading.c`) to explicitly verify the thread safety of attribute parsing (`KTerm_ParseAttributeString`) under high concurrency.
-*   **Maintenance**: Bumped library version to 2.7.4.
 
 ## [v2.7.3] - Network Optimization
 **Release Date:** 2026-05-26
@@ -71,7 +63,6 @@ This patch release optimizes memory usage in the networking subsystem and fixes 
     *   **Architecture**: Introduced inline tag storage (`req_tag`) within network context structures, eliminating `malloc`/`free` cycles for every command.
     *   **Performance**: Benchmarks show a ~4.3% reduction in overhead for the allocation path.
 *   **Speedtest Stability**: Fixed a latent Use-After-Free bug where the Speedtest context could be prematurely freed if the latency probe failed to initialize.
-*   **Maintenance**: Bumped library version to 2.7.3.
 
 ## [v2.7.2] - SSH Automation Optimization
 **Release Date:** 2026-05-25
@@ -83,7 +74,6 @@ This patch release significantly optimizes the `ssh_client` automation subsystem
     *   **Scale**: Increased the supported automation trigger limit from 16 to 128 (defined by `MAX_TRIGGERS`).
     *   **Speed**: Benchmarks show a ~2.7x speedup when evaluating 1000 triggers against high-throughput data streams.
     *   **Efficiency**: Eliminated redundant string scans, reducing CPU usage during heavy automation workflows.
-*   **Maintenance**: Bumped library version to 2.7.2.
 
 ## [v2.7.1] - Critical Security Fix for Mock SSH Client
 **Release Date:** 2026-05-24
@@ -94,19 +84,16 @@ This patch release addresses a security vulnerability in the `ssh_client` refere
 *   **Mock Mode Restriction**: The "Mock Crypto" mode (default build without `libssh`) now strictly prohibits connections to non-local hosts. It only allows connections to `localhost`, `127.0.0.1`, or `::1`.
     *   **Impact**: Prevents users from inadvertently using the insecure, hardcoded handshake reference implementation to connect to real external servers, which would expose credentials and data in cleartext (or with a trivial mock cipher).
     *   **UI**: Added prominent warnings (`[SECURITY ERROR]`) when attempting unsafe connections in Mock Mode.
-*   **Maintenance**: Bumped library version to 2.7.1.
 
 ## [v2.7.0] - Stability, Security & Network Diagnostics
 *   **Capstone Release**: Consolidates all v2.6.x features (PacketDiag, Voice Reactor, Network Hardening) into a stable milestone.
 *   **Networking**: Finalized `FD_SETSIZE` guards for POSIX stability.
 *   **Security**: Hardened SSH client reference implementation against stack overflows and thread-safety issues.
-*   **Maintenance**: Bumped library version to 2.7.0.
 
 ## [v2.6.44] - Stability & Security Hardening
 *   **Networking**: Added `FD_SETSIZE` guards to prevent crashes when file descriptors exceed system limits (e.g., on macOS/Linux).
 *   **Security**: Switched SSH client exec buffer to heap allocation to prevent stack overflows.
 *   **Safety**: Replaced thread-unsafe `strtok` with `SafeStrtok` (wrapping `strtok_r`/`strtok_s`) in SSH client config parsing.
-*   **Maintenance**: Bumped library version to 2.6.44.
 
 ## [v2.6.43] - Advanced Protocol Identification & Security Analysis
 **Release Date:** 2026-05-23
@@ -132,9 +119,6 @@ This release transforms the PacketDiag network inspector from a passive logger i
     *   Added a new "Streaming Services" category (RTMP, OBS-WS, NDI).
     *   Refined `PacketDiag_IdentifyProtocol` to strictly respect transport protocol (TCP/UDP) when matching, preventing false positives (e.g., DNS vs TCP-53).
 
-### Fixes
-*   **Maintenance**: Bumped library version to 2.6.43.
-
 ## [v2.6.42] - Enhanced Protocol Identification & Range Support
 **Release Date:** 2026-05-22
 
@@ -153,9 +137,6 @@ This release significantly expands the protocol definitions used by **PacketDiag
 ### Improvements
 *   **Identification Logic**: Protocol identification now prioritizes exact port matches over range matches to accurately identify standard services running within broader reserved ranges.
 *   **Metadata**: Added `category` and `description` fields to protocol definitions for richer introspection.
-
-### Fixes
-*   **Maintenance**: Bumped library version to 2.6.42.
 
 ## [v2.6.41] - PacketDiag Protocol Map & Stream Reassembly
 - **Feature**: Implemented **Protocol Map** for PacketDiag, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).
