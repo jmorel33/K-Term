@@ -2893,11 +2893,11 @@ static int KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int le
             if (y >= s->rows || y < 0) break;
 
             int w = remaining;
-            if (wrap) {
-                if (x + w > s->cols) {
-                    w = s->cols - x;
-                }
+            if (x + w > s->cols) {
+                w = s->cols - x;
             }
+
+            if (w <= 0) break;
 
             count += KTerm_QueueGridOp(s, x, y, w, 1, style);
 
