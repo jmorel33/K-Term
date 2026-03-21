@@ -408,6 +408,9 @@ void KTerm_Net_FreePacketDiag(KTermPacketDiagContext* ctx);
     #include <netdb.h>
     #include <arpa/inet.h>
     #include <sys/select.h>
+    #include <sys/ioctl.h>
+    #include <net/if.h>
+    #include <ifaddrs.h>
     #ifdef __linux__
         #include <linux/errqueue.h>
         #include <sys/uio.h>
@@ -1459,6 +1462,52 @@ static void KTerm_Net_ProcessPingExt(KTerm* term, KTermSession* session) {
     }
 }
 
+static int KTerm_Net_GetLocalMTU(struct sockaddr_in* dest_addr) {
+    int mtu = 1500;
+#ifdef _WIN32
+    DWORD bestIfIndex;
+    if (GetBestInterface(dest_addr->sin_addr.s_addr, &bestIfIndex) == NO_ERROR) {
+        MIB_IFROW ifRow;
+        memset(&ifRow, 0, sizeof(ifRow));
+        ifRow.dwIndex = bestIfIndex;
+        if (GetIfEntry(&ifRow) == NO_ERROR) {
+            mtu = ifRow.dwMtu;
+        }
+    }
+#else
+    socket_t s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (IS_VALID_SOCKET(s)) {
+        if (connect(s, (struct sockaddr*)dest_addr, sizeof(*dest_addr)) == 0) {
+            struct sockaddr_in local_addr;
+            socklen_t addr_len = sizeof(local_addr);
+            if (getsockname(s, (struct sockaddr*)&local_addr, &addr_len) == 0) {
+                struct ifaddrs *ifaddr, *ifa;
+                if (getifaddrs(&ifaddr) != -1) {
+                    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+                        if (ifa->ifa_addr == NULL) continue;
+                        if (ifa->ifa_addr->sa_family == AF_INET) {
+                            struct sockaddr_in* if_addr = (struct sockaddr_in*)ifa->ifa_addr;
+                            if (if_addr->sin_addr.s_addr == local_addr.sin_addr.s_addr) {
+                                struct ifreq my_ifr;
+                                memset(&my_ifr, 0, sizeof(my_ifr));
+                                strncpy(my_ifr.ifr_name, ifa->ifa_name, IFNAMSIZ - 1);
+                                if (ioctl(s, SIOCGIFMTU, &my_ifr) >= 0) {
+                                    mtu = my_ifr.ifr_mtu;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    freeifaddrs(ifaddr);
+                }
+            }
+        }
+        CLOSE_SOCKET(s);
+    }
+#endif
+    return mtu > 0 ? mtu : 1500;
+}
+
 static void KTerm_Net_ProcessMtuProbe(KTerm* term, KTermSession* session) {
     KTermNetSession* net = KTerm_Net_GetContext(session);
     if (!net || !net->mtu_probe) return;
@@ -1502,7 +1551,7 @@ static void KTerm_Net_ProcessMtuProbe(KTerm* term, KTermSession* session) {
                 KTermMtuProbeResult r = {0};
                 r.done = true;
                 r.path_mtu = ctx->path_mtu;
-                r.local_mtu = 0; // TODO: Get local MTU
+                r.local_mtu = KTerm_Net_GetLocalMTU(&ctx->dest_addr);
                 ctx->callback(term, session, &r, ctx->user_data);
             }
             return;
