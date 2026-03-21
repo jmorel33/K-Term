@@ -3339,7 +3339,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(terminal_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, terminal_compute_preamble);
+                memcpy(src, terminal_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Shader source: preamble=%zu bytes, body=%u bytes, total=%zu bytes\n", l1, bytes_read, strlen(src)); fflush(stderr);
@@ -3404,7 +3404,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(vector_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, vector_compute_preamble);
+                memcpy(src, vector_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Compiling vector shader...\n"); fflush(stderr);
@@ -3429,7 +3429,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(sixel_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, sixel_compute_preamble);
+                memcpy(src, sixel_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 fprintf(stderr, "[KTerm_InitCompute] Compiling sixel shader...\n"); fflush(stderr);
@@ -3451,7 +3451,7 @@ void KTerm_InitCompute(KTerm* term) {
             size_t l1 = strlen(blit_compute_preamble);
             char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
-                strcpy(src, blit_compute_preamble);
+                memcpy(src, blit_compute_preamble, l1);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 // Using TERMINAL layout since it roughly matches (Image at Binding 1 + Bindless)
@@ -8981,6 +8981,7 @@ void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session) {
 
 typedef struct {
     const char* name;
+    size_t name_len;
     int cell_width;
     int cell_height;
     int data_width;
@@ -8990,25 +8991,25 @@ typedef struct {
 } KTermFontDef;
 
 static const KTermFontDef available_fonts[] = {
-    {"VT220", 8, 10, 8, 10, dec_vt220_cp437_8x10, false},
-    {"IBM", 10, 10, 8, 8, ibm_font_8x8, false}, // 10x10 Cell, 8x8 Data (Centered)
-    {"VGA", 8, 8, 8, 8, vga_perfect_8x8_font, false},
-    {"ULTIMATE", 8, 16, 8, 16, ultimate_oldschool_pc_font_8x16, false},
-    {"CP437_16", 8, 16, 8, 16, cp437_font__8x16, false},
-    {"NEC", 8, 16, 8, 16, nec_apc3_font_8x16, false},
-    {"TOSHIBA", 8, 16, 8, 16, toshiba_sat_8x16, false},
-    {"TRIDENT", 8, 16, 8, 16, trident_8x16, false},
-    {"COMPAQ", 8, 16, 8, 16, compaq_portable3_8x16, false},
-    {"OLYMPIAD", 8, 16, 8, 16, olympiad_font_8x16, false},
-    {"MC6847", 8, 8, 8, 8, MC6847_font_8x8, false},
-    {"NEOGEO", 8, 8, 8, 8, neogeo_bios_8x8, false},
-    {"ATASCII", 8, 8, 8, 8, atascii_font_8x8, false},
-    {"PETSCII", 8, 8, 8, 8, petscii_unshifted_font_8x8, false},
-    {"PETSCII_SHIFT", 8, 8, 8, 8, petscii_shifted_font_8x8, false},
-    {"TOPAZ", 8, 8, 8, 8, topaz_font_8x8, false},
-    {"PREPPIE", 8, 8, 8, 8, preppie_font_8x8, false},
-    {"VCR", 12, 14, 12, 14, vcr_osd_font_12x14, true},
-    {NULL, 0, 0, 0, 0, NULL, false}
+    {"VT220", 5, 8, 10, 8, 10, dec_vt220_cp437_8x10, false},
+    {"IBM", 3, 10, 10, 8, 8, ibm_font_8x8, false}, // 10x10 Cell, 8x8 Data (Centered)
+    {"VGA", 3, 8, 8, 8, 8, vga_perfect_8x8_font, false},
+    {"ULTIMATE", 8, 8, 16, 8, 16, ultimate_oldschool_pc_font_8x16, false},
+    {"CP437_16", 8, 8, 16, 8, 16, cp437_font__8x16, false},
+    {"NEC", 3, 8, 16, 8, 16, nec_apc3_font_8x16, false},
+    {"TOSHIBA", 7, 8, 16, 8, 16, toshiba_sat_8x16, false},
+    {"TRIDENT", 7, 8, 16, 8, 16, trident_8x16, false},
+    {"COMPAQ", 6, 8, 16, 8, 16, compaq_portable3_8x16, false},
+    {"OLYMPIAD", 8, 8, 16, 8, 16, olympiad_font_8x16, false},
+    {"MC6847", 6, 8, 8, 8, 8, MC6847_font_8x8, false},
+    {"NEOGEO", 6, 8, 8, 8, 8, neogeo_bios_8x8, false},
+    {"ATASCII", 7, 8, 8, 8, 8, atascii_font_8x8, false},
+    {"PETSCII", 7, 8, 8, 8, 8, petscii_unshifted_font_8x8, false},
+    {"PETSCII_SHIFT", 13, 8, 8, 8, 8, petscii_shifted_font_8x8, false},
+    {"TOPAZ", 5, 8, 8, 8, 8, topaz_font_8x8, false},
+    {"PREPPIE", 7, 8, 8, 8, 8, preppie_font_8x8, false},
+    {"VCR", 3, 12, 14, 12, 14, vcr_osd_font_12x14, true},
+    {NULL, 0, 0, 0, 0, 0, NULL, false}
 };
 
 static int KTerm_Strcasecmp(const char *s1, const char *s2) {
@@ -11663,11 +11664,11 @@ VTLevel KTerm_GetLevel(KTerm* term) {
 
 /**
  * @brief Retrieves a fully processed keyboard event from the terminal's internal buffer.
- * The application hosting the terminal should call this function repeatedly to obtain keyboard input.
+ * The application hosting the terminal should call this function repeatedly (e.g., in its
+ * main loop after `KTerm_Update(term)` or `KTerm_ProcessEvent(term)`) to obtain keyboard input.
  *
- * Input events are pushed into the buffer via `KTerm_ProcessEvent(term)` or `KTerm_QueueInputEvent(term)`.
- * The system translates raw key presses into appropriate VT sequences or characters.
- * This processing considers:
+ * The input system, updated via `KTerm_ProcessEvent(term)`, translates raw Platform key
+ * presses into appropriate VT sequences or characters. This processing considers:
  *  - Modifier keys (Shift, Ctrl, Alt/Meta).
  *  - KTerm modes such as:
  *    - Application Cursor Keys (DECCKM): e.g., Up Arrow sends `ESC O A` instead of `ESC [ A`.
@@ -11680,9 +11681,9 @@ VTLevel KTerm_GetLevel(KTerm* term) {
  *
  * @param event Pointer to a `KTermKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
- * @see KTerm_ProcessEvent(term) for pushing input events from the host application.
- * @see KTermKeyEvent struct for details on the event data fields.
- * @note The terminal provides robust keyboard translation, ensuring that applications
+ * @see KTerm_ProcessEvent(term) which captures platform input and populates the event buffer.
+ * @see VTKeyEvent struct for details on the event data fields.
+ * @note The terminal platform provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
  */
 
