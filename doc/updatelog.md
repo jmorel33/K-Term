@@ -1,3 +1,7 @@
+## [v2.7.9] - Fix Gateway Grid Negative Width and Clean Up Code
+
+*   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where an initial x-coordinate exceeding the terminal width when text wrapping was disabled resulted in negative width calculations. Removed the flawed clamping hack and replaced it with an early `break` on `w <= 0` to properly handle out-of-bounds rendering operations without causing an infinite loop.
+*   **Maintenance**: Cleaned up speculative and brainstorming developer comments in `kterm_impl.h`.
 ## [v2.7.9] - Speedtest Socket Creation Guard and Hardening
 
 *   **Reliability**: Hardened Speedtest socket creation logic across all phases (AUTO_SELECT, CONNECT_DL, CONNECT_UL) by ensuring 'initiated' flags are set before socket calls, preventing potential infinite creation loops if system resources are exhausted.

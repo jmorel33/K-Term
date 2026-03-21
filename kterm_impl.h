@@ -13608,26 +13608,7 @@ void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) 
 }
 
 // Helper to resize a specific session
-// Phase 3: The caller MUST hold session->lock if calling this function?
-// Actually, KTerm_Resize (public API) calls RecalculateLayout which calls this.
-// KTerm_Resize does not take a lock.
-// KTerm_RecalculateLayout calls this.
-// So KTerm_ResizeSession should take the lock.
-// BUT, if called from Update -> ... -> Resize (e.g. DECCOLM), Update already holds the lock?
-// Let's check call paths.
-// 1. KTerm_Resize (Public) -> KTerm_RecalculateLayout -> KTerm_ResizeSession. (No lock held).
-// 2. KTerm_Update (Public) -> KTerm_ProcessEventsInternal -> (DECCOLM?) -> ???
-// If KTerm_Update processes DECCOLM, does it call Resize?
-// Currently DECCOLM toggles a flag. Does it trigger resize immediately?
-// Search for DECCOLM logic.
-// If DECCOLM only sets a flag and KTerm_Update handles it later, or if it modifies internal state directly?
-// The prompt instructions for Phase 3 were: "Lock the Session Mutex during KTerm_Update (logic update) and KTerm_ResizeSession."
-// This implies they are separate entry points.
-// If KTerm_ResizeSession is only called from KTerm_Resize (Public API), then it SHOULD lock.
-// If it is called internally from logic that already locks, we have a problem.
-// Let's assume KTerm_ResizeSession is primarily for the public API or external layout events.
-// The recursive mutex would solve this, but we are using standard mutexes.
-// Let's implement locking in KTerm_ResizeSession as requested, but keep the unlock.
+// Phase 3: The caller MUST hold session->lock if calling this function.
 
 static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int cols, int rows) {
 
@@ -14287,10 +14268,6 @@ static void KTerm_ProcessKeyDirect(KTerm* term, KTermSession* session, const KTe
             session->cursor.x = 0;
             session->cursor.y++;
             if (session->cursor.y >= session->rows) {
-                 // Scroll? For simple direct mode, maybe just clamp or scroll.
-                 // Let's implement basic scrolling if needed, but for now just wrap to top?
-                 // Or better: Scroll.
-                 // Reuse Scroll Logic? KTerm_QueueScrollRegion
                  session->cursor.y = session->rows - 1;
                  KTermRect rect = {0, 0, session->cols, session->rows};
                  KTerm_QueueScrollRegion(session, rect, 1);
@@ -14369,23 +14346,12 @@ bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* ev
             return true;
 
         case KTERM_EVENT_MOUSE:
-             // Mouse Logic moved from kt_io_sit.h (simplified/integrated)
-             // We can check flags and queue response if needed.
-             // But for now, since KTerm_QueueResponse is internal/public, we can just defer to caller?
-             // No, the requirement is "KTERM_EVENT_MOUSE: Update state + generate reports".
-             // So we should implement generation here.
-
              {
                 KTermMouseEvent m = event->mouse;
-                // Update internal state
-                // Note: session->mouse state is already updated by callers usually?
-                // Or should we update it here?
-                // "KTERM_EVENT_MOUSE: Update state + generate reports"
 
-                // Let's assume passed coords are 0-based cell coords
+                // Update internal state
                 session->mouse.cursor_x = m.x + 1;
                 session->mouse.cursor_y = m.y + 1;
-                // Buttons etc.
 
                 bool handled = false;
                 if (session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING) {
@@ -14473,14 +14439,7 @@ bool KTerm_ProcessEvent(KTerm* term, KTermSession* session, const KTermEvent* ev
 
 bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event) {
     if (!event) return false;
-    // Just peek? Or remove? Traditionally GetKey removes.
-    // But KTerm_Update is already consuming the buffer for processing sequences.
-    // If the app calls GetKey, it probably wants to intercept events *before* they are processed?
-    // Or does it want to see processed events?
-    // If KTerm_Update consumes the buffer, then GetKey will likely return nothing unless called *before* Update.
-    // Let's implement peek/copy behavior for inspection, or dequeue if intended for consuming.
-    // Given the architecture "push to buffer -> buffer gets processed", GetKey might be for debugging or alternate handling.
-    // Let's implement standard dequeue from the same buffer. If App consumes it, KTerm_Update won't see it.
+
     KTermSession* session = GET_SESSION(term);
 
     int current_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);

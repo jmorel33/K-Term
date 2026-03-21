@@ -2897,7 +2897,13 @@ static int KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int le
                 if (x + w > s->cols) {
                     w = s->cols - x;
                 }
+            } else {
+                if (x + w > s->cols) {
+                    w = s->cols - x;
+                }
             }
+
+            if (w <= 0) break; // Fix logic bug: x can be > cols
 
             count += KTerm_QueueGridOp(s, x, y, w, 1, style);
 
