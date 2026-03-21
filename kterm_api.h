@@ -58,7 +58,7 @@
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 7
 #define KTERM_VERSION_PATCH 9
-#define KTERM_VERSION_STRING "2.7.9"
+#define KTERM_VERSION_STRING "2.7.11"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)
