@@ -11675,11 +11675,11 @@ VTLevel KTerm_GetLevel(KTerm* term) {
  *    - Application Keypad Mode (DECKPAM/DECKPNM): Numeric keypad keys send special sequences.
  *  - User-Defined Keys (DECUDK), if programmed.
  *
- * The `event->sequence` field of the returned `VTKeyEvent` struct contains the byte
+ * The `event->sequence` field of the returned `KTermKeyEvent` struct contains the byte
  * sequence that should be transmitted to the connected PTY, host application, or
  * further processed locally.
  *
- * @param event Pointer to a `VTKeyEvent` structure that will be filled with the event data.
+ * @param event Pointer to a `KTermKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
  * @see KTerm_ProcessEvent(term) which captures platform input and populates the event buffer.
  * @see VTKeyEvent struct for details on the event data fields.

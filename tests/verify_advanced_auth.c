@@ -2,7 +2,7 @@
 #define KTERM_ENABLE_PACKETDIAG
 #define KTERM_USE_BUNDLED_PCAP
 #define KTERM_DISABLE_VOICE
-#define KTERM_VERSION_STRING "2.6.42"
+#define KTERM_VERSION_STRING "2.7.9"
 
 #include <stdio.h>
 #include <stdlib.h>
