@@ -463,13 +463,14 @@ static void ShowCompletionMatches(const char* matches[], int count, const char* 
 
 static void CompleteCommonPrefix(const char* matches[], int count, const char* partial, int word_start) {
     if (count < 1) return;
-    int common_len = strlen(matches[0]);
+    int common_len = (int)strlen(matches[0]);
     for (int i = 1; i < count; i++) {
         int j = 0;
-        while (j < common_len && j < strlen(matches[i]) && matches[0][j] == matches[i][j]) j++;
+        int current_match_len = (int)strlen(matches[i]);
+        while (j < common_len && j < current_match_len && matches[0][j] == matches[i][j]) j++;
         common_len = j;
     }
-    int current_len = strlen(partial);
+    int current_len = (int)strlen(partial);
     if (common_len > current_len) {
         char common_prefix[MAX_COMMAND_BUFFER];
         strncpy(common_prefix, matches[0], common_len);

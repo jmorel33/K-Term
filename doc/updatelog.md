@@ -1,3 +1,8 @@
+## [v2.7.11] - Performance Optimization in Console Tab Completion
+
+*   **Optimization**: Hoisted redundant `strlen` calls in `CompleteCommonPrefix` within `example/console.c` to improve performance during tab completion, especially with many or long matches.
+*   **Maintenance**: Bumped library version to 2.7.11.
+
 ## [v2.7.10] - Implement local MTU fetching in MtuProbe
 
 *   **Networking**: Implemented platform-specific retrieval of local MTU in `KTerm_Net_ProcessMtuProbe` using `getifaddrs` on Linux/Unix and `GetBestInterface`/`GetIfEntry` on Windows, replacing the hardcoded 0.
