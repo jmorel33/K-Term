@@ -1425,8 +1425,8 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
         "", "", "", "" // F21–F24 (unused)
     };
     for (int i = 0; i < 24; i++) {
-        strncpy(session->input.function_keys[i], function_key_sequences[i], 31);
-        session->input.function_keys[i][31] = '\0';
+        strncpy(session->input.function_keys[i], function_key_sequences[i], sizeof(session->input.function_keys[i]) - 1);
+        session->input.function_keys[i][sizeof(session->input.function_keys[i]) - 1] = '\0';
     }
 }
 
@@ -4941,8 +4941,8 @@ void KTerm_RegisterGatewayExtension(KTerm* term, const char* name, GatewayExtHan
     }
 
     KTermGatewayExtension* ext = &term->gateway_extensions[term->gateway_extension_count++];
-    strncpy(ext->name, name, 31);
-    ext->name[31] = '\0';
+    strncpy(ext->name, name, sizeof(ext->name) - 1);
+    ext->name[sizeof(ext->name) - 1] = '\0';
     ext->handler = handler;
 }
 #endif
@@ -8759,8 +8759,8 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
         }
     }
     if (dscs_len > 0) {
-        strncpy(session->soft_font.name, dscs, 3);
-        session->soft_font.name[3] = '\0';
+        strncpy(session->soft_font.name, dscs, sizeof(session->soft_font.name) - 1);
+        session->soft_font.name[sizeof(session->soft_font.name) - 1] = '\0';
     }
 
     // Update dimensions if provided
@@ -8966,8 +8966,8 @@ void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session) {
         char* message_end = strstr(message_start, "\x1B\\"); // Find ST
         if (message_end) {
             size_t length = message_end - message_start;
-            if (length >= MAX_COMMAND_BUFFER) {
-                length = MAX_COMMAND_BUFFER - 1; // Prevent overflow
+            if (length >= sizeof(session->answerback_buffer)) {
+                length = sizeof(session->answerback_buffer) - 1; // Prevent overflow
             }
             strncpy(session->answerback_buffer, message_start, length);
             session->answerback_buffer[length] = '\0';
@@ -9938,8 +9938,8 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
                 // Load Alphabet Logic
                 if (session->regis.option_command == 'A') {
                     // Set Alphabet Name
-                    strncpy(session->regis.load.name, session->regis.text_buffer, 15);
-                    session->regis.load.name[15] = '\0';
+                    strncpy(session->regis.load.name, session->regis.text_buffer, sizeof(session->regis.load.name) - 1);
+                    session->regis.load.name[sizeof(session->regis.load.name) - 1] = '\0';
                     session->regis.option_command = 0; // Reset
                 } else {
                     // Define Character
@@ -13957,8 +13957,8 @@ void KTerm_SetFocus(KTerm* term, bool focused) {
 void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
     KTermSession* session = GET_SESSION(term);
     if (key_num >= 1 && key_num <= 24) {
-        strncpy(session->input.function_keys[key_num - 1], sequence, 31);
-        session->input.function_keys[key_num - 1][31] = '\0';
+        strncpy(session->input.function_keys[key_num - 1], sequence, sizeof(session->input.function_keys[key_num - 1]) - 1);
+        session->input.function_keys[key_num - 1][sizeof(session->input.function_keys[key_num - 1]) - 1] = '\0';
     }
 }
 
@@ -14086,18 +14086,18 @@ static void KTerm_TranslateKey(KTermSession* session, KTermKeyEvent* event) {
         case KTERM_KEY_INSERT:    strcpy(event->sequence, "\x1B[2~"); break;
         case KTERM_KEY_DELETE:    strcpy(event->sequence, "\x1B[3~"); break;
 
-        case KTERM_KEY_F1:  strncpy(event->sequence, session->input.function_keys[0], 31); break;
-        case KTERM_KEY_F2:  strncpy(event->sequence, session->input.function_keys[1], 31); break;
-        case KTERM_KEY_F3:  strncpy(event->sequence, session->input.function_keys[2], 31); break;
-        case KTERM_KEY_F4:  strncpy(event->sequence, session->input.function_keys[3], 31); break;
-        case KTERM_KEY_F5:  strncpy(event->sequence, session->input.function_keys[4], 31); break;
-        case KTERM_KEY_F6:  strncpy(event->sequence, session->input.function_keys[5], 31); break;
-        case KTERM_KEY_F7:  strncpy(event->sequence, session->input.function_keys[6], 31); break;
-        case KTERM_KEY_F8:  strncpy(event->sequence, session->input.function_keys[7], 31); break;
-        case KTERM_KEY_F9:  strncpy(event->sequence, session->input.function_keys[8], 31); break;
-        case KTERM_KEY_F10: strncpy(event->sequence, session->input.function_keys[9], 31); break;
-        case KTERM_KEY_F11: strncpy(event->sequence, session->input.function_keys[10], 31); break;
-        case KTERM_KEY_F12: strncpy(event->sequence, session->input.function_keys[11], 31); break;
+        case KTERM_KEY_F1:  strncpy(event->sequence, session->input.function_keys[0], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F2:  strncpy(event->sequence, session->input.function_keys[1], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F3:  strncpy(event->sequence, session->input.function_keys[2], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F4:  strncpy(event->sequence, session->input.function_keys[3], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F5:  strncpy(event->sequence, session->input.function_keys[4], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F6:  strncpy(event->sequence, session->input.function_keys[5], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F7:  strncpy(event->sequence, session->input.function_keys[6], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F8:  strncpy(event->sequence, session->input.function_keys[7], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F9:  strncpy(event->sequence, session->input.function_keys[8], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F10: strncpy(event->sequence, session->input.function_keys[9], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F11: strncpy(event->sequence, session->input.function_keys[10], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
+        case KTERM_KEY_F12: strncpy(event->sequence, session->input.function_keys[11], sizeof(event->sequence) - 1); event->sequence[sizeof(event->sequence) - 1] = '\0'; break;
 
         case KTERM_KEY_ENTER:     strcpy(event->sequence, session->ansi_modes.line_feed_new_line ? "\r" : "\n"); break;
         case KTERM_KEY_TAB:       strcpy(event->sequence, "\t"); break;
