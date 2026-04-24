@@ -15,21 +15,24 @@ ssh_client: ssh_client.c kterm.h kt_io_sit.h kt_net.h
 net_server: example/net_server.c kterm.h kt_net.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
-tests: test_performance test_integration test_parser test_attributes
+tests: test_performance test_integration test_parser test_attributes test_event_overflow
 
 test_performance: tests/test_performance_suite.c kterm.h tests/test_utilities.h
-	$(CC) $(CFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -DKTERM_DISABLE_NET -o $@ $< -lm
 
 test_integration: tests/test_integration_suite.c kterm.h tests/test_utilities.h
-	$(CC) $(CFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -DKTERM_DISABLE_NET -o $@ $< -lm
 
 test_parser: tests/test_parser_suite.c kterm.h tests/test_utilities.h
-	$(CC) $(CFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -DKTERM_DISABLE_NET -o $@ $< -lm
 
 test_attributes: tests/test_attributes_modes_suite.c kterm.h tests/test_utilities.h
-	$(CC) $(CFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -DKTERM_DISABLE_NET -o $@ $< -lm
+
+test_event_overflow: tests/test_event_overflow.c kterm.h tests/test_utilities.h
+	$(CC) $(CFLAGS) -DKTERM_DISABLE_NET -o $@ $< -lm
 
 clean:
-	rm -f $(TARGETS) test_performance test_integration test_parser test_attributes
+	rm -f $(TARGETS) test_performance test_integration test_parser test_attributes test_event_overflow
 
 .PHONY: all clean tests
