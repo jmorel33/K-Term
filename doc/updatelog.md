@@ -1,3 +1,9 @@
+## [v2.7.12] - Critical Security Fixes for Out-of-Bounds Writes
+
+*   **Security**: Fixed multiple out-of-bounds write vulnerabilities and missing null-terminations in `kterm_impl.h`. Replaced hardcoded buffer sizes with `sizeof` operators and added explicit null-termination for string operations involving function keys, event sequences, extension names, terminal titles, and the DCS answerback buffer.
+*   **Security**: Fixed a critical buffer overflow in `KTerm_ExecuteDCSAnswerback` where a length check incorrectly used `MAX_COMMAND_BUFFER` instead of the actual destination buffer size.
+*   **Maintenance**: Bumped library version to 2.7.12.
+
 ## [v2.7.11] - Performance Optimization in Console Tab Completion
 
 *   **Optimization**: Hoisted redundant `strlen` calls in `CompleteCommonPrefix` within `example/console.c` to improve performance during tab completion, especially with many or long matches.
