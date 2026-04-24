@@ -781,7 +781,8 @@ typedef struct KTermSpeedtestContext {
 
     bool latency_started;
     bool latency_done;
-    bool streams_initiated;
+    bool dl_initiated;
+    bool ul_initiated;
     bool auto_initiated;
 
     KTermSpeedtestCallback callback;
@@ -4019,8 +4020,8 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
 
     if (st->state == 2) { // CONNECT_DL
         // Init Sockets if needed
-        if (!st->streams_initiated) {
-             st->streams_initiated = true;
+        if (!st->dl_initiated) {
+             st->dl_initiated = true;
              for(int i=0; i<st->num_streams; i++) {
                   st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
                   if (IS_VALID_SOCKET(st->streams[i].fd)) {
@@ -4142,7 +4143,6 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
                  st->streams[i].bytes = 0;
              }
              st->connected_count = 0;
-             st->streams_initiated = false;
              st->state = 4; // CONNECT_UL
              st->start_time = KTerm_GetTime();
         }
@@ -4150,8 +4150,8 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
     else if (st->state == 4) { // CONNECT_UL
          // Initiate Upload connections
          // Fix: Guard against infinite socket creation loop if connection is pending
-         if (!st->streams_initiated) {
-              st->streams_initiated = true;
+         if (!st->ul_initiated) {
+              st->ul_initiated = true;
               // Start connections if not already started
               // (Wait, we need to re-open sockets)
               for(int i=0; i<st->num_streams; i++) {
@@ -4362,6 +4362,8 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
 
     st->latency_started = false;
     st->latency_done = false;
+    st->dl_initiated = false;
+    st->ul_initiated = false;
     st->auto_initiated = false;
 
     return true;
