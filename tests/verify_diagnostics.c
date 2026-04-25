@@ -41,8 +41,12 @@ int main() {
     const char* cmd_conn = "\x1BPGATE;KTERM;1;EXT;net;connections\x1B\\";
     for (int i = 0; cmd_conn[i]; i++) KTerm_WriteChar(term, (unsigned char)cmd_conn[i]);
     
-    // Pump loop
-    for (int i = 0; i < 20; i++) { KTerm_Update(term); usleep(1000); }
+    // Pump loop (Optimized: conditional exit instead of fixed sleep)
+    for (int i = 0; i < 2000; i++) {
+        KTerm_Update(term);
+        if (strstr(last_response, "OK;") && strstr(last_response, "[0:MAIN]")) break;
+        usleep(10); // 10us (20ms max timeout)
+    }
     
     printf("Response: %s\n", last_response);
     if (strstr(last_response, "OK;") && strstr(last_response, "[0:MAIN]")) {
@@ -58,16 +62,16 @@ int main() {
     const char* cmd_spd = "\x1BPGATE;KTERM;2;EXT;net;speedtest;host=auto;graph=1\x1B\\";
     for (int i = 0; cmd_spd[i]; i++) KTerm_WriteChar(term, (unsigned char)cmd_spd[i]);
 
-    // Pump loop longer for state machine
+    // Pump loop longer for state machine (Optimized: conditional exit)
     bool saw_viz = false;
-    for (int i = 0; i < 200; i++) { 
+    for (int i = 0; i < 500; i++) {
         KTerm_Update(term); 
-        usleep(10000);
         // Check for VT sequences in response (Clear Screen or Color codes)
         if (strstr(last_response, "\x1B[2J") || strstr(last_response, "\x1B[1;37m")) {
             saw_viz = true;
             break;
         }
+        usleep(1000); // 1ms (500ms max timeout)
     }
 
     if (saw_viz) {
