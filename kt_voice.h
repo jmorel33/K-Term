@@ -91,6 +91,8 @@ struct KTermVoiceContext {
     bool vad_active;
     float vad_threshold;
     uint64_t vad_start_time;
+
+    char target[256];
 };
 
 // Timestamp Helper
@@ -231,7 +233,16 @@ int KTerm_Voice_Enable(KTermSession* session, bool enable) {
 }
 
 int KTerm_Voice_SetTarget(KTermSession* session, const char* remote_id_or_ip) {
-    (void)session; (void)remote_id_or_ip;
+    if (!session) return SITUATION_FAILURE;
+    KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
+    if (!ctx) return SITUATION_FAILURE;
+
+    if (remote_id_or_ip) {
+        strncpy(ctx->target, remote_id_or_ip, sizeof(ctx->target) - 1);
+        ctx->target[sizeof(ctx->target) - 1] = '\0';
+    } else {
+        ctx->target[0] = '\0';
+    }
     return SITUATION_SUCCESS;
 }
 
