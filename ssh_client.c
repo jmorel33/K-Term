@@ -801,7 +801,8 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssize_t n = recv(fd, vbuf, sizeof(vbuf)-1, 0);
                 if (n > 0) {
                     vbuf[n] = '\0';
-                    strncpy(ssh->server_version, vbuf, sizeof(ssh->server_version));
+                    strncpy(ssh->server_version, vbuf, sizeof(ssh->server_version) - 1);
+                    ssh->server_version[sizeof(ssh->server_version) - 1] = '\0';
                     if (strncmp(vbuf, "SSH-", 4) != 0) {
                         // Assume banner line, ignore
                     }
@@ -1195,7 +1196,8 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         // Verified: Using SSHClient_Strtok for thread safety (Oversight 3 Fix)
         char* token = SSHClient_Strtok(p, " \t=", &saveptr);
         if (token) {
-            strncpy(key, token, 63);
+            strncpy(key, token, sizeof(key) - 1);
+            key[sizeof(key) - 1] = '\0';
 
             if (strcasecmp(key, "Host") == 0) {
                 char* host_pattern = SSHClient_Strtok(NULL, " \t=", &saveptr);
@@ -1360,21 +1362,24 @@ int main(int argc, char** argv) {
                     printf("Loaded profile '%s' from %s\n", target, config_file);
 
                     if (profile.hostname[0]) {
-                        strncpy(cfg_host, profile.hostname, sizeof(cfg_host));
+                        strncpy(cfg_host, profile.hostname, sizeof(cfg_host) - 1);
+                        cfg_host[sizeof(cfg_host) - 1] = '\0';
                         host = cfg_host;
                     } else {
                         host = target;
                     }
 
                     if (profile.user[0]) {
-                        strncpy(cfg_user, profile.user, sizeof(cfg_user));
+                        strncpy(cfg_user, profile.user, sizeof(cfg_user) - 1);
+                        cfg_user[sizeof(cfg_user) - 1] = '\0';
                         user = cfg_user;
                     }
 
                     if (profile.port > 0) port = profile.port;
                     if (profile.durable) durable = true;
                     if (profile.term_type[0]) {
-                        strncpy(cfg_term, profile.term_type, sizeof(cfg_term));
+                        strncpy(cfg_term, profile.term_type, sizeof(cfg_term) - 1);
+                        cfg_term[sizeof(cfg_term) - 1] = '\0';
                         term_type = cfg_term;
                     }
 
@@ -1428,8 +1433,10 @@ int main(int argc, char** argv) {
     // 3. SSH Security Init
     // In real app, allocate context per session. Here global.
     global_ssh_ctx.state = SSH_STATE_INIT;
-    strncpy(global_ssh_ctx.user, user, 63);
-    strncpy(global_ssh_ctx.password, pass, 63);
+    strncpy(global_ssh_ctx.user, user, sizeof(global_ssh_ctx.user) - 1);
+    global_ssh_ctx.user[sizeof(global_ssh_ctx.user) - 1] = '\0';
+    strncpy(global_ssh_ctx.password, pass, sizeof(global_ssh_ctx.password) - 1);
+    global_ssh_ctx.password[sizeof(global_ssh_ctx.password) - 1] = '\0';
     global_ssh_ctx.durable_mode = durable;
     global_ssh_ctx.persist_session = persist;
 
@@ -1447,7 +1454,8 @@ int main(int argc, char** argv) {
     }
     snprintf(global_ssh_ctx.session_file, sizeof(global_ssh_ctx.session_file), "ssh_session_%s_%d.dat", safe_host, port);
 
-    strncpy(global_ssh_ctx.term_type, term_type, 63);
+    strncpy(global_ssh_ctx.term_type, term_type, sizeof(global_ssh_ctx.term_type) - 1);
+    global_ssh_ctx.term_type[sizeof(global_ssh_ctx.term_type) - 1] = '\0';
 
     // Try to restore session if persistence is enabled and file exists
     if (persist) {
