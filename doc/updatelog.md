@@ -1,3 +1,8 @@
+## [v2.7.13] - Security Fixes for SSH and Telnet Clients
+
+*   **Security**: Fixed potential unterminated user strings in `ssh_client.c` and `telnet_client.c` by ensuring all `strncpy` calls are followed by explicit null-termination.
+*   **Maintenance**: Bumped library version to 2.7.13.
+
 ## [v2.7.12] - Critical Security Fixes for Out-of-Bounds Writes
 
 *   **Security**: Fixed multiple out-of-bounds write vulnerabilities and missing null-terminations in `kterm_impl.h`. Replaced hardcoded buffer sizes with `sizeof` operators and added explicit null-termination for string operations involving function keys, event sequences, extension names, terminal titles, and the DCS answerback buffer.
