@@ -4020,9 +4020,11 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
 
     if (st->state == 2) { // CONNECT_DL
         // Init Sockets if needed
+        // Guard against infinite socket creation loop if a connection is pending
         if (!st->dl_initiated) {
              st->dl_initiated = true;
              for(int i=0; i<st->num_streams; i++) {
+                  if (st->streams[i].fd != INVALID_SOCKET) continue;
                   st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
                   if (IS_VALID_SOCKET(st->streams[i].fd)) {
 #ifdef _WIN32
@@ -4149,12 +4151,13 @@ void KTerm_Net_ProcessSpeedtest(KTerm* term, KTermSession* session) {
     }
     else if (st->state == 4) { // CONNECT_UL
          // Initiate Upload connections
-         // Fix: Guard against infinite socket creation loop if connection is pending
+         // Guard against infinite socket creation loop if a connection is pending
          if (!st->ul_initiated) {
               st->ul_initiated = true;
               // Start connections if not already started
               // (Wait, we need to re-open sockets)
               for(int i=0; i<st->num_streams; i++) {
+                   if (st->streams[i].fd != INVALID_SOCKET) continue;
                    st->streams[i].fd = socket(AF_INET, SOCK_STREAM, 0);
                    if (IS_VALID_SOCKET(st->streams[i].fd)) {
 #ifdef _WIN32
