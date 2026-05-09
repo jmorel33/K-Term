@@ -4332,7 +4332,10 @@ bool KTerm_Net_Speedtest(KTerm* term, KTermSession* session, const char* host, i
         strncpy(st->dl_path, path, sizeof(st->dl_path)-1);
         st->dl_path[sizeof(st->dl_path)-1] = '\0';
     }
-    else strcpy(st->dl_path, "/100MB.zip");
+    else {
+        strncpy(st->dl_path, "/100MB.zip", sizeof(st->dl_path) - 1);
+        st->dl_path[sizeof(st->dl_path) - 1] = '\0';
+    }
 
     // Check for Auto-Select
     if (!host || strcmp(host, "auto") == 0) {
@@ -5661,8 +5664,10 @@ bool KTerm_Net_HttpProbe(KTerm* term, KTermSession* session, const char* url, KT
 
     if (slash) {
         strncpy(ctx->path, slash, sizeof(ctx->path)-1);
+        ctx->path[sizeof(ctx->path)-1] = '\0';
     } else {
-        strcpy(ctx->path, "/");
+        strncpy(ctx->path, "/", sizeof(ctx->path) - 1);
+        ctx->path[sizeof(ctx->path) - 1] = '\0';
     }
 
     ctx->start_time = KTerm_GetTime();
